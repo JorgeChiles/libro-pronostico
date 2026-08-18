@@ -32,6 +32,9 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
+          # El archivo de dependencias se llama requisitos.txt, no
+          # requirements.txt, así que hay que señalarlo o el caché falla.
+          cache-dependency-path: requisitos.txt
 
       - name: Instalar dependencias
         run: |
@@ -68,9 +71,16 @@ jobs:
         with:
           path: _site
 
+  # Publicar solo cuando el repositorio esté listo para ser público. Mientras
+  # sea privado, GitHub Pages no está disponible y este paso fallaría en cada
+  # empujón, dejando el historial lleno de cruces rojas. Para activarlo:
+  #
+  #   1. hacer público el repositorio
+  #   2. habilitar Pages con origen "GitHub Actions"
+  #   3. gh variable set PUBLICAR_PAGES --body si
   publicar:
     needs: compilar
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && vars.PUBLICAR_PAGES == 'si'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
