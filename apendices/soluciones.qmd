@@ -1793,3 +1793,310 @@ fuerza de tendencia alta no implica que convenga **modelar** la tendencia; son
 preguntas distintas. Y segundo, con la razón por la que el suavizado exponencial
 simple ganaba en ocho series de la @tbl-ganadores: el modelo más simple gana seguido,
 y no por casualidad.
+
+## Capítulo 10 · ARIMA {#sec-soluciones-10}
+
+```{python}
+#| echo: false
+from statsmodels.stats.diagnostic import acorr_ljungbox
+from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tsa.arima_process import ArmaProcess
+from statsmodels.tsa.stattools import acf, adfuller, kpss
+
+from libro.datos import catalogo
+```
+
+### Ejercicio 1
+
+```{python}
+#| label: tbl-sol-10-1
+#| tbl-cap: "ADF y KPSS sobre Q22252 en tres niveles de diferenciación."
+s = cargar("Q22252")
+y = s.entrenamiento.to_numpy()
+
+filas = []
+for d, datos in ((0, y), (1, np.diff(y)), (2, np.diff(y, 2))):
+    p_adf = adfuller(datos, autolag="AIC")[1]
+    p_kpss = kpss(datos, regression="c", nlags="auto")[1]
+    filas.append({
+        "diferencias": d,
+        "p ADF": round(p_adf, 4),
+        "ADF dice": "estacionaria" if p_adf < 0.05 else "no estacionaria",
+        "p KPSS": round(p_kpss, 4),
+        "KPSS dice": "estacionaria" if p_kpss >= 0.05 else "no estacionaria",
+        "¿coinciden?": "sí" if (p_adf < 0.05) == (p_kpss >= 0.05) else "no",
+    })
+
+pd.DataFrame(filas).set_index("diferencias")
+```
+
+Con la serie sin diferenciar, las dos pruebas **se contradicen**: ADF no rechaza la
+raíz unitaria y KPSS no rechaza la estacionariedad. Es un caso concreto del 14,5 %
+de la @tbl-desacuerdo, y es interesante que aparezca en la primera serie que uno
+elija.
+
+Con una diferencia las dos coinciden en que la serie es estacionaria, y con dos
+también. Usaría **una**, por la regla del @sec-diferenciacion: la menor cantidad que
+logre estacionariedad. La segunda diferencia no agrega nada y solo amplifica ruido.
+
+Vale la pena notar el detalle del p-valor de KPSS igual a 0,1000 exacto en dos
+filas: es el techo de la tabla de valores críticos que usa la implementación. Cuando
+aparece ese valor redondo, el p-valor real es *mayor* que 0,1, y `statsmodels` lo
+avisa. Un p-valor que sale siempre igual a un número redondo casi nunca es una
+coincidencia: suele ser el borde de una tabla.
+
+### Ejercicio 2
+
+```{python}
+#| label: tbl-sol-10-2
+#| tbl-cap: "Complejidad y error del naive según si las dos pruebas coinciden, en las 48.000 series mensuales."
+meta = metadatos()
+mensuales = meta[meta["frecuencia"] == "mensual"].copy()
+mensuales["desacuerdo"] = (
+    (mensuales["adf_pvalue"] < 0.05) != (mensuales["kpss_pvalue"] >= 0.05)
+)
+
+resumen = mensuales.groupby("desacuerdo").agg(
+    series=("serie", "size"),
+    complejidad_media=("complexity_index", "mean"),
+    complejidad_mediana=("complexity_index", "median"),
+    error_naive=("error_naive_smape", "mean"),
+)
+resumen.index = ["las pruebas coinciden", "las pruebas discrepan"]
+resumen.round(3)
+```
+
+```{python}
+n_desacuerdo = int(mensuales["desacuerdo"].sum())
+print(f"series mensuales con desacuerdo: {n_desacuerdo:,} de {len(mensuales):,} "
+      f"({100 * mensuales['desacuerdo'].mean():.1f} %)")
+```
+
+La respuesta es **sí, y por bastante**. Las series donde las dos pruebas se
+contradicen tienen una complejidad estructural promedio muy superior, y también un
+error del naive alrededor de un 47 % mayor.
+
+Ese resultado merece detenerse. El desacuerdo entre ADF y KPSS podría haber sido
+ruido estadístico repartido al azar; no lo es. **Es un indicador de que la serie es
+genuinamente difícil de clasificar**, y las series difíciles de clasificar resultan
+ser también difíciles de pronosticar.
+
+Tiene una interpretación razonable. Las dos pruebas discrepan cuando la serie está
+en una zona ambigua: no es claramente estacionaria ni claramente una caminata con
+tendencia. Puede tener quiebres, cambios de régimen o varianza cambiante, y
+cualquiera de esas cosas confunde a las dos pruebas en direcciones distintas. Son
+las mismas propiedades que hacen subir el índice de complejidad del
+@sec-caracteristicas.
+
+Uso práctico: **el desacuerdo entre las pruebas sirve como señal de alerta**, no
+solo como una molestia metodológica. Si al preparar un pronóstico las dos pruebas se
+contradicen, conviene bajar las expectativas sobre la precisión alcanzable.
+
+### Ejercicio 3
+
+```{python}
+#| label: tbl-sol-10-3
+#| tbl-cap: "Poder de la prueba ADF sobre procesos AR(1) simulados, en 20 repeticiones cada uno."
+generador = np.random.default_rng(11)
+
+filas = []
+for phi in (0.95, 0.8, 0.5):
+    rechazos = 0
+    for _ in range(20):
+        muestra = ArmaProcess(
+            np.array([1, -phi]), np.array([1])
+        ).generate_sample(200, distrvs=generador.standard_normal)
+        rechazos += int(adfuller(muestra, autolag="AIC")[1] < 0.05)
+    filas.append({
+        "φ": phi,
+        "rechaza raíz unitaria": f"{rechazos}/20",
+        "poder estimado": rechazos / 20,
+    })
+
+pd.DataFrame(filas).set_index("φ")
+```
+
+Con $\phi = 0{,}95$ la prueba rechaza la raíz unitaria en apenas una cuarta parte de
+las simulaciones; con $\phi = 0{,}5$ la rechaza siempre.
+
+Y el detalle importante es que **las tres series son estacionarias**. Un AR(1) es
+estacionario para cualquier $|\phi| < 1$, así que en los tres casos la respuesta
+correcta es "rechazar". Con $\phi = 0{,}95$ la prueba se equivoca tres de cada
+cuatro veces.
+
+Eso es falta de **poder**: la capacidad de detectar un efecto que existe. Un AR(1)
+con $\phi = 0{,}95$ se parece muchísimo a una caminata aleatoria en una muestra de
+200 observaciones, y ninguna prueba puede distinguir de manera confiable entre
+$\phi = 0{,}95$ y $\phi = 1$ con esa cantidad de datos.
+
+Dos consecuencias prácticas:
+
+**No rechazar no es evidencia de raíz unitaria.** Es la asimetría que ya apareció en
+el @sec-soluciones-04 con Ljung-Box: rechazar informa, no rechazar casi no informa.
+
+**Diferenciar una serie muy persistente pero estacionaria no es un desastre.** Los
+pronósticos de un ARIMA con $d = 1$ sobre un proceso con $\phi = 0{,}95$ son casi
+indistinguibles de los correctos. La decisión importa mucho menos de lo que sugiere
+la cantidad de tinta que se le dedica.
+
+### Ejercicio 4
+
+```{python}
+#| label: tbl-sol-10-4
+#| tbl-cap: "Dos especificaciones ARIMA sobre M3007: criterio de información contra error de pronóstico."
+s = cargar("M3007")
+y, te, h = s.entrenamiento.to_numpy(), s.prueba.to_numpy(), s.horizonte
+
+filas = []
+for orden in ((1, 1, 1), (2, 1, 2)):
+    resultado = ARIMA(y, order=orden).fit()
+    residuos = pd.Series(resultado.resid).dropna()
+    p_lb = float(
+        acorr_ljungbox(residuos, lags=[20], return_df=True)["lb_pvalue"].iloc[0]
+    )
+    filas.append({
+        "modelo": f"ARIMA{orden}",
+        "AIC": round(resultado.aic, 1),
+        "sMAPE": round(smape(te, resultado.forecast(h)), 2),
+        "Ljung-Box p": round(p_lb, 4),
+    })
+
+pd.DataFrame(filas).set_index("modelo")
+```
+
+**No.** El ARIMA(2,1,2) tiene el AIC más bajo y el sMAPE más alto. Las diferencias
+son mínimas en los dos casos, así que no conviene sacar una conclusión fuerte de
+esta comparación en particular; el patrón sí es general y ya apareció en el
+@sec-soluciones-09 con el AICc: el criterio de información mide ajuste dentro de la
+muestra, penalizado por complejidad, y el sMAPE mide error fuera de la muestra a
+dieciocho pasos.
+
+Los dos residuos pasan la prueba de Ljung-Box con holgura, así que por ese lado
+ninguno de los dos modelos tiene estructura sin capturar.
+
+Lo que más llama la atención de esta tabla es otra cosa: **los dos modelos tienen un
+sMAPE cercano a 52**, malísimo. `M3007` es la serie del @sec-una-serie, la que se
+multiplica por tres en menos de un año después de una década de calma. Ningún ARIMA
+estimado sobre la década de calma puede anticipar eso, y los dos fallan por igual.
+Es un recordatorio útil de que elegir bien entre especificaciones no ayuda cuando el
+problema es que el futuro no se parece al pasado.
+
+### Ejercicio 5
+
+```{python}
+#| label: tbl-sol-10-5
+#| tbl-cap: "Efecto de diferenciar de más sobre M35927: autocorrelación del rezago 1 y desviación estándar."
+s = cargar("M35927")
+y = s.entrenamiento.to_numpy()
+
+filas = []
+for d in range(4):
+    datos = np.diff(y, d) if d else y
+    r = acf(datos, nlags=3)
+    filas.append({
+        "diferencias": d,
+        "r_1": round(float(r[1]), 3),
+        "r_2": round(float(r[2]), 3),
+        "desvío estándar": round(float(datos.std()), 1),
+    })
+
+pd.DataFrame(filas).set_index("diferencias")
+```
+
+```{python}
+#| label: fig-sol-10-5
+#| fig-cap: "Autocorrelación de M35927 con cero, una, dos y tres diferencias."
+from plotly.subplots import make_subplots
+
+REZAGOS = 12
+fig = make_subplots(rows=1, cols=4, shared_yaxes=True,
+                    subplot_titles=[f"d = {d}" for d in range(4)])
+for col, d in enumerate(range(4), start=1):
+    datos = np.diff(y, d) if d else y
+    r = acf(datos, nlags=REZAGOS)
+    banda = 1.96 / np.sqrt(len(datos))
+    fig.add_trace(go.Bar(
+        x=list(range(1, REZAGOS + 1)), y=r[1:],
+        marker_color=COLORES["observado"],
+    ), row=1, col=col)
+    for signo in (1, -1):
+        fig.add_hline(y=signo * banda, line_dash="dot", line_width=1,
+                      line_color=COLORES["prueba"], row=1, col=col)
+fig.update_layout(height=340, showlegend=False, bargap=0.4)
+fig.update_xaxes(title="rezago")
+mostrar(fig)
+```
+
+El artefacto aparece exactamente como lo anticipa el aviso del @sec-diferenciacion, y
+en dos indicadores a la vez.
+
+**La autocorrelación del rezago 1 se vuelve cada vez más negativa**: pasa de $+0{,}98$
+en la serie original a $-0{,}04$ con una diferencia, $-0{,}35$ con dos y $-0{,}53$ con
+tres. Esa correlación negativa no está en los datos: la crea la transformación. Al
+diferenciar, cada valor nuevo comparte una observación con el anterior y con signo
+opuesto, lo que induce dependencia negativa mecánicamente.
+
+**La desviación estándar crece**: 22,7 con una diferencia, 32,7 con dos, 53,9 con
+tres. Diferenciar amplifica el ruido de alta frecuencia, así que cada diferencia de
+más hace la serie *más* difícil de modelar, no menos.
+
+La señal de alarma práctica es la primera: **un $r_1$ marcadamente negativo después de
+diferenciar sugiere que se diferenció de más**. Conviene volver un paso atrás.
+
+### Ejercicio 6
+
+```{python}
+#| label: tbl-sol-10-6
+#| tbl-cap: "Órdenes que AutoARIMA elige para las series trimestrales del catálogo."
+from statsforecast import StatsForecast
+from statsforecast.models import AutoARIMA
+
+filas = []
+for s in cargar(n=len(catalogo())):
+    if s.frecuencia != "trimestral":
+        continue
+    sf = StatsForecast(
+        models=[AutoARIMA(season_length=s.periodo_estacional)],
+        freq="QS", n_jobs=1,
+    )
+    sf.fit(df=s.a_frame(incluir_prueba=False)[["unique_id", "ds", "y"]])
+    p, q, P, Q, m, d, D = sf.fitted_[0][0].model_["arma"]
+    filas.append({
+        "serie": s.id,
+        "fenómeno": s.fenomeno or "—",
+        "p": p, "d": d, "q": q,
+        "P": P, "D": D, "Q": Q,
+        "estacional": "sí" if (P or D or Q) else "no",
+    })
+
+elegidos = pd.DataFrame(filas).set_index("serie")
+elegidos
+```
+
+```{python}
+print(f"series analizadas    : {len(elegidos)}")
+print(f"con d = 1            : {int((elegidos['d'] == 1).sum())}")
+print(f"con d = 0            : {int((elegidos['d'] == 0).sum())}")
+print(f"con d = 2            : {int((elegidos['d'] == 2).sum())}")
+print(f"con términos estacionales: {int((elegidos['estacional'] == 'sí').sum())}")
+```
+
+Las respuestas directas están en el conteo. Pero hay dos cosas en la tabla que valen
+más que las respuestas.
+
+**Una serie recibe todos los órdenes en cero con $d = 1$.** Eso es un
+ARIMA(0,1,0), que como dice la tabla del @sec-modelo-arima **es el naive**. El
+algoritmo evaluó una docena de modelos con parámetros y concluyó que ninguno mejora
+sobre repetir el último valor. Es el resultado del @sec-que-es-pronosticar llegando
+por otra vía: cuando no hay estructura, la selección automática lo detecta y devuelve
+el método más simple.
+
+**Solo algo más de la mitad incluye términos estacionales**, aunque todas son series
+trimestrales y varias tienen estacionalidad visible. La razón es la misma del
+@sec-soluciones-09 con ETS: cada término estacional cuesta parámetros y el criterio
+de información los penaliza. Con 50 u 80 observaciones trimestrales —entre 12 y 20
+ciclos completos— muchas veces no alcanza para justificarlos.
+
+La lección conjunta: **la selección automática es más conservadora que la intuición**.
+Uno tiende a especificar modelos más ricos de lo que los datos sostienen, y el
+criterio de información funciona como contrapeso.
