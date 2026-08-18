@@ -1,7 +1,612 @@
+---
+resources:
+  - datos/cap04_estacionales.csv
+---
+
 # Entrenamiento, validación y prueba {#sec-particiones}
 
-Para qué sirve cada conjunto.
+```{python}
+#| echo: false
+import warnings
 
-::: {.callout-note appearance="simple"}
-Capítulo en preparación.
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+from sklearn.linear_model import LinearRegression, Ridge
+from statsmodels.tsa.holtwinters import ExponentialSmoothing, SimpleExpSmoothing
+
+from libro.datos import cargar, catalogo, metadatos
+from libro.graficos import COLORES, mostrar
+
+warnings.simplefilter("ignore")
+
+
+def smape(real, pron):
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    den = np.abs(real) + np.abs(pron)
+    den[den == 0] = 1e-9
+    return 200 * np.mean(np.abs(real - pron) / den)
+```
+
+El @sec-sobreajuste terminó con una confesión: eligió el grado del polinomio y el valor de
+$\lambda$ mirando el error de prueba. Este capítulo explica por qué eso invalida el número que
+reportó, y cuánto exactamente.
+
+## Elegir es medir muchas veces {#sec-elegir-es-medir}
+
+El objetivo de toda la evaluación es estimar una cantidad que no se puede calcular: el error
+esperado del modelo sobre datos futuros,
+
+$$
+E(f) = \mathbb{E}_{(x,\, y) \sim P}\left[ L\left(y, f(x)\right) \right]
+$$ {#eq-error-generalizacion}
+
+donde $P$ es el proceso que genera la serie y $L$ es una de las métricas del @sec-metricas. Lo
+que se calcula en la práctica es el promedio sobre un conjunto finito de datos apartados,
+
+$$
+\hat{E}(f) = \frac{1}{n_{\text{ap}}} \sum_{t \,\in\, \text{apartado}}
+             L\left(y_t, f(x_t)\right)
+$$ {#eq-error-estimado}
+
+y la @eq-error-estimado estima la @eq-error-generalizacion sin sesgo, **siempre que $f$ se
+haya elegido sin mirar el conjunto apartado.**
+
+Esa última cláusula es todo el capítulo. Cuando hay $K$ candidatos y se elige el de menor
+error medido, lo que se reporta ya no es $\hat{E}$ de un modelo fijo sino el **mínimo** de $K$
+estimaciones ruidosas:
+
+$$
+\hat{E}_{\min} = \min_{k \,=\, 1, \dots, K} \hat{E}(f_k)
+$$ {#eq-minimo}
+
+Y el mínimo de varias estimaciones ruidosas queda sistemáticamente por debajo de lo que
+estima, aunque cada estimación por separado no tenga sesgo. La diferencia
+
+$$
+\text{optimismo} \;=\; \mathbb{E}\left[ E(f_{k^*}) \right]
+                   \;-\; \mathbb{E}\left[ \hat{E}_{\min} \right]
+                   \;\geq\; 0
+$$ {#eq-optimismo}
+
+crece con $K$: cuantos más candidatos se prueban, más se aprovecha el ruido del conjunto donde
+se mide. Es el fenómeno del @sec-r2 movido un nivel hacia arriba. Allá sobreajustaba el modelo
+a los datos; acá sobreajusta **la selección del modelo** al conjunto de medición
+[@cawley2010; @varma2006].
+
+### Medido {#sec-optimismo-medido}
+
+La cuenta se puede hacer con datos reales. Sobre las series del catálogo que admiten un
+conjunto de validación se ajustan diez métodos, se elige el mejor según la validación y se
+compara ese error con el que el mismo método consigue después en el período de prueba.
+
+```{python}
+#| echo: false
+def naive(y, h, m):
+    return np.repeat(y[-1], h)
+
+
+def snaive(y, h, m):
+    if m <= 1:
+        return naive(y, h, m)
+    return np.array([y[-m + (i % m)] for i in range(h)])
+
+
+def media(y, h, m):
+    return np.repeat(y.mean(), h)
+
+
+def deriva(y, h, m):
+    pendiente = (y[-1] - y[0]) / (len(y) - 1)
+    return y[-1] + pendiente * np.arange(1, h + 1)
+
+
+def ses(y, h, m):
+    return SimpleExpSmoothing(y, initialization_method="estimated").fit().forecast(h)
+
+
+def holt(y, h, m):
+    return (ExponentialSmoothing(y, trend="add", initialization_method="estimated")
+            .fit().forecast(h))
+
+
+def holt_amortiguado(y, h, m):
+    return (ExponentialSmoothing(y, trend="add", damped_trend=True,
+                                 initialization_method="estimated").fit().forecast(h))
+
+
+def holt_winters(y, h, m):
+    if m <= 1 or len(y) < 2 * m + 4:
+        return snaive(y, h, m)
+    return (ExponentialSmoothing(y, trend="add", seasonal="add", seasonal_periods=m,
+                                 initialization_method="estimated").fit().forecast(h))
+
+
+def _rezagos(y, p):
+    y = np.asarray(y, float)
+    return (np.array([y[i - p:i] for i in range(p, len(y))]),
+            np.array([y[i] for i in range(p, len(y))]))
+
+
+def _recursivo(modelo, y, p, h):
+    historia, salida = list(y), []
+    for _ in range(h):
+        valor = float(modelo.predict([historia[-p:]])[0])
+        salida.append(valor)
+        historia.append(valor)
+    return np.array(salida)
+
+
+def _lineal(estimador):
+    def metodo(y, h, m):
+        p = min(max(m, 4), 12)
+        if len(y) < p + 8:
+            return naive(y, h, m)
+        X, objetivo = _rezagos(y, p)
+        return _recursivo(estimador.fit(X, objetivo), y, p, h)
+    return metodo
+
+
+METODOS = {
+    "naive": naive, "snaive": snaive, "media": media, "deriva": deriva,
+    "SES": ses, "Holt": holt, "Holt amortiguado": holt_amortiguado,
+    "Holt-Winters": holt_winters,
+    "rezagos OLS": _lineal(LinearRegression()),
+    "rezagos Ridge": _lineal(Ridge(alpha=1.0)),
+}
+NOMBRES = list(METODOS)
+
+
+def errores_de_la_serie(identificador, factor=1.0):
+    """sMAPE de cada método en validación y en prueba. None si la serie es corta."""
+    s = cargar(identificador)
+    y_entrena, y_prueba = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    h, m = s.horizonte, s.periodo_estacional
+    if len(y_entrena) < 2 * h + 12:
+        return None
+    largo = max(2, int(round(h * factor)))
+    y_ajuste, y_validacion = y_entrena[:-largo], y_entrena[-largo:]
+
+    validacion, prueba = {}, {}
+    for nombre, metodo in METODOS.items():
+        try:
+            validacion[nombre] = smape(y_validacion, metodo(y_ajuste, largo, m))
+        except Exception:
+            validacion[nombre] = np.inf
+        try:
+            prueba[nombre] = smape(y_prueba, metodo(y_entrena, h, m))
+        except Exception:
+            prueba[nombre] = np.inf
+    return validacion, prueba
+
+
+MEDIDAS = {}
+for _serie in catalogo()["serie"]:
+    _resultado = errores_de_la_serie(_serie)
+    if _resultado is not None:
+        MEDIDAS[_serie] = _resultado
+```
+
+```{python}
+#| label: tbl-optimismo
+#| tbl-cap: "Optimismo de la selección según cuántos candidatos se comparan, sobre las series del catálogo con validación posible. Cada fila promedia 200 subconjuntos aleatorios de $K$ métodos."
+generador = np.random.default_rng(7)
+
+filas = []
+for K in (1, 2, 3, 5, 7, 10):
+    err_val, err_prueba = [], []
+    repeticiones = 1 if K == len(NOMBRES) else 200
+    for _ in range(repeticiones):
+        subconjunto = (NOMBRES if K == len(NOMBRES)
+                       else list(generador.choice(NOMBRES, size=K, replace=False)))
+        for validacion, prueba in MEDIDAS.values():
+            ganador = min(subconjunto, key=lambda n: validacion[n])
+            err_val.append(validacion[ganador])
+            err_prueba.append(prueba[ganador])
+    filas.append({
+        "candidatos": K,
+        "sMAPE en validación": np.mean(err_val),
+        "sMAPE en prueba": np.mean(err_prueba),
+        "optimismo": np.mean(err_prueba) - np.mean(err_val),
+    })
+
+pd.DataFrame(filas).set_index("candidatos").round(2)
+```
+
+La @tbl-optimismo es el capítulo entero en seis filas.
+
+**Con un solo candidato el optimismo es 1,29.** No es cero, porque validación y prueba son
+períodos distintos de la serie y el segundo resulta más difícil, pero ahí no hubo selección:
+es la diferencia honesta entre dos ventanas de tiempo.
+
+**Con diez candidatos el optimismo es 3,45**, casi el triple. Nada cambió en los modelos ni en
+los datos; lo único que creció es la cantidad de veces que se miró el mismo conjunto.
+
+Y el detalle que conviene mirar dos veces: **el error de validación mejora de 10,34 a 9,71 al
+pasar de 7 a 10 candidatos, y el de prueba no mejora** —13,15 contra 13,16—. Los últimos tres
+candidatos no compraron precisión: compraron optimismo. Quien reporte el número de validación
+va a creer que mejoró un 6 % algo que no se movió.
+
+::: {.callout-note}
+## Lo que sí funciona
+
+La lectura pesimista de la @tbl-optimismo sería "elegir no sirve". Es al revés: el sMAPE de
+prueba baja de 25,90 con un candidato a 13,16 con diez, así que **elegir el modelo reduce el
+error a la mitad**. El problema no es la selección. El problema es reportar como estimación
+del error futuro el mismo número con el que se seleccionó.
+:::
+
+## Tres conjuntos {#sec-tres-conjuntos}
+
+La solución es apartar dos bloques en vez de uno. Sobre una serie $y_1, \dots, y_n$ se eligen
+dos cortes $c_1 < c_2 < n$:
+
+$$
+\underbrace{y_1, \dots, y_{c_1}}_{\text{ajuste}} \;\;\Big|\;\;
+\underbrace{y_{c_1+1}, \dots, y_{c_2}}_{\text{validación}} \;\;\Big|\;\;
+\underbrace{y_{c_2+1}, \dots, y_{n}}_{\text{prueba}}
+$$ {#eq-tres-conjuntos}
+
+con un papel distinto y excluyente para cada uno. La división en tres es la práctica estándar
+del aprendizaje automático [@hastie2009], y su traducción a series de tiempo —cortes temporales
+en vez de sorteos— es la que @tashman2000 revisó en detalle para la literatura de pronóstico:
+
+| conjunto | qué se hace con él | cuántas veces se mira |
+|---|---|---|
+| **ajuste** | estimar los parámetros de cada candidato | todas las que hagan falta |
+| **validación** | comparar candidatos y elegir uno | todas las que hagan falta |
+| **prueba** | estimar el error del modelo elegido | **una sola vez, al final** |
+
+: Los tres conjuntos de la @eq-tres-conjuntos y su función. {#tbl-tres-conjuntos}
+
+La columna de la derecha es la regla operativa. La validación es un recurso consumible que se
+puede gastar sin culpa: para eso está. El conjunto de prueba se mira una vez y se reporta lo
+que dio, sin volver atrás a cambiar nada. **Si después de ver el error de prueba se ajusta
+cualquier cosa, ese conjunto pasó a ser validación** y ya no queda ninguna estimación honesta
+en el proyecto.
+
+```{python}
+#| label: fig-tres-conjuntos
+#| fig-cap: "La @eq-tres-conjuntos sobre M39292, con validación de largo $h$. Los dos cortes son temporales: nada se sortea."
+s = cargar("M39292")
+y_entrena, y_prueba = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+h = s.horizonte
+corte_1 = len(y_entrena) - h
+y_todo = np.concatenate([y_entrena, y_prueba])
+
+fig = go.Figure()
+for desde, hasta, nombre, color in (
+    (0, corte_1, "ajuste", COLORES["observado"]),
+    (corte_1, len(y_entrena), "validación", "#d18b2c"),
+    (len(y_entrena), len(y_todo), "prueba", COLORES["prueba"]),
+):
+    fig.add_trace(go.Scatter(
+        x=np.arange(desde, hasta), y=y_todo[desde:hasta], mode="lines",
+        name=f"{nombre} ({hasta - desde} obs)", line=dict(color=color, width=2),
+    ))
+
+for corte in (corte_1, len(y_entrena)):
+    fig.add_vline(x=corte, line_dash="dot", line_width=1,
+                  line_color=COLORES["auxiliar"])
+fig.update_xaxes(title="período")
+mostrar(fig, alto=380, titulo_y="unidades")
+```
+
+El corte de validación va **al final del período de entrenamiento**, no en el medio y no al
+azar. Las dos razones son las del @sec-particion y valen igual un nivel más adentro: una
+validación que interpola no mide la tarea que importa, y una validación rodeada de datos de
+ajuste filtra información de sus vecinos.
+
+## Reajustar después de elegir {#sec-reajustar}
+
+Elegido el modelo, hay dos maneras de producir el pronóstico final: dejarlo como quedó
+ajustado sobre el conjunto de ajuste, o volver a estimar sus parámetros con ajuste y
+validación juntos. La segunda usa más datos; la primera respeta la partición al pie de la
+letra.
+
+```{python}
+#| label: tbl-reajustar
+#| tbl-cap: "Error de prueba del modelo elegido en validación, reajustado con ajuste + validación o dejado como estaba."
+filas = []
+for identificador, (validacion, prueba) in MEDIDAS.items():
+    s = cargar(identificador)
+    y_entrena, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    h, m = s.horizonte, s.periodo_estacional
+    y_ajuste = y_entrena[:-h]
+    ganador = min(NOMBRES, key=lambda n: validacion[n])
+    metodo = METODOS[ganador]
+    try:
+        # Sin reajustar: el mismo ajuste, extendido para tapar validación y prueba.
+        sin_reajustar = smape(y_te, metodo(y_ajuste, 2 * h, m)[-h:])
+    except Exception:
+        sin_reajustar = np.inf
+    filas.append({
+        "serie": identificador, "elegido": ganador,
+        "reajustado": prueba[ganador], "sin reajustar": sin_reajustar,
+    })
+
+comparacion = pd.DataFrame(filas)
+mejora = int((comparacion["reajustado"] < comparacion["sin reajustar"]).sum())
+empeora = int((comparacion["reajustado"] > comparacion["sin reajustar"]).sum())
+
+pd.DataFrame([
+    {"resumen": "sMAPE medio",
+     "reajustado": comparacion["reajustado"].mean(),
+     "sin reajustar": comparacion["sin reajustar"].mean()},
+    {"resumen": "sMAPE mediano",
+     "reajustado": comparacion["reajustado"].median(),
+     "sin reajustar": comparacion["sin reajustar"].median()},
+    {"resumen": "en cuántas series gana",
+     "reajustado": mejora, "sin reajustar": empeora},
+]).set_index("resumen").round(2)
+```
+
+```{python}
+#| echo: false
+from scipy.stats import binomtest
+
+_p = binomtest(mejora, mejora + empeora, 0.5).pvalue
+print(f"prueba de signos sobre {mejora + empeora} series: "
+      f"{mejora} a {empeora},  p = {_p:.4f}")
+```
+
+**Reajustar gana en 24 de 30 series** y baja el sMAPE medio de 16,71 a 13,16, un 21 %. El
+signo es consistente y no es casualidad: la prueba de signos da $p = 0{,}0014$.
+
+La razón es sencilla y vale recordarla cada vez que se arma una partición temporal: el
+conjunto de validación son las observaciones **más recientes**, justo las que más informan
+sobre el período siguiente. Dejarlas afuera del ajuste final es tirarlas después de haberlas
+usado.
+
+La regla queda así: **la validación se usa para elegir y después se devuelve al ajuste. El
+conjunto de prueba nunca se devuelve.**
+
+## Cuánto cuesta la validación {#sec-costo-validacion}
+
+Apartar un tercer bloque no es gratis. En series largas el costo es despreciable; en series
+cortas se come el historial.
+
+```{python}
+#| label: tbl-costo-validacion
+#| tbl-cap: "Costo de una validación de largo $h$ como fracción del período de entrenamiento, sobre las 99.935 series de M4."
+md = metadatos()
+md = md.assign(costo=md["horizonte"] / md["n_entrenamiento"])
+
+resumen = md.groupby("frecuencia").agg(
+    series=("serie", "size"),
+    n_mediano=("n_entrenamiento", "median"),
+    h=("horizonte", "first"),
+)
+resumen["costo mediano %"] = (
+    100 * md.groupby("frecuencia")["costo"].median()
+).round(1)
+resumen["% de series que pierde más del 20 %"] = (
+    100 * md.groupby("frecuencia")["costo"].apply(lambda c: (c > 0.2).mean())
+).round(1)
+resumen.sort_values("n_mediano")
+```
+
+En la serie anual mediana la validación se lleva el 20,7 % del historial, y **en el 59,8 % de
+las anuales se lleva más del 20 %**. Vale recordar de dónde vienen esos horizontes: los fijó el
+diseño de la competencia [@makridakis2018], no una decisión del analista. Sobre el total de M4 el número es 29,8 %: casi un tercio
+de las series paga una fracción sustancial de su historia por el privilegio de elegir un
+modelo con honestidad.
+
+En el extremo, la validación es directamente imposible:
+
+```{python}
+#| label: tbl-sin-validacion
+#| tbl-cap: "Series del catálogo donde no queda margen para una validación de largo $h$ dejando al menos 12 observaciones de ajuste."
+filas = []
+for identificador in catalogo()["serie"]:
+    s = cargar(identificador)
+    n = len(s.entrenamiento)
+    if n < 2 * s.horizonte + 12:
+        filas.append({
+            "serie": identificador, "frecuencia": s.frecuencia,
+            "n entrenamiento": n, "h": s.horizonte,
+            "quedaría para ajustar": n - s.horizonte,
+        })
+
+pd.DataFrame(filas).set_index("serie")
+```
+
+Cuatro de las 34 series del catálogo, todas por el mismo motivo. `Y21804` y `Y22817` tienen 13
+observaciones y horizonte 6: apartar una validación dejaría 7 datos para ajustar cualquier cosa.
+
+El piso de 12 observaciones es una convención de este libro, no un resultado, y `Q5655` —que
+quedaría con 16— está justo del lado malo de una raya que se podría haber trazado en otro lugar.
+Lo que no es convención es la forma del problema: cuando $h$ es una fracción grande de $n$, no
+hay partición que deje los dos bloques con datos suficientes. En esos casos hay tres salidas, en
+orden de preferencia:
+
+1. **Validación cruzada temporal**, que reutiliza los mismos datos en varias ventanas en vez
+   de apartar un bloque. Es el @sec-validacion-cruzada, es la respuesta estándar y
+   @bergmeir2012 discuten cuándo es válida en series de tiempo.
+2. **Elegir con un criterio que no consuma datos**, como el AICc de la @eq-aicc, que penaliza
+   parámetros en lugar de apartar observaciones.
+3. **No elegir**: fijar un método de antemano según la estructura de la serie o según lo que
+   funcionó en series parecidas. El @sec-seleccion-escala desarrolla esta idea, que es además
+   la que hace falta cuando alguien sube una serie de quince puntos y espera un pronóstico.
+
+Ninguna de las tres es un remedio completo. Con 13 observaciones **no hay manera de estimar
+con precisión el error de un modelo**, y el reflejo correcto es reportar esa incertidumbre en
+vez de esconderla detrás de un número con un decimal.
+
+## Cuánto debe medir la validación {#sec-largo-validacion}
+
+Queda una decisión: qué tan largo hacer el bloque. El argumento a favor de que mida
+exactamente $h$ es que así la validación mide **la misma tarea** que la prueba: mismo
+horizonte, misma dificultad de extrapolación.
+
+```{python}
+#| label: tbl-largo-validacion
+#| tbl-cap: "Tres largos de validación sobre las mismas series. La columna de aciertos cuenta en cuántas el ganador de validación fue también el mejor en prueba."
+def experimento(factor):
+    err_val, err_prueba, aciertos = [], [], 0
+    for identificador in MEDIDAS:
+        validacion, prueba = errores_de_la_serie(identificador, factor)
+        ganador = min(validacion, key=validacion.get)
+        err_val.append(validacion[ganador])
+        err_prueba.append(prueba[ganador])
+        aciertos += ganador == min(prueba, key=prueba.get)
+    return np.mean(err_val), np.mean(err_prueba), aciertos
+
+
+filas = []
+for etiqueta, factor in (("h/2", 0.5), ("h", 1.0), ("2h", 2.0)):
+    v, t, a = experimento(factor)
+    filas.append({
+        "largo de la validación": etiqueta,
+        "sMAPE en validación": v,
+        "sMAPE en prueba": t,
+        f"aciertos sobre {len(MEDIDAS)}": a,
+    })
+
+pd.DataFrame(filas).set_index("largo de la validación").round(2)
+```
+
+El mejor error de prueba lo da $h$: 13,16 contra 14,10 y 14,31. Hay que decirlo con cuidado,
+igual: **con 30 series esas tres diferencias no son concluyentes.** Lo que la tabla sostiene es
+una recomendación por defecto, no un resultado.
+
+Lo que sí es interesante es la última columna, que va en dirección **opuesta** al error. Con
+una validación de $h/2$ el ganador de validación coincide con el mejor de prueba en 15 series
+de 30, más del doble que con $2h$, y sin embargo su error de prueba es el peor de los tres.
+Acertar más seguido no compensa si, cuando falla, falla peor: la validación corta acierta en
+los casos fáciles y se equivoca de manera catastrófica en los difíciles. **La tasa de aciertos
+no es la métrica que importa; el error resultante sí.**
+
+## Pruébalo {#sec-probalo-15}
+
+La celda que sigue arma la partición de tres conjuntos en tu navegador y elige entre cuatro
+métodos. Cambia `largo_validacion` y mira dos cosas a la vez: si cambia el método elegido y
+cómo se separa el error de validación del de prueba.
+
+```{pyodide}
+#| caption: Partición de tres conjuntos — cambia `cual` y `largo_validacion`
+#| autorun: true
+import numpy as np
+import pandas as pd
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+
+datos = pd.read_csv("datos/cap04_estacionales.csv", parse_dates=["ds"])
+
+# "estacionalidad marcada", "estacionalidad débil", "amplitud creciente",
+# "quiebre de nivel"
+cual = "estacionalidad marcada"
+largo_validacion = 18            # prueba con 9, 18 y 36
+
+
+def smape(real, pron):
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    return 200 * np.mean(np.abs(real - pron) / (np.abs(real) + np.abs(pron)))
+
+
+g = datos[datos["etiqueta"] == cual].sort_values("ds")
+y = g["y"].to_numpy()
+m = int(g["m"].iloc[0])
+h = int((g["split"] == "prueba").sum())
+
+y_entrena, y_prueba = y[:-h], y[-h:]
+y_ajuste = y_entrena[:-largo_validacion]
+y_validacion = y_entrena[-largo_validacion:]
+
+print(f"{cual}: ajuste {len(y_ajuste)} | validación {len(y_validacion)} | "
+      f"prueba {len(y_prueba)}   (m = {m}, h = {h})")
+
+
+def naive(y, h):
+    return np.repeat(y[-1], h)
+
+
+def snaive(y, h):
+    return np.array([y[-m + (i % m)] for i in range(h)])
+
+
+def holt(y, h):
+    return (ExponentialSmoothing(y, trend="add", initialization_method="estimated")
+            .fit().forecast(h))
+
+
+def holt_winters(y, h):
+    return (ExponentialSmoothing(y, trend="add", seasonal="add", seasonal_periods=m,
+                                 initialization_method="estimated").fit().forecast(h))
+
+
+METODOS = {"naive": naive, "snaive": snaive, "Holt": holt,
+           "Holt-Winters": holt_winters}
+
+filas = []
+for nombre, metodo in METODOS.items():
+    filas.append({
+        "método": nombre,
+        "validación": smape(y_validacion, metodo(y_ajuste, largo_validacion)),
+        "prueba": smape(y_prueba, metodo(y_entrena, h)),      # reajustado
+    })
+
+tabla = pd.DataFrame(filas).set_index("método").round(3)
+elegido = tabla["validación"].idxmin()
+print(tabla)
+print(f"\nelegido en validación : {elegido}")
+print(f"  error de validación  : {tabla.loc[elegido, 'validación']:.3f}")
+print(f"  error de prueba      : {tabla.loc[elegido, 'prueba']:.3f}")
+print(f"  optimismo            : "
+      f"{tabla.loc[elegido, 'prueba'] - tabla.loc[elegido, 'validación']:+.3f}")
+print(f"\nel mejor en prueba habría sido: {tabla['prueba'].idxmin()}")
+```
+
+## Lo que hay que reportar {#sec-reportar-particion}
+
+El @sec-que-reportar dio una lista de qué informar al evaluar un método. Con tres conjuntos se
+agregan cuatro líneas, y ninguna es formalidad:
+
+1. **Dónde están los dos cortes** y con qué criterio se eligieron. La lista de @hyndman2021
+   para pronóstico clásico no incluye este punto porque no hace falta con dos conjuntos; con
+   tres, sí.
+2. **Cuántos candidatos se compararon.** Sin ese número el lector no puede juzgar el optimismo
+   de la @eq-optimismo. Diez candidatos y dos candidatos no son lo mismo, aunque el error
+   reportado sea idéntico.
+3. **Cuántas veces se miró el conjunto de prueba.** Si la respuesta honesta es "más de una",
+   hay que decirlo.
+4. **Si el modelo final se reajustó** con ajuste + validación.
+
+Y una advertencia que el @sec-aprendizaje-profundo desarrolla: cuando el modelo tiene
+componentes aleatorios, "el modelo elegido" no es una sola cosa. En el material de tesis que
+alimenta este libro, **en el 68 % de las series el mejor modelo neuronal cambia solo al cambiar
+la semilla**. Con esa variabilidad, elegir el ganador en validación selecciona en buena medida
+una semilla afortunada, y el optimismo de la @tbl-optimismo es un piso, no un techo.
+
+## Ejercicios
+
+Las soluciones están en el @sec-soluciones-15.
+
+**1.** Reproduce la @tbl-optimismo midiendo el optimismo **mediano** en vez del medio. ¿Crece
+igual con $K$? ¿Por qué las dos medidas pueden contar historias distintas?
+
+**2.** Calcula el error de prueba de los diez métodos sobre una serie del catálogo. ¿Cuánto va
+del mejor al peor? Compáralo con el optimismo de 3,45 de la @tbl-optimismo y decide cuál de
+los dos errores es más grave: elegir mal el modelo o reportar mal el error.
+
+**3.** En la @tbl-reajustar hay 6 series donde reajustar empeora. Identifícalas y compara la
+suma de lo que pierden con la suma de lo que ganan las otras 24. ¿Qué método eligieron y qué
+dificultad tienen? ¿Cambiarías la recomendación del @sec-reajustar?
+
+**4.** Arma una partición que **viole** la regla temporal —validación sorteada al azar dentro
+del entrenamiento— y mide el optimismo resultante. ¿Es mayor o menor que con la partición
+correcta? Explica el signo.
+
+**5.** Usando `metadatos()`, calcula cuántas series de M4 quedarían con menos de $2m$
+observaciones de ajuste después de apartar una validación de largo $h$, con $m$ el período
+estacional. Repite con $3m$. El resultado es sorprendente: explícalo mirando cómo se armó M4 y
+di en qué frecuencias está realmente el problema de las series cortas.
+
+**6.** El @sec-costo-validacion propone tres salidas para las series demasiado cortas. Toma la
+tercera —fijar el método de antemano— y mide qué error de prueba se consigue en las cuatro
+series de la @tbl-sin-validacion usando siempre `snaive`. Compáralo con el mejor método de cada
+una y con el peor.
+
+## Referencias {.unnumbered}
+
+::: {#refs}
 :::

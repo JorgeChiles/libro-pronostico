@@ -3329,3 +3329,483 @@ prueba de largos distintos —168, 97 y 27 puntos—, y los períodos más largo
 extrapolaciones más lejanas, donde el polinomio se dispara más. Parte de la mejora es eso y
 no solo la varianza. El @sec-validacion-cruzada arma la comparación de manera que este
 problema no aparezca.
+
+## Capítulo 15 · Entrenamiento, validación y prueba {#sec-soluciones-15}
+
+```{python}
+#| echo: false
+from statsmodels.tsa.holtwinters import SimpleExpSmoothing
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import Lasso, Ridge
+from sklearn.neighbors import KNeighborsRegressor
+from sklearn.tree import DecisionTreeRegressor
+
+
+def _naive(y, h, m):
+    return np.repeat(y[-1], h)
+
+
+def _snaive(y, h, m):
+    if m <= 1:
+        return _naive(y, h, m)
+    return np.array([y[-m + (i % m)] for i in range(h)])
+
+
+def _media(y, h, m):
+    return np.repeat(y.mean(), h)
+
+
+def _deriva(y, h, m):
+    pendiente = (y[-1] - y[0]) / (len(y) - 1)
+    return y[-1] + pendiente * np.arange(1, h + 1)
+
+
+def _ses(y, h, m):
+    return SimpleExpSmoothing(y, initialization_method="estimated").fit().forecast(h)
+
+
+def _holt(y, h, m):
+    return (ExponentialSmoothing(y, trend="add", initialization_method="estimated")
+            .fit().forecast(h))
+
+
+def _holt_amortiguado(y, h, m):
+    return (ExponentialSmoothing(y, trend="add", damped_trend=True,
+                                 initialization_method="estimated").fit().forecast(h))
+
+
+def _holt_winters(y, h, m):
+    if m <= 1 or len(y) < 2 * m + 4:
+        return _snaive(y, h, m)
+    return (ExponentialSmoothing(y, trend="add", seasonal="add", seasonal_periods=m,
+                                 initialization_method="estimated").fit().forecast(h))
+
+
+def _rez(y, p):
+    y = np.asarray(y, float)
+    return (np.array([y[i - p:i] for i in range(p, len(y))]),
+            np.array([y[i] for i in range(p, len(y))]))
+
+
+def _recursivo(modelo, y, p, h):
+    historia, salida = list(y), []
+    for _ in range(h):
+        valor = float(modelo.predict([historia[-p:]])[0])
+        salida.append(valor)
+        historia.append(valor)
+    return np.array(salida)
+
+
+def _lineal(estimador):
+    def metodo(y, h, m):
+        p = min(max(m, 4), 12)
+        if len(y) < p + 8:
+            return _naive(y, h, m)
+        X, objetivo = _rez(y, p)
+        return _recursivo(estimador.fit(X, objetivo), y, p, h)
+    return metodo
+
+
+LOS_DIEZ = {
+    "naive": _naive, "snaive": _snaive, "media": _media, "deriva": _deriva,
+    "SES": _ses, "Holt": _holt, "Holt amortiguado": _holt_amortiguado,
+    "Holt-Winters": _holt_winters,
+    "rezagos OLS": _lineal(LinearRegression()),
+    "rezagos Ridge": _lineal(Ridge(alpha=1.0)),
+}
+DIEZ = list(LOS_DIEZ)
+
+
+def errores_val_prueba(identificador):
+    """sMAPE de los diez métodos en validación (largo h) y en prueba."""
+    s = cargar(identificador)
+    y_entrena, y_prueba = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    h, m = s.horizonte, s.periodo_estacional
+    if len(y_entrena) < 2 * h + 12:
+        return None
+    y_ajuste, y_validacion = y_entrena[:-h], y_entrena[-h:]
+    val, pru = {}, {}
+    for nombre, metodo in LOS_DIEZ.items():
+        try:
+            val[nombre] = smape(y_validacion, metodo(y_ajuste, h, m))
+        except Exception:
+            val[nombre] = np.inf
+        try:
+            pru[nombre] = smape(y_prueba, metodo(y_entrena, h, m))
+        except Exception:
+            pru[nombre] = np.inf
+    return val, pru
+
+
+LAS_TREINTA = {}
+for _s in catalogo()["serie"]:
+    _r = errores_val_prueba(_s)
+    if _r is not None:
+        LAS_TREINTA[_s] = _r
+```
+
+### Ejercicio 1 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-15-1
+#| tbl-cap: "Optimismo medio, optimismo de las medianas y mediana de las diferencias, según la cantidad de candidatos."
+generador = np.random.default_rng(7)
+
+filas = []
+for K in (1, 2, 3, 5, 7, 10):
+    val, pru = [], []
+    repeticiones = 1 if K == len(DIEZ) else 200
+    for _ in range(repeticiones):
+        sub = (DIEZ if K == len(DIEZ)
+               else list(generador.choice(DIEZ, size=K, replace=False)))
+        for v, p in LAS_TREINTA.values():
+            g = min(sub, key=lambda n: v[n])
+            val.append(v[g])
+            pru.append(p[g])
+    val, pru = np.array(val), np.array(pru)
+    filas.append({
+        "candidatos": K,
+        "optimismo de las medias": pru.mean() - val.mean(),
+        "optimismo de las medianas": np.median(pru) - np.median(val),
+        "mediana de las diferencias": np.median(pru - val),
+    })
+
+pd.DataFrame(filas).set_index("candidatos").round(2)
+```
+
+Las tres columnas suben con $K$, pero solo una lo hace de manera **monótona**: la mediana de
+las diferencias, que va de $-0{,}03$ a $+0{,}59$ sin retrocesos. El optimismo de las medianas
+salta a 2,05 con tres candidatos y **baja** a 1,54 con cinco, y el de las medias es el más
+grande de los tres en todas las filas.
+
+La razón de las diferencias es una distinción que conviene tener presente cada vez que se
+resume un experimento: **la mediana de las diferencias no es la diferencia de las medianas.**
+La primera pregunta "¿en el caso típico, cuánto se paga?" y la segunda "¿cuánto separa al caso
+típico de validación del caso típico de prueba?", que no son la misma pregunta porque el caso
+típico de una distribución no se corresponde con el caso típico de la otra.
+
+Y la media es mucho mayor que las dos medianas —3,45 contra 2,54 y 0,59 con diez candidatos—
+porque unas pocas series pagan un optimismo enorme y arrastran el promedio. Las tres medidas
+son correctas; **la elección entre ellas es una decisión sobre qué pregunta se está
+contestando**, y hay que declararla. Para reportar el riesgo de un proyecto, la media es la
+honesta: el error de una serie catastrófica cuesta plata igual que el de veinte series buenas.
+
+### Ejercicio 2 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-15-2
+#| tbl-cap: "Distancia entre el mejor y el peor de los diez métodos en el período de prueba, sobre las 30 series."
+filas = []
+for identificador, (_, pru) in LAS_TREINTA.items():
+    finitos = [v for v in pru.values() if np.isfinite(v)]
+    filas.append({
+        "serie": identificador,
+        "mejor": min(finitos),
+        "peor": max(finitos),
+        "rango": max(finitos) - min(finitos),
+    })
+
+rangos = pd.DataFrame(filas).set_index("serie")
+pd.DataFrame([{
+    "mínimo": rangos["rango"].min(),
+    "mediana": rangos["rango"].median(),
+    "media": rangos["rango"].mean(),
+    "máximo": rangos["rango"].max(),
+}], index=["rango entre el mejor y el peor método"]).round(2)
+```
+
+El rango mediano es **41,15 puntos de sMAPE** y el medio 59,20. Comparado con el optimismo de
+3,45 de la @tbl-optimismo, **elegir mal el modelo cuesta más de diez veces lo que cuesta
+reportar mal el error.**
+
+Eso responde la pregunta del enunciado con un orden de magnitud, y la conclusión es la del
+recuadro del @sec-elegir-es-medir: el capítulo no argumenta contra la selección, argumenta
+contra confundir el número de selección con el número de reporte.
+
+Pero hay una segunda lectura que no aparece en los promedios. El error de elegir mal se
+**ve**: el modelo pronostica mal, alguien lo nota, se corrige. El error de reportar mal no se
+ve, y su costo no es el 3,45 de sMAPE: es haber tomado una decisión —contratar, invertir,
+dimensionar un inventario— confiando en un número un 26 % mejor que el real. **Los dos errores
+no se miden en la misma unidad.**
+
+### Ejercicio 3 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-15-3
+#| tbl-cap: "Las series donde reajustar con ajuste + validación empeora el error de prueba, con el método elegido y la dificultad del catálogo."
+cat = catalogo().set_index("serie")
+
+filas = []
+for identificador, (val, pru) in LAS_TREINTA.items():
+    s = cargar(identificador)
+    y_entrena, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    h, m = s.horizonte, s.periodo_estacional
+    ganador = min(DIEZ, key=lambda n: val[n])
+    try:
+        sin = smape(y_te, LOS_DIEZ[ganador](y_entrena[:-h], 2 * h, m)[-h:])
+    except Exception:
+        sin = np.inf
+    filas.append({
+        "serie": identificador, "elegido": ganador,
+        "reajustado": pru[ganador], "sin reajustar": sin,
+        "diferencia": pru[ganador] - sin,
+        "dificultad": cat.loc[identificador, "dificultad"],
+        "n": len(y_entrena),
+    })
+
+todas = pd.DataFrame(filas)
+peores = todas[todas["diferencia"] > 0].sort_values("diferencia", ascending=False)
+peores.set_index("serie").round(2)
+```
+
+Las seis son `W4`, `Q15481`, `M6696`, `M32571`, `M47356` y `D2039`. Buscar un fenómeno común
+no da nada: hay una de serie larga, una de cambio de varianza, dos de cobertura de dificultad,
+una de atípicos y una de caminata aleatoria. Cinco fenómenos distintos en seis series es ruido,
+no patrón.
+
+Dos cosas sí aparecen.
+
+**La dificultad.** Cuatro de las seis están etiquetadas como dificultad alta y **ninguna como
+baja**, mientras que entre las 24 que mejoran hay 6 de dificultad baja. En una serie difícil el
+sMAPE de un horizonte es una medición ruidosa, y con 30 series es esperable que unas pocas
+salgan del lado equivocado por azar.
+
+**El método elegido.** Cuatro de las seis eligieron un método que extrapola tendencia —Holt,
+Holt amortiguado o Holt-Winters—. Tiene sentido mecánico: reajustar con las observaciones más
+recientes reestima la pendiente, y si esas últimas $h$ observaciones tenían una inclinación que
+no continúa, el reajuste empeora el pronóstico justamente porque le hizo caso a los datos
+nuevos.
+
+```{python}
+#| label: tbl-sol-15-3b
+#| tbl-cap: "Cuánto se pierde en las seis series contra cuánto se gana en las otras 24."
+gana = todas[todas["diferencia"] < 0]
+pd.DataFrame([
+    {"grupo": "las 6 donde reajustar empeora", "series": len(peores),
+     "suma de |diferencia|": peores["diferencia"].sum(),
+     "peor caso": peores["diferencia"].max()},
+    {"grupo": "las 24 donde reajustar mejora", "series": len(gana),
+     "suma de |diferencia|": -gana["diferencia"].sum(),
+     "peor caso": -gana["diferencia"].min()},
+]).set_index("grupo").round(2)
+```
+
+Y acá está la respuesta a la última pregunta. **No: la recomendación no cambia.** Lo que se
+pierde en las seis series suma 17,0 puntos de sMAPE, con un peor caso de 6,1. Lo que se gana en
+las otras veinticuatro suma 123,4, con un mejor caso de 50,3. La apuesta es asimétrica siete a
+uno a favor de reajustar, y las pérdidas están acotadas mientras las ganancias no.
+
+Es el tipo de decisión que hay que tomar mirando la distribución completa y no la tasa de
+aciertos, exactamente como la última columna de la @tbl-largo-validacion.
+
+### Ejercicio 4 {.unnumbered}
+
+Para poder sortear filas hace falta el marco supervisado del @sec-supervisado: la
+@eq-ventana convierte la serie en una tabla y ahí `train_test_split` está a una línea de
+distancia. Los candidatos son ocho modelos de `scikit-learn` con capacidades muy distintas,
+que es el escenario donde la selección importa.
+
+```{python}
+#| label: tbl-sol-15-4
+#| tbl-cap: "Optimismo con partición temporal y con validación sorteada al azar dentro del entrenamiento. Ocho candidatos, 30 series."
+CANDIDATOS = {
+    "OLS": lambda: LinearRegression(),
+    "Ridge λ=1": lambda: Ridge(alpha=1.0),
+    "Ridge λ=100": lambda: Ridge(alpha=100.0),
+    "árbol prof. 3": lambda: DecisionTreeRegressor(max_depth=3, random_state=0),
+    "árbol prof. 10": lambda: DecisionTreeRegressor(max_depth=10, random_state=0),
+    "bosque": lambda: RandomForestRegressor(n_estimators=100, random_state=0),
+    "kNN 3": lambda: KNeighborsRegressor(3),
+    "kNN 10": lambda: KNeighborsRegressor(10),
+}
+
+generador = np.random.default_rng(3)
+filas = []
+for identificador in LAS_TREINTA:
+    s = cargar(identificador)
+    y_entrena, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    h, m = s.horizonte, s.periodo_estacional
+    p = min(max(m, 4), 12)
+    if len(y_entrena) < 2 * h + 12 + p:
+        continue
+    X, objetivo = _rez(y_entrena, p)
+
+    # (a) validación temporal: las últimas h filas
+    X_aj, o_aj, X_val, o_val = X[:-h], objetivo[:-h], X[-h:], objetivo[-h:]
+    # (b) validación sorteada: h filas cualesquiera
+    orden = generador.permutation(len(X))
+    i_val, i_aj = np.sort(orden[:h]), np.sort(orden[h:])
+
+    val_t, val_a, prueba = {}, {}, {}
+    for nombre, construir in CANDIDATOS.items():
+        val_t[nombre] = smape(o_val, construir().fit(X_aj, o_aj).predict(X_val))
+        val_a[nombre] = smape(
+            objetivo[i_val],
+            construir().fit(X[i_aj], objetivo[i_aj]).predict(X[i_val]),
+        )
+        prueba[nombre] = smape(
+            y_te, _recursivo(construir().fit(X, objetivo), y_entrena, p, h)
+        )
+
+    g_t = min(val_t, key=val_t.get)
+    g_a = min(val_a, key=val_a.get)
+    filas.append({
+        "val temporal": val_t[g_t], "prueba temporal": prueba[g_t],
+        "val al azar": val_a[g_a], "prueba al azar": prueba[g_a],
+    })
+
+d = pd.DataFrame(filas)
+pd.DataFrame([
+    {"partición": "temporal (correcta)",
+     "sMAPE en validación": d["val temporal"].mean(),
+     "sMAPE en prueba": d["prueba temporal"].mean(),
+     "optimismo": d["prueba temporal"].mean() - d["val temporal"].mean()},
+    {"partición": "sorteada al azar (con fuga)",
+     "sMAPE en validación": d["val al azar"].mean(),
+     "sMAPE en prueba": d["prueba al azar"].mean(),
+     "optimismo": d["prueba al azar"].mean() - d["val al azar"].mean()},
+]).set_index("partición").round(2)
+```
+
+El optimismo es **mayor** con la partición al azar: 6,89 contra 5,76. Y el mecanismo se lee en
+las otras dos columnas, que es lo que pedía el enunciado.
+
+**El error de prueba casi no cambia** —14,22 contra 15,00, una diferencia que con 30 series no
+significa nada—. Es decir: sortear la validación no eligió modelos mucho peores.
+
+**El error de validación baja de 9,24 a 7,33**, un 21 %. Ahí está todo el efecto. La partición
+al azar deja en el conjunto de ajuste las filas vecinas de las que va a evaluar, y como las
+ventanas de la @eq-ventana se solapan, predecir esas filas es casi copiar. El modelo parece
+mejor de lo que es.
+
+El signo es entonces el que corresponde: **la fuga no empeora el modelo, empeora la
+medición**, y por eso agranda la brecha. Es la versión cuantificada de lo que el
+@sec-trampa advierte, y la razón por la que ese capítulo insiste en `Pipeline`: el error no
+avisa, solo mejora los números.
+
+En las medianas el efecto es más brutal todavía: la validación temporal tiene mediana 2,15 y la
+sorteada 0,95. **Más de la mitad del error desaparece por el solo hecho de sortear.**
+
+### Ejercicio 5 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-15-5
+#| tbl-cap: "Series de M4 que quedarían con menos de $2m$ y menos de $3m$ observaciones de ajuste después de apartar una validación de largo $h$."
+md = metadatos()
+md = md.assign(ajuste=md["n_entrenamiento"] - md["horizonte"])
+
+resumen = md.groupby("frecuencia").agg(
+    series=("serie", "size"),
+    m=("periodo_estacional", "first"),
+    n_mediano=("n_entrenamiento", "median"),
+)
+resumen["ajuste < 2m"] = md.assign(
+    x=md["ajuste"] < 2 * md["periodo_estacional"]
+).groupby("frecuencia")["x"].sum()
+resumen["ajuste < 3m"] = md.assign(
+    x=md["ajuste"] < 3 * md["periodo_estacional"]
+).groupby("frecuencia")["x"].sum()
+resumen
+```
+
+La respuesta es **cero**: ninguna de las 99.935 series de M4 queda por debajo de $2m$ después
+de apartar la validación, y con el criterio de $3m$ aparecen 17 en total —15 mensuales y 2
+trimestrales— sobre 72.000 series estacionales.
+
+Eso no es una propiedad de las series del mundo: es una propiedad de **cómo se armó la
+competencia**. M4 exigió un mínimo de observaciones por frecuencia justamente para que los
+métodos estacionales fueran aplicables, y las series que no llegaban quedaron afuera. El
+criterio que uno inventa para diagnosticar un problema puede estar ya garantizado por el diseño
+del conjunto de datos, y confirmarlo cuesta tres líneas.
+
+La consecuencia es que **el problema de las series cortas en M4 no está en las estacionales.**
+Está donde $m = 1$ y el criterio de $2m$ no dice nada:
+
+```{python}
+#| label: tbl-sol-15-5b
+#| tbl-cap: "El problema real: series donde el ajuste queda por debajo de tres veces el horizonte."
+md = md.assign(apretada=md["ajuste"] < 3 * md["horizonte"])
+apretadas = md.groupby("frecuencia").agg(
+    series=("serie", "size"), h=("horizonte", "first"),
+    apretadas=("apretada", "sum"),
+)
+apretadas["%"] = (100 * apretadas["apretadas"] / apretadas["series"]).round(1)
+apretadas.sort_values("%", ascending=False)
+```
+
+Con un criterio expresado en horizontes en vez de en períodos estacionales, el problema aparece:
+**8.758 series anuales (38,1 %) y 9.915 mensuales (20,7 %)** quedarían con menos de tres
+horizontes de datos para ajustar. En las diarias, horarias y semanales el conteo es cero.
+
+Que las mensuales aparezcan en la lista es lo que hace interesante al ejercicio. Tienen una
+mediana de 202 observaciones, que suena holgada, pero su horizonte es 18: tres horizontes son 54
+puntos, y una de cada cinco series mensuales no los tiene. **La métrica correcta para "esta serie
+es corta" en pronóstico es cuántos horizontes caben, no cuántas observaciones hay.**
+
+### Ejercicio 6 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-15-6
+#| tbl-cap: "Las cuatro series de la @tbl-sin-validacion: snaive fijo contra el mejor y el peor de los diez métodos."
+filas = []
+for identificador in ("Q5655", "Q23425", "Y21804", "Y22817"):
+    s = cargar(identificador)
+    y_entrena, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    h, m = s.horizonte, s.periodo_estacional
+    errores = {}
+    for nombre, metodo in LOS_DIEZ.items():
+        try:
+            errores[nombre] = smape(y_te, metodo(y_entrena, h, m))
+        except Exception:
+            errores[nombre] = np.inf
+    finitos = {k: v for k, v in errores.items() if np.isfinite(v)}
+    mejor = min(finitos, key=finitos.get)
+    peor = max(finitos, key=finitos.get)
+    filas.append({
+        "serie": identificador, "n": len(y_entrena), "m": m, "h": h,
+        "snaive fijo": errores["snaive"],
+        "el mejor": f"{mejor} ({finitos[mejor]:.2f})",
+        "el peor": f"{peor} ({finitos[peor]:.2f})",
+    })
+
+tabla = pd.DataFrame(filas).set_index("serie")
+tabla.round(2)
+```
+
+```{python}
+#| label: tbl-sol-15-6b
+#| tbl-cap: "Promedio sobre las cuatro series."
+promedios = []
+for identificador in ("Q5655", "Q23425", "Y21804", "Y22817"):
+    s = cargar(identificador)
+    y_entrena, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    h, m = s.horizonte, s.periodo_estacional
+    errores = {}
+    for nombre, metodo in LOS_DIEZ.items():
+        try:
+            errores[nombre] = smape(y_te, metodo(y_entrena, h, m))
+        except Exception:
+            errores[nombre] = np.inf
+    finitos = [v for v in errores.values() if np.isfinite(v)]
+    promedios.append({"snaive fijo": errores["snaive"],
+                      "oráculo": min(finitos), "el peor": max(finitos)})
+
+pd.DataFrame(promedios).mean().round(2).to_frame("sMAPE medio")
+```
+
+El resultado justifica la tercera salida del @sec-costo-validacion mejor de lo que uno
+esperaría. **`snaive` fijo da 24,10 de sMAPE medio; el oráculo —el mejor método de cada serie,
+elegido con información que no se tiene— da 21,57; y el peor método da 46,33.**
+
+Dicho de otra manera: renunciar por completo a elegir cuesta **2,5 puntos** respecto de la
+elección perfecta, y evita los **22 puntos** que costaría una elección desafortunada. Y en dos
+de las cuatro series —`Q23425` y `Y22817`— `snaive` *es* el mejor de los diez.
+
+La razón no es que `snaive` sea bueno, es que con 13 o 16 observaciones **no hay información
+suficiente para distinguir métodos**, así que cualquier procedimiento de selección está
+eligiendo ruido. Un método fijo y sensato al menos no tiene varianza de selección.
+
+Es exactamente el razonamiento que el @sec-seleccion-escala formaliza y que la aplicación de
+pronóstico necesita: cuando la serie es demasiado corta para justificar una elección,
+**condicionar el método a la estructura de la serie es mejor que fingir que se lo eligió con
+datos.**
