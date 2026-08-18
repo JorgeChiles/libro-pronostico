@@ -49,6 +49,7 @@ book:
         - capitulos/25-produccion.qmd
   appendices:
     - apendices/soluciones.qmd
+    - apendices/bibliografia.qmd
     - laboratorio/interactividad.qmd
 
 bibliography: referencias.bib

@@ -19,8 +19,8 @@ entrenamiento y 18 de prueba, las que fija la competencia.
 ## Nivel 1 · Gráfico interactivo
 
 Se genera al compilar el libro, con el intérprete de Python local. El lector no
-descarga Python: recibe HTML y JavaScript. Pasá el cursor por encima, hacé zoom,
-o hacé clic en la leyenda para ocultar una serie.
+descarga Python: recibe HTML y JavaScript. Pasa el cursor por encima, haz zoom,
+o haz clic en la leyenda para ocultar una serie.
 
 ```{python}
 #| label: fig-plotly
@@ -58,13 +58,13 @@ mostrar(fig, titulo_y="unidades")
 
 ## Nivel 2 · Celdas editables
 
-La celda que sigue corre **en el navegador**, con Pyodide. Cambiá el horizonte
-`h` o el período estacional `m` y volvé a ejecutar. No hace falta instalar nada,
+La celda que sigue corre **en el navegador**, con Pyodide. Cambia el horizonte
+`h` o el período estacional `m` y vuelve a ejecutar. No hace falta instalar nada,
 pero la primera celda de la página tarda unos segundos en arrancar mientras baja
 el intérprete.
 
 ```{pyodide}
-#| caption: Pronóstico naive estacional — cambiá h y volvé a ejecutar
+#| caption: Pronóstico naive estacional — cambia h y vuelve a ejecutar
 #| autorun: true
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -91,7 +91,7 @@ exigente: `statsmodels` dentro del navegador, que es lo que van a necesitar los
 capítulos de descomposición, suavizado y ARIMA.
 
 ```{pyodide}
-#| caption: Descomposición STL en el navegador — mové el argumento seasonal
+#| caption: Descomposición STL en el navegador — mueve el argumento seasonal
 #| autorun: false
 import pandas as pd
 import matplotlib.pyplot as plt

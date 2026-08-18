@@ -1,0 +1,12 @@
+---
+nocite: |
+  @*
+---
+
+# Bibliografía {.unnumbered}
+
+Todas las obras citadas en el libro. Cada capítulo lista al final las que cita, y
+esta es la lista completa.
+
+::: {#refs}
+:::

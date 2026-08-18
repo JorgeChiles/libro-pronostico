@@ -33,3 +33,8 @@ demanda, finanzas, macroeconomía y demografía, con la partición de
 entrenamiento y prueba que fijó la competencia. Nada de datos inventados, salvo
 en los pocos lugares donde ilustrar un punto teórico con un dato artificial es
 más claro; ahí se dice.
+
+:::: {.absorbe-bibliografia}
+::: {#refs}
+:::
+::::

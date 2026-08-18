@@ -21,6 +21,8 @@ Ese es todo el problema de este capítulo. Cuando hay una serie, el gráfico del
 @sec-visualizacion dice casi todo lo que hace falta saber. Cuando hay cien mil
 —o mil, o cincuenta— hay que reemplazar la mirada por números: **características**
 (*features*) que resuman cada serie en unos pocos valores comparables entre sí.
+La idea viene de @wang2006, y @hyndman2015 la llevaron a escala industrial para
+detectar series anómalas entre millones.
 
 Sirven para tres cosas distintas, y conviene tenerlas separadas:
 
@@ -42,7 +44,7 @@ $$
 F_T = \max\left(0,\; 1 - \frac{\operatorname{Var}(R)}{\operatorname{Var}(T + R)}\right)
 \qquad
 F_S = \max\left(0,\; 1 - \frac{\operatorname{Var}(R)}{\operatorname{Var}(S + R)}\right)
-$$
+$$ {#eq-fuerzas}
 
 Las dos van de 0 a 1, y la lectura es directa: si al sacarle la tendencia a la
 serie la varianza casi no baja, la tendencia no explicaba nada y $F_T \approx 0$;
@@ -111,7 +113,7 @@ descriptor en el que no conviene confiar.
 
 ### $F_T$ no significa "tiene tendencia" {#sec-ft-no-es-tendencia}
 
-Mirá la última fila de la tabla. `M32692` es la serie que el catálogo etiqueta como
+Mira la última fila de la tabla. `M32692` es la serie que el catálogo etiqueta como
 quiebre de nivel, y su $F_T$ es `{python} f"{filas[-1]['F_T']:.2f}"`, bajísima. Y
 sin embargo la serie cambia de nivel de manera evidente:
 
@@ -145,7 +147,7 @@ Con dos números por serie se puede dibujar un mapa:
 
 ```{python}
 #| label: fig-mapa-catalogo
-#| fig-cap: "Las series del catálogo en el plano de las dos fuerzas. Pasá el cursor para ver de cuál se trata."
+#| fig-cap: "Las series del catálogo en el plano de las dos fuerzas. Pasa el cursor para ver de cuál se trata."
 cat = catalogo()
 
 fig = go.Figure()
@@ -239,9 +241,9 @@ Hay varias, y no miden lo mismo:
 | Medida | Qué captura |
 |---|---|
 | **Entropía espectral** | Cuán repartida está la energía entre frecuencias. Baja si un ciclo domina. |
-| **Entropía de permutación** | Cuán variados son los patrones de orden entre valores vecinos. |
-| **Entropía muestral** | Cuán poco se repiten los subpatrones a lo largo de la serie. |
-| **Complejidad de Lempel-Ziv** | Cuánto se puede comprimir la serie discretizada. |
+| **Entropía de permutación** [@bandt2002] | Cuán variados son los patrones de orden entre valores vecinos. |
+| **Entropía muestral** [@richman2000] | Cuán poco se repiten los subpatrones a lo largo de la serie. |
+| **Complejidad de Lempel-Ziv** [@lempel1976] | Cuánto se puede comprimir la serie discretizada. |
 
 Las cuatro están en `metadatos()`. Y acá hay que decir algo que los textos sobre
 características de series casi nunca dicen.
@@ -347,16 +349,17 @@ nunca se menciona.
 
 El pipeline que produjo `metadatos()` calcula 29 descriptores por serie: las dos
 fuerzas, cuatro medidas de entropía, autocorrelaciones a distintos rezagos,
-p-valores de dos pruebas de estacionariedad, proporción de valores atípicos, puntos
-de giro, exponente de Hurst, cambios de varianza, puntos de quiebre.
+p-valores de dos pruebas de estacionariedad —la de @dickeyfuller1979 y la de
+@kpss1992—, proporción de valores atípicos, puntos de giro, el exponente de
+@hurst1951, cambios de varianza y puntos de quiebre.
 
 Veintinueve números por serie es demasiado para ordenar nada. Y están muy
 correlacionados entre sí: una serie con tendencia fuerte también tiene
 autocorrelación alta al rezago 1, y probablemente entropía espectral baja. La
 salida es reducir.
 
-El **índice de complejidad estructural** es la primera componente principal de esos
-29 descriptores estandarizados, con el signo invertido:
+El **índice de complejidad estructural** es la primera componente principal
+[@pearson1901] de esos 29 descriptores estandarizados, con el signo invertido:
 
 ```python
 X = descriptores_estandarizados            # 99.935 × 29
@@ -400,7 +403,7 @@ pd.DataFrame([
 ```
 
 El índice correlaciona mejor que cualquiera de las entropías clásicas en
-correlación lineal. Pero mirá con cuidado la segunda columna: **Lempel-Ziv gana en
+correlación lineal. Pero mira con cuidado la segunda columna: **Lempel-Ziv gana en
 correlación de rangos**. Las dos cosas son verdad a la vez, y hay que decirlas
 juntas.
 
@@ -497,10 +500,10 @@ describiendo una propiedad real de los datos y no un artefacto de ninguno de los
 tres. Es la mejor evidencia disponible cuando no hay una verdad de referencia
 contra la que comparar.
 
-## Probalo {#sec-probalo-05}
+## Pruébalo {#sec-pruébalo-05}
 
 La celda que sigue calcula las dos fuerzas en tu navegador, con `statsmodels`.
-Cambiá la serie y el período estacional.
+Cambia la serie y el período estacional.
 
 Vale la pena probar dos cosas. Primero, poner `m = 12` en la caminata aleatoria: la
 fuerza de estacionalidad va a devolver un número igual, porque el cálculo siempre
@@ -509,7 +512,7 @@ comparar el quiebre de nivel con la tendencia limpia y ver la diferencia de $F_T
 que comentamos en el @sec-ft-no-es-tendencia.
 
 ```{pyodide}
-#| caption: Fuerza de tendencia y de estacionalidad — cambiá `cual` y `m`
+#| caption: Fuerza de tendencia y de estacionalidad — cambia `cual` y `m`
 #| autorun: true
 import numpy as np
 import pandas as pd
@@ -540,28 +543,33 @@ print(f"fuerza de estacionalidad F_S = {f_s:.3f}")
 
 Las soluciones están en el @sec-soluciones-05.
 
-**1.** Calculá $F_T$ y $F_S$ para las series de caminata aleatoria del catálogo con
+**1.** Calcula $F_T$ y $F_S$ para las series de caminata aleatoria del catálogo con
 `cargar(fenomeno="caminata-aleatoria", n=3)`. ¿Dan los valores bajos que
-esperabas? Compará con lo que dice `metadatos()`.
+esperabas? Compara con lo que dice `metadatos()`.
 
 **2.** El @sec-ft-no-es-tendencia muestra que un quiebre de nivel no se refleja en
-$F_T$. Buscá en `metadatos()` las diez series con el `change_points_per_length` más
-alto y mirá qué $F_T$ tienen. ¿Se confirma el patrón?
+$F_T$. Busca en `metadatos()` las diez series con el `change_points_per_length` más
+alto y mira qué $F_T$ tienen. ¿Se confirma el patrón?
 
-**3.** Tomá una serie diaria del catálogo y calculá $F_S$ con `m = 7` y con
+**3.** Toma una serie diaria del catálogo y calcula $F_S$ con `m = 7` y con
 `m = 30`. Los dos dan un número. ¿Cuál creerías, y por qué? ¿Qué dice esto sobre
 usar características sin decidir antes el período estacional?
 
-**4.** El @sec-costo-entropia mide que la entropía muestral es $O(n^2)$. Estimá,
+**4.** El @sec-costo-entropia mide que la entropía muestral es $O(n^2)$. Estima,
 con los tiempos de la @tbl-costo, cuánto tardaría sobre `D4099` completa, que tiene
-9.919 observaciones. Después medilo, si tenés paciencia. ¿Le acertó la estimación?
+9.919 observaciones. Después mídelo, si tienes paciencia. ¿Le acertó la estimación?
 
-**5.** Calculá la matriz de correlación entre `trend_strength`,
+**5.** Calcula la matriz de correlación entre `trend_strength`,
 `seasonal_strength`, `z_acf1`, `z_entropy` y `complexity_index` sobre las series
 mensuales. ¿Qué pares están más correlacionados? ¿Justifica eso reducir los
 descriptores a un índice?
 
 **6.** El índice se construye invirtiendo el signo de la primera componente
 principal. Si alguien se olvidara de invertirlo, ¿qué pasaría con la
-@tbl-validacion-indice? Escribí en dos frases cómo detectarías el error sin ver el
+@tbl-validacion-indice? Escribe en dos frases cómo detectarías el error sin ver el
 código que lo produjo.
+
+## Referencias {.unnumbered}
+
+::: {#refs}
+:::

@@ -49,6 +49,8 @@ respuesta.
 ### Ejercicio 1
 
 ```{python}
+#| label: fig-sol-01-1
+#| fig-cap: "Y10884: la serie con quiebre de nivel del catálogo."
 serie = cargar("Y10884")
 
 fig = go.Figure()
@@ -74,6 +76,8 @@ existe.
 ### Ejercicio 2
 
 ```{python}
+#| label: tbl-sol-01-2
+#| tbl-cap: "sMAPE de cuatro métodos simples sobre Q1915."
 serie = cargar("Q1915")
 y = serie.entrenamiento.to_numpy()
 real = serie.prueba.to_numpy()
@@ -133,6 +137,8 @@ calculado para cada serie de M4. Así el ejercicio no depende de bajar 30 series
 completas, y se puede resolver sin conexión:
 
 ```{python}
+#| label: fig-sol-01-4
+#| fig-cap: "Complejidad contra error del naive en una muestra de 30 series mensuales."
 poblacion = metadatos()
 poblacion = poblacion[
     (poblacion["frecuencia"] == "mensual") & poblacion["error_naive_smape"].notna()
@@ -300,6 +306,8 @@ estructura temporal, que es lo que el modelo necesita para no desalinearse.
 ### Ejercicio 3
 
 ```{python}
+#| label: fig-sol-02-3
+#| fig-cap: "H313 agregada a frecuencia diaria con mean y con sum."
 serie = cargar("H313").entrenamiento
 promedio = serie.resample("D").mean()
 suma = serie.resample("D").sum()
@@ -341,6 +349,8 @@ de agregación tiene que salir de la decisión que el pronóstico va a alimentar
 ### Ejercicio 4
 
 ```{python}
+#| label: tbl-sol-02-4
+#| tbl-cap: "Error del naive horario y del diario agregado, en tres series."
 filas = []
 for serie_id in ["H317", "H242", "H282"]:
     s = cargar(serie_id)
@@ -382,6 +392,8 @@ sobre 48, ni tiene la misma precisión estadística.
 ### Ejercicio 5
 
 ```{python}
+#| label: tbl-sol-02-5
+#| tbl-cap: "Rezagos y media móvil de M16834; las doce primeras filas."
 y = cargar("M16834").entrenamiento
 
 tabla = pd.DataFrame({
@@ -414,6 +426,8 @@ serie corta eso puede ser la mitad de los datos.
 ### Ejercicio 6
 
 ```{python}
+#| label: fig-sol-02-6
+#| fig-cap: "Diferencia entre una media móvil centrada y una hacia atrás."
 y = cargar("M32692").entrenamiento
 
 centrada = y.rolling(5, center=True).mean()
@@ -449,6 +463,296 @@ instante *t* esos valores todavía no existen.
 Es el caso más común de fuga de información en series de tiempo, y es difícil de
 notar porque el código no tiene nada de raro: `rolling(5, center=True)` se lee
 igual de bien que `rolling(5)`.
+
+## Capítulo 3 · Visualización {#sec-soluciones-03}
+
+```{python}
+#| echo: false
+from statsmodels.tsa.stattools import acf
+```
+
+### Ejercicio 1
+
+```{python}
+#| label: fig-sol-03-1
+#| fig-cap: "Y21290: la serie que el catálogo etiqueta como de valores atípicos."
+s = cargar("Y21290")
+y = s.entrenamiento
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=y.index, y=y.values, mode="lines",
+    line=dict(color=COLORES["observado"], width=1.4),
+    hovertemplate="%{x|%Y}<br>%{y:,.1f}<extra></extra>",
+))
+mostrar(fig, titulo_y="unidades")
+
+print(f"{s.id}: {s.frecuencia}, {s.n} observaciones, m = {s.periodo_estacional}")
+print(f"fenómeno que le asigna el catálogo: {s.fenomeno}")
+```
+
+La serie crece de manera sostenida y bastante suave durante casi setecientos años
+de datos anuales. A ojo **no** se ven valores atípicos, y el catálogo la etiqueta
+como `atipicos`. Vale la pena entender la discrepancia, porque enseña más que el
+ejercicio.
+
+```{python}
+z = (y - y.mean()) / y.std()
+print(f"puntos con |z| > 3 sobre el nivel: {int((z.abs() > 3).sum())}")
+print(f"máximo |z|                       : {z.abs().max():.2f}")
+
+meta = metadatos()
+fila = meta[meta["serie"] == s.id].iloc[0]
+percentil = 100 * (meta["z_outlier_ratio"] < fila["z_outlier_ratio"]).mean()
+print(f"\nz_outlier_ratio de la serie      : {fila['z_outlier_ratio']:.3f}")
+print(f"percentil entre las 99.935 series: {percentil:.1f}")
+print(f"promedio de la población         : {meta['z_outlier_ratio'].mean():.3f}")
+```
+
+Los dos criterios dicen cosas opuestas y **los dos están bien calculados**. El
+criterio ingenuo del puntaje z sobre el nivel no encuentra nada; el descriptor del
+pipeline la ubica en el percentil 100 de las 99.935 series.
+
+La razón es que el puntaje z sobre el nivel es el criterio equivocado para una
+serie con tendencia. La desviación estándar que usa como escala está inflada por la
+tendencia misma: si la serie recorre un rango enorme, ningún punto individual queda
+lejos del promedio en términos de ese rango. Un atípico en una serie de tiempo casi
+nunca es un valor extremo respecto de toda la serie; es un valor extremo respecto de
+**sus vecinos**, o respecto de lo que el resto de la estructura predecía.
+
+De ahí la lección general: **"atípico" no es una propiedad de un punto, es el
+resultado de un procedimiento.** Cambian los resultados según qué se compare —el
+nivel o el cambio—, con qué escala —desviación estándar o desviación absoluta
+mediana— y si se quitó la tendencia antes. Cuando un descriptor dice "atípicos",
+hay que leer su definición antes de creerle, y cuando uno mismo define el criterio,
+hay que declararlo.
+
+### Ejercicio 2
+
+```{python}
+#| label: fig-sol-03-2
+#| fig-cap: "Gráfico estacional de Q22252 en nivel y sin tendencia, con un trazo por año."
+from statsmodels.tsa.seasonal import STL
+from plotly.subplots import make_subplots
+
+s = cargar("Q22252")
+y, m = s.entrenamiento, s.periodo_estacional
+sin_tendencia = pd.Series(
+    y.to_numpy() - STL(y, period=m, robust=True).fit().trend, index=y.index
+)
+
+fig = make_subplots(rows=1, cols=2, subplot_titles=["en nivel", "sin tendencia"])
+for col, serie_dibujo in ((1, y), (2, sin_tendencia)):
+    tabla = pd.DataFrame({
+        "y": serie_dibujo.to_numpy(),
+        "trimestre": serie_dibujo.index.quarter,
+        "anio": serie_dibujo.index.year,
+    })
+    anios = sorted(tabla["anio"].unique())
+    for k, anio in enumerate(anios):
+        g = tabla[tabla["anio"] == anio]
+        opacidad = 0.25 + 0.75 * k / max(len(anios) - 1, 1)
+        fig.add_trace(go.Scatter(
+            x=g["trimestre"], y=g["y"], mode="lines+markers",
+            line=dict(width=1.2, color=f"rgba(31,78,121,{opacidad:.2f})"),
+            marker=dict(size=4), name=str(anio),
+        ), row=1, col=col)
+
+fig.update_layout(height=400, showlegend=False)
+fig.update_xaxes(title="trimestre", dtick=1)
+mostrar(fig)
+```
+
+```{python}
+tabla = pd.DataFrame({"y": y.to_numpy(), "trimestre": y.index.quarter})
+por_trimestre = tabla.groupby("trimestre")["y"].agg(promedio="mean", desvio="std")
+rango = por_trimestre["promedio"].max() - por_trimestre["promedio"].min()
+
+print(f"rango entre promedios trimestrales : {rango:.1f}")
+print(f"desvío típico dentro del trimestre : {por_trimestre['desvio'].mean():.1f}")
+```
+
+En el panel de la izquierda la tendencia domina: los trazos se apilan uno arriba
+del otro y la forma del ciclo apenas se distingue. El diagnóstico numérico lo
+confirma —el desvío dentro de cada trimestre es mayor que el rango entre los
+promedios trimestrales—, que es la misma situación de la @tbl-entre-dentro.
+
+En el panel de la derecha, con la tendencia fuera, los trazos se superponen
+alrededor del cero y ahí sí se puede juzgar si el perfil es estable de año en año.
+
+La regla práctica: **el gráfico estacional se hace sobre la serie sin tendencia**,
+salvo que la serie no tenga tendencia. Es un paso que se omite seguido y hace que el
+gráfico parezca informativo cuando no lo es.
+
+### Ejercicio 3
+
+```{python}
+#| label: fig-sol-03-3
+#| fig-cap: "Correlograma de H242 con 48 rezagos. Los picos caen en los múltiplos de 24."
+s = cargar("H242")
+valores = s.entrenamiento.to_numpy()
+REZAGOS = 48
+r = acf(valores, nlags=REZAGOS)
+banda = 1.96 / np.sqrt(len(valores))
+
+fig = go.Figure()
+fig.add_trace(go.Bar(
+    x=list(range(1, REZAGOS + 1)), y=r[1:],
+    marker_color=COLORES["observado"],
+    hovertemplate="rezago %{x}<br>r = %{y:.3f}<extra></extra>",
+))
+for signo in (1, -1):
+    fig.add_hline(y=signo * banda, line_dash="dot", line_width=1,
+                  line_color=COLORES["prueba"])
+fig.update_layout(height=380, showlegend=False, bargap=0.5)
+fig.update_xaxes(title="rezago", dtick=6)
+mostrar(fig, titulo_y="autocorrelación")
+
+for k in (12, 24, 36, 48):
+    print(f"r[{k:2d}] = {r[k]:+.3f}")
+print(f"\nm que declara M4 para las horarias: {s.periodo_estacional}")
+```
+
+Los picos positivos están en los rezagos **24 y 48**, es decir en los múltiplos de
+24. Eso dice que el ciclo dominante de la serie tiene 24 observaciones de largo, y
+coincide exactamente con el $m = 24$ que declara M4 para las series horarias.
+
+Hay un detalle que vale la pena notar: en el rezago **12** la autocorrelación es
+fuertemente **negativa**. Tiene sentido y es una firma útil. A media distancia del
+período, el ciclo está en contrafase: las horas de máximo consumo se comparan con
+las de mínimo. Un correlograma con picos positivos en los múltiplos de $m$ y valles
+negativos en los múltiplos impares de $m/2$ es la firma de una estacionalidad
+limpia y bien definida.
+
+### Ejercicio 4
+
+Con la @eq-banda, la probabilidad de que un $r_k$ de ruido blanco caiga fuera de la
+banda es aproximadamente 0,05. Sobre 20 rezagos, el valor esperado es
+$20 \times 0{,}05 = 1$ rezago.
+
+```{python}
+generador = np.random.default_rng(42)
+T, REZAGOS = 200, 20
+banda = 1.96 / np.sqrt(T)
+
+conteos = []
+for _ in range(10):
+    ruido = generador.normal(size=T)
+    r = acf(ruido, nlags=REZAGOS)
+    conteos.append(int(np.sum(np.abs(r[1:]) > banda)))
+
+print(f"esperado por teoría : {REZAGOS * 0.05:.1f} rezagos")
+print(f"observado en 10 repeticiones: {conteos}")
+print(f"promedio observado  : {np.mean(conteos):.1f}")
+```
+
+El promedio observado se parece al esperado. Y el detalle importante está en la
+dispersión: hay repeticiones con cero rezagos fuera de la banda y otras con dos o
+tres. Es decir, **ver dos o tres rezagos significativos en un correlograma de veinte
+es perfectamente compatible con ruido blanco**.
+
+Es un caso de comparaciones múltiples: al mirar veinte pruebas al 5 %, encontrar
+alguna significativa no dice nada. La conclusión práctica es no interpretar rezagos
+sueltos, sino patrones —un decaimiento lento, un pico en el rezago estacional— o
+usar la prueba conjunta de @ljungbox1978, que evalúa todos los rezagos a la vez y no
+sufre este problema.
+
+### Ejercicio 5
+
+```{python}
+#| label: fig-sol-03-5
+#| fig-cap: "Gráfico de rezagos de M47356 en el rezago 1. El punto atípico queda aislado, lejos de la nube."
+s = cargar("M47356")
+y = pd.Series(s.entrenamiento.to_numpy())
+z = (y - y.mean()) / y.std()
+atipicos = z.abs() > 3
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=y.shift(1)[~atipicos], y=y[~atipicos], mode="markers",
+    marker=dict(size=6, color=COLORES["observado"]), name="resto",
+))
+fig.add_trace(go.Scatter(
+    x=y.shift(1)[atipicos], y=y[atipicos], mode="markers",
+    marker=dict(size=11, color=COLORES["prueba"], symbol="x"), name="atípico",
+))
+fig.update_layout(height=420)
+fig.update_xaxes(title="y(t−1)")
+mostrar(fig, titulo_y="y(t)")
+
+limpia = y[~atipicos].reset_index(drop=True)
+print(f"observaciones          : {len(y)}")
+print(f"atípicos con |z| > 3   : {int(atipicos.sum())}")
+print(f"r_1 con todos los datos: {y.corr(y.shift(1)):+.3f}")
+print(f"r_1 sin los atípicos   : {limpia.corr(limpia.shift(1)):+.3f}")
+```
+
+Sí, se ven: el punto atípico queda aislado, lejos de la nube principal, y en el
+gráfico de rezagos aparece dos veces —una como $y_t$ y otra como $y_{t-1}$—, lo que
+lo hace todavía más visible.
+
+Y el efecto sobre la autocorrelación es grande y en la dirección que suele
+sorprender: al quitar un solo punto de 67, $r_1$ **sube** de $+0{,}08$ a $+0{,}19$,
+más del doble. El atípico no estaba creando una correlación falsa: estaba
+**escondiendo** la que había.
+
+El mecanismo es el mismo que hace peligroso al coeficiente de correlación en
+general. Un punto muy lejano al centro tiene un peso enorme en la suma de la
+@eq-autocorrelacion, y si no sigue el patrón de los demás, arrastra el resultado
+hacia cero. Es exactamente la razón por la que el gráfico de rezagos no es
+redundante con el correlograma: el correlograma habría dicho "esta serie casi no
+tiene autocorrelación", y habría sido una conclusión errada.
+
+### Ejercicio 6
+
+```{python}
+#| label: fig-sol-03-6
+#| fig-cap: "Correlograma de Q1915 en nivel y después de una diferencia."
+s = cargar("Q1915")
+valores = s.entrenamiento.to_numpy()
+diferenciada = np.diff(valores)
+REZAGOS = 12
+banda = 1.96 / np.sqrt(len(valores))
+
+fig = make_subplots(rows=1, cols=2, shared_yaxes=True,
+                    subplot_titles=["en nivel", "una diferencia"])
+for col, datos_ac in ((1, valores), (2, diferenciada)):
+    r = acf(datos_ac, nlags=REZAGOS)
+    fig.add_trace(go.Bar(
+        x=list(range(1, REZAGOS + 1)), y=r[1:],
+        marker_color=COLORES["observado"],
+    ), row=1, col=col)
+    for signo in (1, -1):
+        fig.add_hline(y=signo * banda, line_dash="dot", line_width=1,
+                      line_color=COLORES["prueba"], row=1, col=col)
+fig.update_layout(height=360, showlegend=False, bargap=0.5)
+fig.update_xaxes(title="rezago")
+mostrar(fig)
+
+for etiqueta, datos_ac in (("nivel", valores), ("diferencia", diferenciada)):
+    r = acf(datos_ac, nlags=REZAGOS)
+    fuera = int(np.sum(np.abs(r[1:]) > banda))
+    print(f"{etiqueta:11s}: r_1 = {r[1]:+.3f} · {fuera} de {REZAGOS} "
+          f"rezagos fuera de la banda")
+```
+
+Diferenciar redujo la cantidad de rezagos significativos de 12 sobre 12 a 5 sobre
+12, pero **no eliminó la autocorrelación**: $r_1$ sigue por encima de 0,9. Vale la
+pena que el resultado no sea limpio, porque lo honesto es que una diferencia no
+siempre alcanza.
+
+Por qué diferenciar es el remedio habitual, en dos frases: una serie con tendencia
+tiene valores que se parecen a sus vecinos simplemente porque todos vienen de un
+nivel que se mueve despacio, y eso produce autocorrelación alta en todos los rezagos
+sin que haya nada específico que aprender; al trabajar con los **cambios** en vez de
+los niveles, ese efecto compartido desaparece y queda a la vista la dependencia
+propia de la serie.
+
+Que acá quede autocorrelación fuerte después de una diferencia indica que la serie
+es muy suave —la tendencia misma cambia de pendiente despacio—, de modo que los
+cambios también están correlacionados entre sí. Cuántas diferencias hacen falta es
+justamente la pregunta que el @sec-arima responde con pruebas formales en vez de a
+ojo.
 
 ## Capítulo 4 · Descomposición {#sec-soluciones-04}
 
@@ -525,6 +829,8 @@ en menos datos y en un solo lado.
 ### Ejercicio 3
 
 ```{python}
+#| label: tbl-sol-04-3
+#| tbl-cap: "Fuerzas de Q15481 calculadas en nivel y en logaritmo."
 s = cargar("Q15481")
 y, m = s.entrenamiento, s.periodo_estacional
 
@@ -581,6 +887,8 @@ que sirva para el método que uno tenía en mente. El fenómeno y la frecuencia 
 condiciones independientes.
 
 ```{python}
+#| label: fig-sol-04-4
+#| fig-cap: "Residuos de M47356 con ajuste robusto y sin él."
 s = cargar("M47356")
 y, m = s.entrenamiento, s.periodo_estacional
 
@@ -626,6 +934,8 @@ lo **confina**.
 ### Ejercicio 5
 
 ```{python}
+#| label: fig-sol-04-5
+#| fig-cap: "Componente estacional de M35927 con ventana angosta y con ventana ancha."
 s = cargar("M35927")
 y, m = s.entrenamiento, s.periodo_estacional
 
@@ -674,6 +984,8 @@ movió, y lo que no logra representar se va al residuo.
 ### Ejercicio 6
 
 ```{python}
+#| label: tbl-sol-04-6
+#| tbl-cap: "Prueba de Ljung-Box sobre los residuos de tres descomposiciones."
 filas = []
 for serie_id in ["M35927", "Q22252", "H242"]:
     s = cargar(serie_id)
@@ -739,6 +1051,8 @@ def fuerzas(y, m):
 ### Ejercicio 1
 
 ```{python}
+#| label: tbl-sol-05-1
+#| tbl-cap: "Fuerzas de tendencia y estacionalidad de las caminatas aleatorias del catálogo."
 referencia = metadatos().set_index("serie")
 
 filas = []
@@ -885,7 +1199,7 @@ así que el tiempo se multiplica por unas 98 veces.
 No medimos la serie completa acá porque el libro se compila en cada cambio y un
 capítulo no puede tardar minutos en una sola celda —que es, en pequeño, el mismo
 problema que hizo que el cálculo sobre las 100.000 series llevara 16 horas—. Si lo
-corrés, esperá un resultado del orden de la estimación, algo por encima: el costo
+corrés, espera un resultado del orden de la estimación, algo por encima: el costo
 real crece un poco más rápido que $n^2$ porque las series largas también degradan
 el uso de la memoria caché.
 
@@ -897,6 +1211,8 @@ aleatoria de largos.
 ### Ejercicio 5
 
 ```{python}
+#| label: tbl-sol-05-5
+#| tbl-cap: "Correlación entre descriptores en las series mensuales de M4."
 columnas = [
     "trend_strength", "seasonal_strength", "z_acf1",
     "z_entropy", "complexity_index",
@@ -980,6 +1296,8 @@ def mase_m4(real, pron, entrenamiento, m=1):
 ### Ejercicio 1
 
 ```{python}
+#| label: tbl-sol-07-1
+#| tbl-cap: "MAE dentro y fuera de la muestra en dos series de largo distinto."
 filas = []
 for serie_id in ["Q22252", "M35927"]:
     s = cargar(serie_id)
@@ -1061,6 +1379,8 @@ del todo.
 ### Ejercicio 3
 
 ```{python}
+#| label: tbl-sol-07-3
+#| tbl-cap: "Métricas de dos pronósticos absurdos y del naive de referencia."
 s = cargar("M35927")
 tr, te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
 
@@ -1098,6 +1418,8 @@ bueno.
 ### Ejercicio 4
 
 ```{python}
+#| label: tbl-sol-07-4
+#| tbl-cap: "Q15481 evaluada en diez puntos de corte distintos."
 s = cargar("Q15481")
 completa = s.completa.to_numpy()
 m, h = s.periodo_estacional, s.horizonte
@@ -1149,6 +1471,8 @@ corte que dé el resultado más lindo.
 ### Ejercicio 5
 
 ```{python}
+#| label: tbl-sol-07-5
+#| tbl-cap: "Cobertura empírica de los intervalos del 80 % y del 95 % sobre el catálogo."
 filas = []
 for z, nominal in [(1.28, 80), (1.96, 95)]:
     cubiertos = total = 0

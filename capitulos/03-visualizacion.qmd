@@ -1,7 +1,481 @@
+---
+resources:
+  - datos/cap04_estacionales.csv
+---
+
 # Visualización {#sec-visualizacion}
 
-Gráficos de línea, estacionales, de rezagos y de autocorrelación.
+```{python}
+#| echo: false
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
-::: {.callout-note appearance="simple"}
-Capítulo en preparación.
+from libro.datos import cargar, catalogo
+from libro.graficos import COLORES, mostrar
+```
+
+Antes de ajustar cualquier modelo hay que mirar la serie. No es un consejo de
+prudencia: es que ciertas cosas —un quiebre de nivel, un valor imposible, una
+estacionalidad que cambió de forma— se ven en dos segundos en un gráfico y no
+aparecen en ningún resumen numérico.
+
+@anscombe1973 lo demostró de la manera más contundente posible: construyó cuatro
+conjuntos de datos con la misma media, la misma varianza, la misma correlación y la
+misma recta de regresión, y cuatro dibujos completamente distintos. La moraleja
+vale igual para series de tiempo, y este capítulo son los cuatro gráficos que
+conviene hacer siempre.
+
+## El gráfico de línea {#sec-grafico-linea}
+
+El primero y el más importante: el valor contra el tiempo.
+
+```{python}
+#| label: fig-cuatro-series
+#| fig-cap: "Cuatro series del catálogo con comportamientos distintos. Cada panel muestra algo que ningún resumen numérico comunica."
+ejemplos = [
+    ("Q1915", "tendencia clara y sostenida"),
+    ("M35927", "estacionalidad marcada"),
+    ("M32692", "quiebre de nivel"),
+    ("Q15481", "amplitud que crece con el nivel"),
+]
+
+fig = make_subplots(rows=2, cols=2, subplot_titles=[t for _, t in ejemplos],
+                    vertical_spacing=0.13, horizontal_spacing=0.08)
+
+for i, (serie_id, _) in enumerate(ejemplos):
+    s = cargar(serie_id)
+    y = s.entrenamiento
+    fig.add_trace(go.Scatter(
+        x=y.index, y=y.values, mode="lines", name=s.id,
+        line=dict(color=COLORES["observado"], width=1.4),
+        hovertemplate="%{x|%b %Y}<br>%{y:,.0f}<extra>" + s.id + "</extra>",
+    ), row=i // 2 + 1, col=i % 2 + 1)
+
+fig.update_layout(height=560, showlegend=False)
+mostrar(fig)
+```
+
+Lo que hay que buscar son seis cosas, en orden de cuánto condicionan la elección
+del modelo:
+
+1. **Tendencia**: un movimiento de largo plazo hacia arriba o hacia abajo. Si hay,
+   cualquier método que no extrapole pendiente se va a quedar atrás.
+2. **Estacionalidad**: un patrón que se repite con período fijo y conocido.
+3. **Ciclo**: subidas y bajadas de duración variable, no fija.
+4. **Quiebres**: cambios de nivel o de pendiente que dividen la serie en dos
+   regímenes. Los datos anteriores al quiebre pueden ser inútiles, o peor que
+   inútiles.
+5. **Valores atípicos**: puntos aislados fuera de escala. Algunos son errores de
+   medición y otros son eventos reales; la distinción no es estadística, es de
+   conocimiento del dominio.
+6. **Cambios de varianza**: la amplitud de las fluctuaciones crece o se reduce con
+   el nivel. Es lo que decide entre descomposición aditiva y multiplicativa, como
+   vimos en el @sec-aditiva-multiplicativa.
+
+::: {.callout-note}
+## Estacionalidad y ciclo no son lo mismo
+
+La distinción importa porque tienen soluciones distintas. La estacionalidad tiene
+período conocido —doce meses, cuatro trimestres, veinticuatro horas— y por eso se
+puede modelar con términos que se repiten. El ciclo tiene duración variable: un
+ciclo económico dura entre dos y diez años, sin período fijo, y no se puede
+anticipar con la misma herramienta.
+
+En la práctica: si el patrón se repite exactamente cada $m$ observaciones, es
+estacionalidad; si sube y baja en plazos que cambian, es ciclo. @hyndman2021
+insiste en esta distinción porque confundirlas lleva a especificar mal el modelo.
+:::
+
+## El gráfico estacional {#sec-grafico-estacional}
+
+El gráfico de línea muestra el paso del tiempo. El estacional lo dobla sobre sí
+mismo: superpone un trazo por cada ciclo, de modo que las posiciones equivalentes
+—todos los eneros, todos los lunes— queden alineadas. Es el gráfico que propone
+@cleveland1993 para comparar perfiles repetidos.
+
+```{python}
+#| label: fig-estacional
+#| fig-cap: "Gráfico estacional de M35927: un trazo por año, con los meses alineados. Los trazos más oscuros son los años más recientes."
+serie = cargar("M35927")
+y = serie.entrenamiento
+m = serie.periodo_estacional
+
+tabla = pd.DataFrame({
+    "y": y.to_numpy(),
+    "mes": y.index.month,
+    "anio": y.index.year,
+})
+anios = sorted(tabla["anio"].unique())
+
+fig = go.Figure()
+for k, anio in enumerate(anios):
+    g = tabla[tabla["anio"] == anio]
+    opacidad = 0.25 + 0.75 * k / max(len(anios) - 1, 1)
+    fig.add_trace(go.Scatter(
+        x=g["mes"], y=g["y"], mode="lines", name=str(anio),
+        line=dict(width=1.2, color=f"rgba(31,78,121,{opacidad:.2f})"),
+        hovertemplate="mes %{x}<br>%{y:,.0f}<extra>" + str(anio) + "</extra>",
+    ))
+
+fig.update_layout(height=460, showlegend=False)
+fig.update_xaxes(title="mes del año", dtick=1)
+mostrar(fig, titulo_y="unidades")
+```
+
+Y acá aparece una trampa que conviene conocer. Los trazos están apilados a alturas
+distintas, y esa separación vertical no es estacionalidad: es la tendencia. Se
+comprueba comparando la variación **entre** meses con la variación **dentro** de
+cada mes a lo largo de los años:
+
+```{python}
+#| label: tbl-entre-dentro
+#| tbl-cap: "Promedio y desviación estándar de cada mes de M35927 a lo largo de 28 años."
+por_mes = tabla.groupby("mes")["y"].agg(promedio="mean", desvio="std")
+
+rango_entre = por_mes["promedio"].max() - por_mes["promedio"].min()
+desvio_dentro = por_mes["desvio"].mean()
+
+print(f"rango entre los promedios mensuales : {rango_entre:.0f} unidades")
+print(f"desvío típico dentro de cada mes    : {desvio_dentro:.0f} unidades")
+
+por_mes.round(1)
+```
+
+El rango entre los promedios mensuales
+(`{python} f"{rango_entre:.0f}"` unidades) es **menor** que la variación dentro de
+cada mes (`{python} f"{desvio_dentro:.0f}"` unidades). Dicho de otro modo: si uno
+mira el gráfico estacional de una serie con tendencia, lo que ve es sobre todo la
+tendencia. Para que el gráfico diga algo sobre estacionalidad hay que quitársela
+primero, con la descomposición del @sec-descomposicion:
+
+```{python}
+#| label: fig-estacional-sin-tendencia
+#| fig-cap: "El mismo gráfico estacional después de quitar la tendencia con STL. La línea gruesa es el perfil promedio."
+from statsmodels.tsa.seasonal import STL
+
+descomposicion = STL(y, period=m, robust=True).fit()
+sin_tendencia = pd.Series(y.to_numpy() - descomposicion.trend, index=y.index)
+
+tabla_st = pd.DataFrame({
+    "y": sin_tendencia.to_numpy(),
+    "mes": y.index.month,
+    "anio": y.index.year,
+})
+
+fig = go.Figure()
+for k, anio in enumerate(anios):
+    g = tabla_st[tabla_st["anio"] == anio]
+    opacidad = 0.2 + 0.7 * k / max(len(anios) - 1, 1)
+    fig.add_trace(go.Scatter(
+        x=g["mes"], y=g["y"], mode="lines", name=str(anio),
+        line=dict(width=1.1, color=f"rgba(31,78,121,{opacidad:.2f})"),
+        hovertemplate="mes %{x}<br>%{y:+,.0f}<extra>" + str(anio) + "</extra>",
+    ))
+fig.add_trace(go.Scatter(
+    x=list(range(1, 13)),
+    y=tabla_st.groupby("mes")["y"].mean().to_numpy(),
+    mode="lines+markers", name="promedio",
+    line=dict(color=COLORES["prueba"], width=3),
+    hovertemplate="mes %{x}<br>promedio %{y:+,.0f}<extra></extra>",
+))
+fig.update_layout(height=460, showlegend=False)
+fig.update_xaxes(title="mes del año", dtick=1)
+mostrar(fig, titulo_y="desvío respecto de la tendencia")
+```
+
+Con la tendencia fuera, el ciclo se vuelve legible y los trazos se apilan
+alrededor del cero.
+
+## Autocorrelación {#sec-autocorrelacion}
+
+Los gráficos anteriores requieren que alguien mire. La autocorrelación convierte la
+misma información en números, lo que permite automatizarla; es lo que hace posible
+el @sec-caracteristicas.
+
+La **autocorrelación** (*autocorrelation*) de rezago $k$ mide cuánto se parece la
+serie a sí misma desplazada $k$ posiciones. Con $T$ observaciones y media
+$\bar{y}$:
+
+$$
+r_k = \frac{\displaystyle\sum_{t=k+1}^{T} (y_t - \bar{y})\,(y_{t-k} - \bar{y})}
+           {\displaystyle\sum_{t=1}^{T} (y_t - \bar{y})^2}
+$$ {#eq-autocorrelacion}
+
+Es un coeficiente de correlación entre la serie y su propio rezago, así que va de
+$-1$ a $1$, y por construcción $r_0 = 1$.
+
+Para saber si un $r_k$ es distinto de cero hace falta una referencia. Si la serie
+fuera **ruido blanco** (*white noise*) —observaciones independientes con la misma
+distribución—, cada $r_k$ se distribuiría aproximadamente como
+
+$$
+r_k \;\sim\; \mathcal{N}\!\left(0,\; \tfrac{1}{T}\right)
+$$ {#eq-distribucion-rk}
+
+de donde sale la banda de significación que se dibuja en todo correlograma:
+
+$$
+\pm\, \frac{1{,}96}{\sqrt{T}}
+$$ {#eq-banda}
+
+Un $r_k$ fuera de esa banda es evidencia de estructura. Conviene recordar que la
+@eq-banda supone ruido blanco y que, con veinte rezagos, aproximadamente uno va a
+salirse por azar aunque la serie sea ruido: es la lógica de las comparaciones
+múltiples. Por eso, cuando la pregunta es "¿hay *alguna* estructura?", es preferible
+la prueba conjunta de @ljungbox1978 que aparece en el @sec-residuo.
+
+El gráfico de $r_k$ contra $k$ se llama **correlograma**:
+
+```{python}
+#| label: fig-correlogramas
+#| fig-cap: "Correlogramas de tres series con estructura distinta. Las líneas punteadas son la banda de la @eq-banda."
+from statsmodels.tsa.stattools import acf
+
+comparadas = [
+    ("Q1915", "tendencia fuerte"),
+    ("M35927", "estacionalidad marcada"),
+    ("D2039", "sin estructura visible"),
+]
+REZAGOS = 24
+
+fig = make_subplots(rows=1, cols=3, subplot_titles=[t for _, t in comparadas],
+                    shared_yaxes=True, horizontal_spacing=0.05)
+
+for i, (serie_id, _) in enumerate(comparadas, start=1):
+    valores = cargar(serie_id).entrenamiento.to_numpy()
+    r = acf(valores, nlags=REZAGOS)
+    banda = 1.96 / np.sqrt(len(valores))
+
+    fig.add_trace(go.Bar(
+        x=list(range(1, REZAGOS + 1)), y=r[1:],
+        marker_color=COLORES["observado"], name=serie_id,
+        hovertemplate="rezago %{x}<br>r = %{y:.3f}<extra></extra>",
+    ), row=1, col=i)
+    for signo in (1, -1):
+        fig.add_hline(y=signo * banda, line_dash="dot", line_width=1,
+                      line_color=COLORES["prueba"], row=1, col=i)
+
+fig.update_layout(height=380, showlegend=False, bargap=0.5)
+fig.update_xaxes(title="rezago")
+mostrar(fig, titulo_y="autocorrelación")
+```
+
+```{python}
+#| label: tbl-firmas-acf
+#| tbl-cap: "Autocorrelación al rezago 1, al rezago estacional, y cantidad de rezagos fuera de la banda."
+filas = []
+for serie_id, etiqueta in comparadas:
+    s = cargar(serie_id)
+    valores = s.entrenamiento.to_numpy()
+    r = acf(valores, nlags=REZAGOS)
+    banda = 1.96 / np.sqrt(len(valores))
+    filas.append({
+        "serie": s.id,
+        "comportamiento": etiqueta,
+        "m": s.periodo_estacional,
+        "r_1": r[1],
+        "r_m": r[s.periodo_estacional] if s.periodo_estacional > 1 else np.nan,
+        "fuera de banda": int(np.sum(np.abs(r[1:]) > banda)),
+        "banda": banda,
+    })
+
+pd.DataFrame(filas).set_index("serie").round(3)
+```
+
+Las tres firmas son reconocibles, y aprender a leerlas es la mitad del trabajo del
+@sec-arima.
+
+**Tendencia**: los $r_k$ arrancan cerca de 1 y decaen despacio. Como los valores
+vecinos son parecidos y la serie se mueve en una dirección, la correlación persiste
+durante muchos rezagos. Los 24 rezagos salen de la banda.
+
+**Estacionalidad**: hay picos en los múltiplos del período. En `M35927`, con
+$m = 12$, la autocorrelación al rezago 12 sigue siendo altísima.
+
+**Sin estructura**: pocos rezagos salen de la banda y no forman ningún patrón. En
+`D2039` la autocorrelación cae de golpe después del primer rezago.
+
+## El gráfico de rezagos {#sec-grafico-rezagos}
+
+El correlograma resume cada rezago en un número. El **gráfico de rezagos** (*lag
+plot*) muestra la nube completa: $y_t$ contra $y_{t-k}$. Sirve para dos cosas que
+el correlograma no puede: ver si la relación es lineal —porque la
+@eq-autocorrelacion solo mide asociación lineal— y detectar valores atípicos.
+
+```{python}
+#| label: fig-rezagos
+#| fig-cap: "Gráfico de rezagos de M35927 para cuatro rezagos. En el rezago 12 los puntos vuelven a alinearse: es la estacionalidad."
+y_serie = pd.Series(y.to_numpy())
+REZAGOS_GRAFICO = (1, 3, 6, 12)
+
+fig = make_subplots(rows=1, cols=4, shared_yaxes=True, horizontal_spacing=0.03,
+                    subplot_titles=[f"k = {k}" for k in REZAGOS_GRAFICO])
+
+for i, k in enumerate(REZAGOS_GRAFICO, start=1):
+    rezagada = y_serie.shift(k)
+    correlacion = y_serie.corr(rezagada)
+    fig.add_trace(go.Scatter(
+        x=rezagada, y=y_serie, mode="markers",
+        marker=dict(size=3, opacity=0.5, color=COLORES["observado"]),
+        name=f"k={k}",
+        hovertemplate="y(t−k) %{x:,.0f}<br>y(t) %{y:,.0f}<extra></extra>",
+    ), row=1, col=i)
+    fig.layout.annotations[i - 1].text = f"k = {k} · r = {correlacion:.2f}"
+
+fig.update_layout(height=340, showlegend=False)
+mostrar(fig)
+```
+
+En el rezago 12 la nube se vuelve a alinear. Es lo mismo que dice el pico del
+correlograma, visto de otra manera, y con una ventaja: si la relación fuera curva,
+o si unos pocos puntos sostuvieran toda la correlación, acá se vería y en el
+correlograma no.
+
+## La autocorrelación parcial {#sec-pacf}
+
+Hay una segunda medida que aparece siempre al lado de la anterior. La
+autocorrelación de rezago 2 de una serie con tendencia es alta en buena parte
+*porque* la de rezago 1 lo es: el efecto se propaga. La **autocorrelación parcial**
+(*partial autocorrelation*) $\phi_{kk}$ mide la asociación entre $y_t$ y $y_{t-k}$
+**descontando** el efecto de los rezagos intermedios. Formalmente es el último
+coeficiente de la regresión
+
+$$
+y_t = \phi_{k1}\, y_{t-1} + \phi_{k2}\, y_{t-2} + \cdots + \phi_{kk}\, y_{t-k}
+      + \varepsilon_t
+$$ {#eq-pacf}
+
+```{python}
+#| label: fig-pacf
+#| fig-cap: "Autocorrelación y autocorrelación parcial de Q1915. La parcial se corta después del primer rezago."
+from statsmodels.tsa.stattools import pacf
+
+s = cargar("Q1915")
+valores = s.entrenamiento.to_numpy()
+REZAGOS_PACF = 16
+r = acf(valores, nlags=REZAGOS_PACF)
+p = pacf(valores, nlags=REZAGOS_PACF)
+banda = 1.96 / np.sqrt(len(valores))
+
+fig = make_subplots(rows=1, cols=2, shared_yaxes=True,
+                    subplot_titles=["autocorrelación", "autocorrelación parcial"])
+for col, serie_ac in ((1, r), (2, p)):
+    fig.add_trace(go.Bar(
+        x=list(range(1, REZAGOS_PACF + 1)), y=serie_ac[1:],
+        marker_color=COLORES["observado"],
+        hovertemplate="rezago %{x}<br>%{y:.3f}<extra></extra>",
+    ), row=1, col=col)
+    for signo in (1, -1):
+        fig.add_hline(y=signo * banda, line_dash="dot", line_width=1,
+                      line_color=COLORES["prueba"], row=1, col=col)
+
+fig.update_layout(height=360, showlegend=False, bargap=0.5)
+fig.update_xaxes(title="rezago")
+mostrar(fig)
+```
+
+La diferencia es notable: la autocorrelación decae despacio y la parcial se corta
+después del primer rezago. La lectura es que **toda la dependencia de esta serie
+pasa por el valor inmediatamente anterior**; los rezagos más lejanos no agregan
+nada propio.
+
+Ese par de formas —autocorrelación que decae, parcial que se corta en el rezago
+$p$— es la firma de un proceso autorregresivo de orden $p$, y es exactamente el
+criterio de identificación que propusieron @boxjenkins1970 y que el @sec-arima usa
+en detalle.
+
+## Qué mirar, en orden {#sec-checklist}
+
+Un procedimiento corto para una serie nueva:
+
+1. **Gráfico de línea.** ¿Tendencia? ¿Quiebres? ¿Valores imposibles? ¿La amplitud
+   crece con el nivel?
+2. **Gráfico estacional**, quitando la tendencia si hay. ¿El ciclo tiene la misma
+   forma todos los años, o cambió?
+3. **Correlograma.** ¿Decae despacio? ¿Hay picos estacionales? ¿Cuántos rezagos
+   salen de la banda?
+4. **Gráfico de rezagos** en el rezago 1 y en el estacional. ¿La relación es
+   lineal? ¿Hay puntos que sostienen la correlación por sí solos?
+
+Cuatro gráficos, dos minutos, y la mayoría de las decisiones de modelado quedan
+tomadas. Lo que sigue en la Parte I —descomposición, características, métodos— es
+en buena medida una manera de hacer esto mismo de forma automática y a escala.
+
+## Pruébalo {#sec-probalo-03}
+
+La celda que sigue calcula la autocorrelación en tu navegador. Cambia la serie y la
+cantidad de rezagos.
+
+Vale la pena mirar dos cosas: cuántos rezagos salen de la banda en la serie de
+estacionalidad débil comparada con la de estacionalidad marcada, y qué le pasa al
+correlograma de la serie con quiebre de nivel, que tiene autocorrelación alta sin
+tener una estacionalidad limpia.
+
+```{pyodide}
+#| caption: Correlograma — cambia `cual` y `rezagos`
+#| autorun: true
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from statsmodels.tsa.stattools import acf
+
+datos = pd.read_csv("datos/cap04_estacionales.csv", parse_dates=["ds"])
+
+# "estacionalidad marcada", "estacionalidad débil", "amplitud creciente",
+# "quiebre de nivel"
+cual = "estacionalidad marcada"
+rezagos = 24
+
+g = datos[(datos["etiqueta"] == cual) & (datos["split"] == "entrenamiento")]
+y = g["y"].to_numpy()
+
+r = acf(y, nlags=rezagos)
+banda = 1.96 / np.sqrt(len(y))
+fuera = int(np.sum(np.abs(r[1:]) > banda))
+
+fig, ax = plt.subplots(figsize=(9, 3.4))
+ax.bar(range(1, rezagos + 1), r[1:], color="#1f4e79", width=0.5)
+ax.axhline(banda, ls=":", color="#c0504d")
+ax.axhline(-banda, ls=":", color="#c0504d")
+ax.axhline(0, color="black", lw=0.6)
+ax.set_xlabel("rezago")
+ax.set_ylabel("autocorrelación")
+ax.set_title(f"{cual}: {fuera} de {rezagos} rezagos fuera de la banda "
+             f"±{banda:.3f}")
+fig.tight_layout()
+plt.show()
+```
+
+## Ejercicios
+
+Las soluciones están en el @sec-soluciones-03.
+
+**1.** Grafica la serie `Y21290` y describe en dos frases qué ves. Después mira qué
+fenómeno le asigna el catálogo. ¿Coincide con tu descripción?
+
+**2.** Construye el gráfico estacional de `Q22252` con un trazo por año. ¿Se puede
+ver la forma del ciclo, o la tendencia domina? Si domina, repite el gráfico después
+de quitarle la tendencia.
+
+**3.** Calcula la autocorrelación de `H242` para 48 rezagos y grafica el
+correlograma. ¿En qué rezagos están los picos? ¿Qué dice eso sobre el período
+estacional de la serie, y coincide con el que declara M4?
+
+**4.** Usando la @eq-banda, calcula cuántos rezagos de 20 esperarías que salgan de
+la banda por azar si la serie fuera ruido blanco. Después genera ruido blanco con
+`np.random.normal`, calcula su correlograma y cuenta cuántos salen. Repite el
+experimento diez veces. ¿El promedio se parece a lo que esperabas?
+
+**5.** Grafica $y_t$ contra $y_{t-1}$ para `M47356`, la serie de valores atípicos.
+¿Se ven los atípicos en el gráfico de rezagos? ¿Cuánto cambia $r_1$ si los quitas?
+
+**6.** Compara el correlograma de `Q1915` con el de su serie diferenciada
+(`np.diff`). ¿Qué le pasó a la autocorrelación? Explica en dos frases por qué
+diferenciar es el remedio habitual para una serie con tendencia.
+
+## Referencias {.unnumbered}
+
+::: {#refs}
 :::
