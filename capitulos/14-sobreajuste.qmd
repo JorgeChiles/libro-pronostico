@@ -1,7 +1,556 @@
+---
+resources:
+  - datos/cap04_estacionales.csv
+---
+
 # Sobreajuste {#sec-sobreajuste}
 
-El compromiso sesgo-varianza, capacidad y regularización.
+```{python}
+#| echo: false
+import warnings
 
-::: {.callout-note appearance="simple"}
-Capítulo en preparación.
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+
+from libro.datos import cargar
+from libro.graficos import COLORES, mostrar
+
+warnings.simplefilter("ignore")
+
+
+def smape(real, pron):
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    return 200 * np.mean(np.abs(real - pron) / (np.abs(real) + np.abs(pron)))
+```
+
+El @sec-r2 mostró que el $R^2$ sube al agregar predictores de ruido puro mientras el error
+de pronóstico empeora. Este capítulo explica por qué pasa eso, cómo se llama y qué hacer al
+respecto.
+
+Es el capítulo más importante de la Parte II. Todo el resto —qué modelo elegir, cómo
+validar, cuántas características construir— son formas distintas de manejar el mismo
+compromiso.
+
+## La descomposición del error {#sec-descomposicion-error}
+
+Supongamos que los datos vienen de $y = g(x) + \varepsilon$ con
+$\operatorname{Var}(\varepsilon) = \sigma^2$, y que $\hat{f}$ es el modelo estimado a partir
+de una muestra. El error cuadrático esperado en un punto $x$ se descompone en tres partes:
+
+$$
+\mathbb{E}\left[\left(y - \hat{f}(x)\right)^2\right]
+= \underbrace{\left(\mathbb{E}[\hat{f}(x)] - g(x)\right)^2}_{\text{sesgo}^2}
++ \underbrace{\operatorname{Var}\!\left(\hat{f}(x)\right)}_{\text{varianza}}
++ \underbrace{\sigma^2}_{\text{irreducible}}
+$$ {#eq-sesgo-varianza}
+
+Esta descomposición aparece formulada así en @geman1992, en un artículo que se preguntaba
+por qué las redes neuronales de la época generalizaban mal, y es el esqueleto del
+tratamiento moderno del tema [@hastie2009].
+
+Los tres términos tienen lectura concreta.
+
+**El sesgo** es cuánto se equivoca el modelo *en promedio sobre todas las muestras
+posibles*. Un modelo demasiado rígido tiene sesgo alto: por más datos que reciba, no puede
+representar la forma verdadera.
+
+**La varianza** es cuánto cambia el modelo si se lo estima con otra muestra. Un modelo
+demasiado flexible tiene varianza alta: se acomoda a las particularidades de los datos que
+vio, y con otra muestra habría dicho algo distinto.
+
+**El término irreducible** es el ruido. Ningún modelo lo puede eliminar y es el piso del
+error alcanzable. En pronóstico ese piso es alto: es lo que el @sec-que-es-pronosticar midió
+al mostrar que en las series sin estructura ningún método le gana al naive.
+
+La @eq-sesgo-varianza tiene una consecuencia que organiza el capítulo: **sesgo y varianza se
+mueven en direcciones opuestas cuando se cambia la flexibilidad del modelo**. No se pueden
+minimizar los dos a la vez; hay un punto intermedio que minimiza la suma.
+
+## Capacidad {#sec-capacidad}
+
+La **capacidad** de un modelo es cuántas formas distintas puede representar: el tamaño del
+conjunto $\mathcal{F}$ de la @eq-perdida. Subir la capacidad baja el sesgo y sube la
+varianza.
+
+La manera más clara de verlo es con polinomios de grado creciente ajustados al índice
+temporal, que es la @eq-tendencia del @sec-tendencia-predictor con más términos:
+
+$$
+y_t = \beta_0 + \beta_1 t + \beta_2 t^2 + \cdots + \beta_G t^G + \varepsilon_t
+$$ {#eq-polinomio}
+
+El grado $G$ es la capacidad. Con $G = 1$ es una recta; con $G$ grande, una curva que puede
+pasar por casi cualquier conjunto de puntos.
+
+```{python}
+#| label: tbl-grados
+#| tbl-cap: "Error de la @eq-polinomio dentro y fuera de la muestra, sobre M39292 partida al 70 %."
+from sklearn.linear_model import LinearRegression
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import PolynomialFeatures
+
+serie = cargar("M39292")   # tendencia limpia, sin quiebres
+y_completa = serie.completa.to_numpy()
+corte = int(len(y_completa) * 0.7)
+y_tr, y_te = y_completa[:corte], y_completa[corte:]
+
+# El índice se escala por el corte para que las potencias no desborden.
+t_tr = (np.arange(corte) / corte).reshape(-1, 1)
+t_te = (np.arange(corte, len(y_completa)) / corte).reshape(-1, 1)
+
+
+def rmse(real, pron):
+    return float(np.sqrt(np.mean((np.asarray(real) - np.asarray(pron)) ** 2)))
+
+
+filas = []
+for grado in (1, 2, 3, 5, 8, 12, 15):
+    modelo = make_pipeline(PolynomialFeatures(grado), LinearRegression()).fit(t_tr, y_tr)
+    filas.append({
+        "grado": grado,
+        "parámetros": grado + 1,
+        "RMSE entrenamiento": rmse(y_tr, modelo.predict(t_tr)),
+        "RMSE prueba": rmse(y_te, modelo.predict(t_te)),
+    })
+
+pd.DataFrame(filas).set_index("grado").round(1)
+```
+
+El patrón es el sobreajuste en estado puro: **el error de entrenamiento baja de forma
+monótona y el de prueba se descontrola**. De grado 1 a grado 15 el error de entrenamiento
+baja de 18,4 a 5,5 —lo mejora más de tres veces— y el de prueba pasa de 88 a 743.000: cuatro
+órdenes de magnitud peor.
+
+Elegida la serie a propósito: M39292 tiene tendencia limpia y ningún quiebre, así que todo lo
+que aparece en la columna de prueba es atribuible al modelo y no a un evento que ninguna
+capacidad podía anticipar. El ejercicio 1 muestra qué pasa cuando la serie sí tiene un
+quiebre.
+
+```{python}
+#| label: fig-grados
+#| fig-cap: "Tres polinomios ajustados a M39292. El de grado 12 pasa muy cerca de los datos de entrenamiento y se dispara fuera de ellos. El eje está recortado."
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=np.arange(corte), y=y_tr, mode="lines", name="entrenamiento",
+    line=dict(color=COLORES["observado"], width=2),
+))
+fig.add_trace(go.Scatter(
+    x=np.arange(corte, len(y_completa)), y=y_te, mode="lines",
+    name="observado (prueba)",
+    line=dict(color=COLORES["prueba"], width=2, dash="dot"),
+))
+todos = (np.arange(len(y_completa)) / corte).reshape(-1, 1)
+for grado in (1, 3, 12):
+    modelo = make_pipeline(PolynomialFeatures(grado), LinearRegression()).fit(t_tr, y_tr)
+    fig.add_trace(go.Scatter(
+        x=np.arange(len(y_completa)), y=modelo.predict(todos), mode="lines",
+        name=f"grado {grado}", line=dict(width=1.8),
+    ))
+
+fig.add_vline(x=corte, line_dash="dot", line_width=1, line_color=COLORES["auxiliar"])
+fig.update_yaxes(range=[0, 1.6 * y_completa.max()])
+fig.update_xaxes(title="período")
+mostrar(fig, alto=440, titulo_y="unidades")
+```
+
+### La varianza, medida {#sec-varianza-medida}
+
+El término de varianza de la @eq-sesgo-varianza se puede estimar directamente: se ajusta el
+mismo modelo a muchas submuestras y se mira cuánto varía su predicción en un punto fijo.
+
+```{python}
+#| label: tbl-varianza
+#| tbl-cap: "Predicción de la @eq-polinomio un 5 % más allá del final de la serie, sobre 30 submuestras del 70 %. La desviación entre corridas es el término de varianza."
+generador = np.random.default_rng(0)
+y_muestra = cargar("M35927").entrenamiento.to_numpy()
+punto = np.array([[1.05]])          # 5 % más allá del final
+
+filas = []
+for grado in (1, 3, 10):
+    predicciones = []
+    for _ in range(30):
+        indices = np.sort(
+            generador.choice(
+                len(y_muestra), size=int(len(y_muestra) * 0.7), replace=False
+            )
+        )
+        modelo = make_pipeline(PolynomialFeatures(grado), LinearRegression()).fit(
+            (indices / len(y_muestra)).reshape(-1, 1), y_muestra[indices]
+        )
+        predicciones.append(float(modelo.predict(punto).item()))
+
+    filas.append({
+        "grado": grado,
+        "predicción media": np.mean(predicciones),
+        "desviación entre corridas": np.std(predicciones),
+    })
+
+pd.DataFrame(filas).set_index("grado").round(1)
+```
+
+Con grado 1 la predicción es prácticamente la misma en las treinta corridas; con grado 10
+varía en decenas de unidades. **El modelo de grado 10 no tiene una respuesta: tiene una
+respuesta por muestra.** Eso es varianza, y es la mitad del problema que describe la
+@eq-sesgo-varianza.
+
+## Mueve el grado {#sec-widget-14}
+
+El widget que sigue tiene el deslizador del grado del polinomio. Elige una serie, súbelo y
+mira **separarse las dos curvas de error** del panel de abajo.
+
+Tres cosas que vale la pena buscar:
+
+- Con grado 1 el error de entrenamiento y el de prueba son parecidos: el modelo tiene sesgo
+  pero casi no tiene varianza.
+- A partir de cierto grado el de entrenamiento sigue bajando y el de prueba empieza a
+  subir. Ese punto es el óptimo, y **se lo encuentra mirando el error de prueba, no el de
+  entrenamiento**.
+- Mover el corte de entrenamiento cambia el grado óptimo. Con más datos se puede sostener
+  más capacidad, que es exactamente lo que dice el término de varianza.
+
+```{shinylive-python}
+#| standalone: true
+#| viewerHeight: 840
+#| components: [viewer]
+
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from shiny import App, reactive, render, ui
+from sklearn.linear_model import LinearRegression
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import PolynomialFeatures
+
+AQUI = Path(__file__).parent
+datos = pd.read_csv(AQUI / "cap04_estacionales.csv", parse_dates=["ds"])
+ETIQUETAS = list(dict.fromkeys(datos["etiqueta"]))
+
+app_ui = ui.page_fluid(
+    ui.layout_columns(
+        ui.input_select("serie", "Serie", ETIQUETAS, selected=ETIQUETAS[0]),
+        ui.input_slider("grado", "Grado del polinomio", 1, 20, 3),
+        ui.input_slider("corte", "Corte de entrenamiento (%)", 50, 90, 70, step=5),
+        col_widths=[4, 4, 4],
+    ),
+    ui.output_ui("resumen"),
+    ui.output_plot("grafico", height="620px"),
+)
+
+
+def servidor(input, output, session):
+
+    @reactive.calc
+    def partes():
+        g = datos[datos["etiqueta"] == input.serie()].sort_values("ds")
+        y = g["y"].to_numpy()
+        return y, int(len(y) * input.corte() / 100)
+
+    @reactive.calc
+    def curvas():
+        """RMSE de entrenamiento y de prueba para cada grado hasta el elegido."""
+        y, corte = partes()
+        t_tr = (np.arange(corte) / corte).reshape(-1, 1)
+        t_te = (np.arange(corte, len(y)) / corte).reshape(-1, 1)
+
+        grados, err_tr, err_te = [], [], []
+        for g in range(1, int(input.grado()) + 1):
+            modelo = make_pipeline(
+                PolynomialFeatures(g), LinearRegression()
+            ).fit(t_tr, y[:corte])
+            grados.append(g)
+            err_tr.append(
+                float(np.sqrt(np.mean((y[:corte] - modelo.predict(t_tr)) ** 2)))
+            )
+            err_te.append(
+                float(np.sqrt(np.mean((y[corte:] - modelo.predict(t_te)) ** 2)))
+            )
+        return grados, err_tr, err_te
+
+    @render.ui
+    def resumen():
+        grados, err_tr, err_te = curvas()
+        mejor = grados[int(np.argmin(err_te))]
+        return ui.markdown(
+            f"Grado **{grados[-1]}**  ·  RMSE entrenamiento **{err_tr[-1]:,.1f}**  ·  "
+            f"RMSE prueba **{err_te[-1]:,.1f}**  ·  "
+            f"el mejor grado hasta acá es **{mejor}**"
+        )
+
+    @render.plot
+    def grafico():
+        y, corte = partes()
+        grados, err_tr, err_te = curvas()
+        grado = int(input.grado())
+
+        t_tr = (np.arange(corte) / corte).reshape(-1, 1)
+        todos = (np.arange(len(y)) / corte).reshape(-1, 1)
+        modelo = make_pipeline(
+            PolynomialFeatures(grado), LinearRegression()
+        ).fit(t_tr, y[:corte])
+
+        fig, (arriba, abajo) = plt.subplots(2, 1, figsize=(9, 6.8))
+
+        arriba.plot(np.arange(corte), y[:corte], lw=1.6, color="#1f4e79",
+                    label="entrenamiento")
+        arriba.plot(np.arange(corte, len(y)), y[corte:], lw=1.8, ls="--",
+                    color="#c0504d", label="prueba")
+        arriba.plot(np.arange(len(y)), modelo.predict(todos), lw=2,
+                    color="#2e8b57", label=f"polinomio de grado {grado}")
+        arriba.axvline(corte, color="gray", lw=1, ls=":")
+        margen = 0.6 * (y.max() - y.min())
+        arriba.set_ylim(y.min() - margen, y.max() + margen)
+        arriba.legend(loc="upper left", fontsize=8)
+        arriba.set_title("serie y ajuste (eje recortado)", fontsize=9)
+
+        abajo.plot(grados, err_tr, lw=2, marker="o", ms=4, color="#1f4e79",
+                   label="RMSE entrenamiento")
+        abajo.plot(grados, err_te, lw=2, marker="o", ms=4, color="#c0504d",
+                   label="RMSE prueba")
+        abajo.set_yscale("log")
+        abajo.set_xlabel("grado del polinomio")
+        abajo.legend(fontsize=8)
+        abajo.set_title("el error de prueba se separa del de entrenamiento",
+                        fontsize=9)
+
+        fig.tight_layout()
+        return fig
+
+
+app = App(app_ui, servidor)
+
+## file: cap04_estacionales.csv
+{{< include datos/cap04_estacionales.csv >}}
+```
+
+## Regularización {#sec-regularizacion}
+
+Bajar la capacidad quitando parámetros es una opción cruda: obliga a decidir de antemano
+cuáles sacar. La **regularización** hace algo más sutil: deja todos los parámetros y
+penaliza que sean grandes.
+
+En **Ridge**, propuesta por @hoerl1970 para tratar predictores correlacionados, la
+penalización es la suma de los cuadrados:
+
+$$
+\hat{\beta}^{\text{ridge}} = \arg\min_{\beta}
+\left\{ \sum_{i=1}^{n} \left( y_i - \mathbf{x}_i^{\top}\beta \right)^2
++ \lambda \sum_{j=1}^{k} \beta_j^2 \right\}
+$$ {#eq-ridge}
+
+En **Lasso** [@tibshirani1996], la suma de los valores absolutos:
+
+$$
+\hat{\beta}^{\text{lasso}} = \arg\min_{\beta}
+\left\{ \sum_{i=1}^{n} \left( y_i - \mathbf{x}_i^{\top}\beta \right)^2
++ \lambda \sum_{j=1}^{k} \left| \beta_j \right| \right\}
+$$ {#eq-lasso}
+
+El cambio de $\beta^2$ a $|\beta|$ parece menor y tiene una consecuencia grande: **Lasso
+lleva coeficientes exactamente a cero** y Ridge solo los encoge. Lasso selecciona
+variables; Ridge las conserva todas con menos peso.
+
+En los dos casos $\lambda$ controla la fuerza: con $\lambda = 0$ se recupera mínimos
+cuadrados y con $\lambda \to \infty$ todos los coeficientes van a cero. Es un dial de
+capacidad continuo y, por lo tanto, un dial sobre el compromiso de la @eq-sesgo-varianza.
+
+::: {.callout-warning}
+## La regularización exige estandarizar
+
+Las ecuaciones @eq-ridge y @eq-lasso penalizan la magnitud de los coeficientes, y esa
+magnitud depende de las unidades de cada columna. Un predictor medido en miles tiene
+coeficientes chicos y queda casi sin penalizar; otro medido en unidades tiene coeficientes
+grandes y se lleva todo el castigo.
+
+La consecuencia es directa: **sin estandarizar, $\lambda$ no significa nada**. Al probar la
+regularización sin escalar sobre una serie de valores del orden de 10.000, un $\lambda$ de
+100 no cambia absolutamente nada, porque es despreciable frente a la escala de la suma de
+cuadrados.
+
+Es el complemento del @sec-escalado: allá vimos que estandarizar no importa cuando todas
+las columnas son rezagos de la misma variable; acá importa siempre, porque lo que se
+compara no son las columnas entre sí sino cada coeficiente contra la penalización.
+:::
+
+```{python}
+#| label: tbl-regularizacion
+#| tbl-cap: "Ridge y Lasso sobre una tabla supervisada de 24 rezagos, con estandarización previa. La última columna muestra la selección que hace Lasso."
+from sklearn.linear_model import Lasso, Ridge
+from sklearn.preprocessing import StandardScaler
+
+
+def tabla_supervisada(y, p):
+    y = np.asarray(y, dtype=float)
+    X = np.array([y[i - p:i] for i in range(p, len(y))])
+    return X, np.array([y[i] for i in range(p, len(y))])
+
+
+def pronosticar_recursivo(modelo, y, p, h):
+    historia = list(y)
+    salida = []
+    for _ in range(h):
+        valor = float(modelo.predict([historia[-p:]])[0])
+        salida.append(valor)
+        historia.append(valor)
+    return np.array(salida)
+
+
+s = cargar("M35927")
+y_entrena, y_prueba, h = s.entrenamiento.to_numpy(), s.prueba.to_numpy(), s.horizonte
+P = 24
+X, objetivo = tabla_supervisada(y_entrena, P)
+
+candidatos = [
+    ("sin regularizar", LinearRegression()),
+    ("Ridge, λ = 0,1", Ridge(alpha=0.1)),
+    ("Ridge, λ = 1", Ridge(alpha=1.0)),
+    ("Ridge, λ = 10", Ridge(alpha=10.0)),
+    ("Ridge, λ = 100", Ridge(alpha=100.0)),
+    ("Lasso, λ = 0,1", Lasso(alpha=0.1, max_iter=50_000)),
+    ("Lasso, λ = 1", Lasso(alpha=1.0, max_iter=50_000)),
+    ("Lasso, λ = 5", Lasso(alpha=5.0, max_iter=50_000)),
+]
+
+filas = []
+for nombre, estimador in candidatos:
+    modelo = make_pipeline(StandardScaler(), estimador).fit(X, objetivo)
+    coeficientes = modelo[-1].coef_
+    filas.append({
+        "modelo": nombre,
+        "R² entrenamiento": modelo.score(X, objetivo),
+        "sMAPE prueba": smape(
+            y_prueba, pronosticar_recursivo(modelo, y_entrena, P, h)
+        ),
+        "coef. no nulos": int(np.sum(np.abs(coeficientes) > 1e-6)),
+    })
+
+pd.DataFrame(filas).set_index("modelo").round(4)
+```
+
+Las dos columnas del medio cuentan la historia de la @eq-sesgo-varianza en dos números.
+
+**El $R^2$ de entrenamiento baja de forma monótona al subir $\lambda$**: cada unidad de
+penalización le quita al modelo capacidad de acomodarse a lo que vio. Eso es sesgo
+creciente.
+
+**El sMAPE de prueba tiene un mínimo en el medio.** Sin regularizar da 0,93; con
+$\lambda = 1$ baja a 0,84; con $\lambda = 100$ sube a 1,34. Es la U del compromiso, y el
+punto óptimo no está en ningún extremo.
+
+La última columna muestra la diferencia entre las dos penalizaciones: Lasso con
+$\lambda = 0{,}1$ deja doce de los veinticuatro rezagos en cero exactamente, y con
+$\lambda = 5$ deja solo tres. Ridge conserva los veinticuatro en todos los casos.
+
+Existe una tercera opción que combina las dos penalizaciones, la *elastic net*
+[@zou2005], y que en `scikit-learn` [@pedregosa2011] es `ElasticNet`. Es la más razonable
+cuando hay grupos de predictores correlacionados entre sí —el caso típico de una tabla de
+rezagos consecutivos—, porque Lasso tiende a quedarse con uno del grupo de manera
+arbitraria. El @sec-ingenieria vuelve sobre eso.
+
+### Cuándo la regularización no ayuda {#sec-regularizacion-no-ayuda}
+
+Conviene medir también el caso contrario, porque el consejo "regularizá siempre" es tan
+automático como equivocado:
+
+```{python}
+#| label: tbl-regularizacion-corta
+#| tbl-cap: "Las mismas técnicas sobre Q23425, con 16 observaciones de entrenamiento y ventana de 4."
+s_corta = cargar("Q23425")
+y_tr_c, y_te_c = s_corta.entrenamiento.to_numpy(), s_corta.prueba.to_numpy()
+h_c, P_c = s_corta.horizonte, 4
+X_c, objetivo_c = tabla_supervisada(y_tr_c, P_c)
+
+filas = []
+for nombre, estimador in (
+    ("sin regularizar", LinearRegression()),
+    ("Ridge, λ = 1", Ridge(alpha=1.0)),
+    ("Ridge, λ = 10", Ridge(alpha=10.0)),
+    ("Lasso, λ = 1", Lasso(alpha=1.0, max_iter=50_000)),
+):
+    modelo = make_pipeline(StandardScaler(), estimador).fit(X_c, objetivo_c)
+    filas.append({
+        "modelo": nombre,
+        "filas": len(X_c),
+        "columnas": P_c,
+        "R² entrenamiento": modelo.score(X_c, objetivo_c),
+        "sMAPE prueba": smape(
+            y_te_c, pronosticar_recursivo(modelo, y_tr_c, P_c, h_c)
+        ),
+    })
+
+pd.DataFrame(filas).set_index("modelo").round(3)
+```
+
+Acá regularizar no ayuda: Ridge **empeora** el sMAPE de 18,02 a 18,38 y después a 21,02, y
+Lasso lo deja donde estaba. La razón es que con doce filas y cuatro columnas el modelo casi
+no tiene capacidad de sobra: su $R^2$ de entrenamiento es 0,68, muy lejos del 0,996 del caso
+anterior. No estaba sobreajustando, así que agregarle sesgo solo lo empeora.
+
+**La regularización es un remedio para un exceso de capacidad.** Cuando el exceso no
+existe, es un costo sin beneficio. El síntoma que hay que buscar antes de aplicarla es la
+brecha entre el error de entrenamiento y el de prueba: si son parecidos, el problema no es
+sobreajuste.
+
+## Cómo se detecta y cómo se controla {#sec-resumen-sobreajuste}
+
+```{python}
+#| label: tbl-sintomas
+#| tbl-cap: "Diagnóstico según la relación entre el error de entrenamiento y el de prueba."
+pd.DataFrame([
+    {"síntoma": "error de entrenamiento alto, error de prueba parecido",
+     "diagnóstico": "subajuste: sesgo alto",
+     "qué hacer": "más capacidad, más características, menos regularización"},
+    {"síntoma": "error de entrenamiento bajo, error de prueba mucho mayor",
+     "diagnóstico": "sobreajuste: varianza alta",
+     "qué hacer": "menos capacidad, más regularización, más datos"},
+    {"síntoma": "los dos errores bajos y parecidos",
+     "diagnóstico": "buen punto del compromiso",
+     "qué hacer": "nada; verificar que la partición sea honesta"},
+    {"síntoma": "error de prueba menor que el de entrenamiento",
+     "diagnóstico": "sospecha: partición no representativa, o fuga",
+     "qué hacer": "revisar el corte y el largo del período de prueba"},
+]).set_index("síntoma")
+```
+
+La última fila merece atención: apareció de verdad en el @sec-soluciones-07, donde una serie
+de 56 observaciones daba un error de prueba menor que el de entrenamiento. No es imposible,
+pero casi siempre significa que el período de prueba es corto o poco representativo.
+
+Y una advertencia que el capítulo siguiente desarrolla: **todo este capítulo usó el error de
+prueba para elegir la capacidad**. Si esa elección se hace mirando el conjunto de prueba,
+ese conjunto deja de ser una estimación honesta del error futuro, porque se lo usó para
+tomar una decisión. La solución es un tercer conjunto, y de eso trata el @sec-particiones.
+
+## Ejercicios
+
+Las soluciones están en el @sec-soluciones-14.
+
+**1.** Reproduce la @tbl-grados sobre `M3007`, la serie del @sec-que-es-pronosticar, y
+después sobre `Q1915`. ¿En qué grado está el mínimo del error de prueba en cada una? En
+M3007 el error de prueba del mejor polinomio es enorme comparado con el de M39292: grafica
+la serie completa y explica por qué, y por qué ninguna elección de grado lo podía evitar.
+
+**2.** Usando el procedimiento del @sec-varianza-medida, estima el término de varianza para
+grados 1 a 12 sobre una serie del catálogo y grafícalo. ¿Crece de manera suave o se dispara
+a partir de cierto grado?
+
+**3.** Aplica Ridge con $\lambda$ de $10^{-3}$ a $10^{3}$ en escala logarítmica sobre una
+tabla de 24 rezagos y grafica el sMAPE contra $\lambda$. ¿Se ve la U de la
+@tbl-regularizacion?
+
+**4.** Compara Ridge y Lasso con el mismo $\lambda$ sobre la misma tabla y mira **cuáles**
+rezagos sobreviven en Lasso. ¿Están entre ellos el rezago 1 y el rezago estacional?
+
+**5.** Corre la @tbl-regularizacion sin el `StandardScaler`. ¿Qué le pasa al efecto de
+$\lambda$? Explica el resultado con el aviso del @sec-regularizacion.
+
+**6.** Toma una serie larga del catálogo y ajusta un polinomio de grado 12 con el 50 %, el
+70 % y el 90 % de los datos. ¿Cómo cambia el error de prueba al aumentar los datos de
+entrenamiento? Relaciona la respuesta con el término de varianza de la @eq-sesgo-varianza.
+
+## Referencias {.unnumbered}
+
+::: {#refs}
 :::
