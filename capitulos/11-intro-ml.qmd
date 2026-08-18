@@ -1,7 +1,274 @@
 # Introducción al aprendizaje automático {#sec-intro-ml}
 
-Qué cambia respecto de la Parte I y por qué.
+```{python}
+#| echo: false
+import warnings
 
-::: {.callout-note appearance="simple"}
-Capítulo en preparación.
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+
+from libro.datos import cargar, catalogo, metadatos
+from libro.graficos import COLORES, mostrar
+
+warnings.simplefilter("ignore")
+```
+
+La Parte I construyó modelos a partir de una idea explícita de cómo está hecha la
+serie. Holt-Winters supone nivel, tendencia y estacionalidad; ARIMA supone una
+estructura de autocorrelación; la regresión supone una relación lineal con predictores
+elegidos a mano. En los tres casos **la forma del modelo la pone quien modela**, y los
+datos solo ajustan los parámetros.
+
+La Parte II invierte el reparto. Se le da al algoritmo una tabla de entradas y salidas
+y se le pide que **encuentre la forma**. Eso permite capturar relaciones que nadie
+especificó, y trae consigo un conjunto de problemas nuevos que la Parte I no tenía.
+
+Este capítulo dice qué cambia, qué se gana, qué se pierde y —lo más importante— cuándo
+conviene. La respuesta a la última pregunta es menos entusiasta de lo que suele
+leerse, y es mejor decirlo al principio que descubrirlo en el capítulo 22.
+
+## El mismo problema, otra formulación {#sec-otra-formulacion}
+
+El puente ya está construido: lo armó el @sec-rezagos-predictores. Una serie se
+convierte en un problema **supervisado** eligiendo un conjunto de rezagos y armando
+una tabla donde cada fila es una observación:
+
+$$
+y_t = f\!\left( y_{t-1},\, y_{t-2},\, \ldots,\, y_{t-p},\;
+                x_{1,t},\, \ldots,\, x_{k,t} \right) + \varepsilon_t
+$$ {#eq-supervisado}
+
+Toda la Parte I son casos particulares de la @eq-supervisado con distintas
+restricciones sobre $f$:
+
+```{python}
+#| label: tbl-correspondencia
+#| tbl-cap: "Los métodos de la Parte I y los de la Parte II vistos como casos particulares del aprendizaje supervisado, ordenados por cuánta libertad tiene f."
+pd.DataFrame([
+    {"método": "naive", "restricción sobre f": "f(y_{t-1}) = y_{t-1}; sin parámetros"},
+    {"método": "AR(p)", "restricción sobre f": "lineal en los p rezagos"},
+    {"método": "regresión con Fourier", "restricción sobre f": "lineal en términos construidos del tiempo"},
+    {"método": "Holt-Winters", "restricción sobre f": "lineal, con estado que se actualiza"},
+    {"método": "regresión regularizada", "restricción sobre f": "lineal, con penalización sobre los coeficientes"},
+    {"método": "árbol de decisión", "restricción sobre f": "constante por regiones"},
+    {"método": "bosque o boosting", "restricción sobre f": "suma de muchas funciones constantes por regiones"},
+    {"método": "red neuronal", "restricción sobre f": "casi ninguna"},
+]).set_index("método")
+```
+
+Esa tabla es la idea central de la Parte II. **No hay dos disciplinas: hay una sola
+pregunta y distintos grados de libertad para responderla.** Un ARIMA es un modelo de
+aprendizaje supervisado con una restricción muy fuerte sobre $f$; una red neuronal es
+el mismo problema con una restricción muy débil.
+
+De ahí sale la tensión que organiza todo lo que viene: cuanta menos restricción se
+impone, más formas puede aprender el algoritmo y **más datos hacen falta para
+distinguir una forma real del ruido**. Ese compromiso es el tema del @sec-sobreajuste,
+y no se puede esquivar.
+
+## Lo que se gana {#sec-lo-que-se-gana}
+
+Tres cosas concretas, en orden de cuánto importan en la práctica.
+
+**Relaciones no lineales.** Si la demanda crece con la temperatura hasta cierto punto y
+después cae, ninguna regresión lineal lo captura sin que alguien construya el término
+cuadrático a mano. Un árbol o una red lo encuentran solos.
+
+**Muchos predictores.** Los métodos de la Parte I manejan bien unas pocas variables
+externas. Los de la Parte II manejan decenas o cientos, y tienen mecanismos —la
+regularización del @sec-sobreajuste— para decidir cuáles importan.
+
+**Muchas series a la vez.** Un ARIMA se ajusta a una serie. Un modelo de aprendizaje
+automático puede entrenarse con las filas de miles de series juntas y aprender patrones
+que ninguna serie individual muestra con claridad. Es el enfoque **global**, y es lo
+que le permitió al ganador de M4 [@smyl2020] superar a todos los métodos que se ajustan
+serie por serie.
+
+## Lo que se pierde {#sec-lo-que-se-pierde}
+
+**Interpretabilidad.** El $\phi_1$ de un AR(1) tiene lectura directa: cuánto del valor
+de ayer se traslada a hoy. Los pesos de una red no tienen ninguna.
+
+**Intervalos de predicción.** Los métodos de la Parte I traen fórmulas cerradas para la
+incertidumbre —las ecuaciones @eq-intervalo-naive a @eq-intervalo-deriva—. Los de la
+Parte II, en general, no: hay que construirlos por remuestreo, y de eso trata el
+@sec-bootstrapping.
+
+**Garantías sobre la extrapolación.** Un árbol de decisión **no puede predecir un valor
+fuera del rango que vio**, porque su pronóstico es un promedio de observaciones de
+entrenamiento. En una serie con tendencia creciente eso es una limitación grave, y es la
+razón por la que los modelos basados en árboles necesitan que se les quite la tendencia
+antes. El @sec-modelos-basicos lo muestra con datos.
+
+**Y sobre todo, datos.** Este es el punto que decide casi todo, y merece números.
+
+## El problema de los datos {#sec-problema-datos}
+
+La @eq-supervisado convierte una serie de $n$ observaciones en una tabla de $n-p$ filas
+y $p$ columnas. Para una serie corta eso es devastador:
+
+```{python}
+#| label: tbl-filas-disponibles
+#| tbl-cap: "Filas de entrenamiento disponibles al construir una tabla supervisada con 12 rezagos, según el largo de la serie."
+pd.DataFrame([
+    {
+        "observaciones": n,
+        "filas útiles": n - 12,
+        "columnas": 12,
+        "filas por columna": round((n - 12) / 12, 1),
+    }
+    for n in (20, 50, 100, 300, 1000, 5000)
+]).set_index("observaciones")
+```
+
+Con veinte observaciones y doce rezagos quedan **ocho filas y doce columnas**: más
+predictores que observaciones. Cualquier modelo con capacidad de sobra va a ajustar esas
+ocho filas de manera perfecta sin haber aprendido nada.
+
+Y esa situación no es un caso extremo inventado. Es la mayoría de M4:
+
+```{python}
+#| label: tbl-largos-m4
+#| tbl-cap: "Distribución del largo de las series de M4 por frecuencia."
+meta = metadatos()
+
+resumen = (
+    meta.groupby("frecuencia", observed=True)["n_entrenamiento"]
+    .describe()[["count", "min", "25%", "50%", "75%", "max"]]
+    .loc[["anual", "trimestral", "mensual", "semanal", "diaria", "horaria"]]
+)
+resumen.columns = ["series", "mínimo", "cuartil 1", "mediana", "cuartil 3", "máximo"]
+resumen.round(0).astype(int)
+```
+
+```{python}
+#| echo: false
+menos_100 = 100 * (meta["n_entrenamiento"] < 100).mean()
+menos_50 = 100 * (meta["n_entrenamiento"] < 50).mean()
+mas_1000 = 100 * (meta["n_entrenamiento"] > 1000).mean()
+mediana_anual = int(
+    meta.loc[meta["frecuencia"] == "anual", "n_entrenamiento"].median()
+)
+```
+
+El `{python} f"{menos_100:.0f}"` % de las series de M4 tiene **menos de 100
+observaciones** y el `{python} f"{menos_50:.0f}"` % tiene menos de 50. Solo el
+`{python} f"{mas_1000:.1f}"` % pasa las mil. Las series anuales tienen una mediana de
+`{python} f"{mediana_anual}"` observaciones: con doce rezagos quedarían
+`{python} f"{mediana_anual - 12}"` filas.
+
+Esa es la razón estructural por la que el aprendizaje automático no barrió con los
+métodos estadísticos en las competencias de pronóstico. **No es que los algoritmos sean
+malos: es que la mayoría de las series de tiempo reales son cortas.**
+
+## La evidencia, sin adornos {#sec-evidencia}
+
+Conviene mostrar el resultado antes de dedicarle once capítulos al tema. En la
+evaluación de 26 modelos sobre 4.773 series de M4 que acompaña a este libro, medida con
+la métrica oficial de la competencia:
+
+```{python}
+#| label: tbl-owa-familias
+#| tbl-cap: "OWA de una selección de los 26 modelos evaluados sobre series de M4. Menos de 1,000 significa que le gana al benchmark Naive2."
+pd.DataFrame([
+    {"modelo": "ARIMA", "familia": "estadístico", "OWA": 0.936},
+    {"modelo": "SARIMA", "familia": "estadístico", "OWA": 0.938},
+    {"modelo": "LassoLars", "familia": "aprendizaje automático", "OWA": 0.974},
+    {"modelo": "Regresión lineal", "familia": "aprendizaje automático", "OWA": 0.978},
+    {"modelo": "Holt-Winters", "familia": "estadístico", "OWA": 0.995},
+    {"modelo": "ETS", "familia": "estadístico", "OWA": 0.998},
+    {"modelo": "Naive2 (referencia)", "familia": "referencia", "OWA": 1.000},
+    {"modelo": "Naive estacional", "familia": "referencia", "OWA": 1.007},
+    {"modelo": "Transformer", "familia": "aprendizaje profundo", "OWA": 1.419},
+    {"modelo": "Red densa", "familia": "aprendizaje profundo", "OWA": 1.543},
+    {"modelo": "ConvNet 1D", "familia": "aprendizaje profundo", "OWA": 1.609},
+]).set_index("modelo")
+```
+
+Los tres modelos de aprendizaje profundo quedaron **entre un 42 % y un 61 % peor que el
+benchmark**, y muy por detrás de un ARIMA. Los modelos lineales regularizados
+—LassoLars— sí superaron al benchmark, aunque por menos que el ARIMA.
+
+::: {.callout-important}
+## Cómo leer ese resultado
+
+Hay dos lecturas equivocadas y una correcta.
+
+**Equivocada uno: "el aprendizaje profundo no sirve para series de tiempo."** El
+ganador de M4 fue un híbrido de suavizado exponencial y redes recurrentes [@smyl2020],
+con OWA 0,821, muy por delante de cualquier método puramente estadístico. Las redes
+sirven; la cuestión es cómo se las usa.
+
+**Equivocada dos: "esos modelos estaban mal implementados."** Es posible mejorarlos,
+pero el patrón se repite en la literatura: los métodos estadísticos simples son
+competitivos y difíciles de superar en series cortas [@makridakis2018;
+@petropoulos2022].
+
+**La correcta**: una red entrenada **serie por serie** sobre 60 o 200 observaciones no
+tiene con qué aprender. El método ganador no hacía eso: entrenaba un modelo **global**
+sobre todas las series a la vez, con miles de veces más datos, y le dejaba a un
+componente estadístico la parte que las redes hacen peor. La lección no es sobre las
+redes, es sobre **cuántos datos necesita cada nivel de flexibilidad**.
+
+Un detalle de la misma evaluación refuerza el punto: en las series **horarias** —las
+únicas de M4 con más de 700 observaciones y un ciclo diario marcado— las redes fueron
+competitivas, con OWA de 0,76 a 0,81, mejores que el ARIMA en esa frecuencia. Donde hay
+datos, funcionan.
+:::
+
+## Cuándo conviene {#sec-cuando-conviene}
+
+De todo lo anterior sale un criterio bastante concreto:
+
+```{python}
+#| label: tbl-cuando-conviene
+#| tbl-cap: "Cuándo el aprendizaje automático tiene ventaja sobre los métodos de la Parte I."
+pd.DataFrame([
+    {"situación": "serie corta, sin variables externas",
+     "qué conviene": "métodos de la Parte I; el aprendizaje automático no tiene con qué"},
+    {"situación": "serie larga con estructura compleja",
+     "qué conviene": "probar los dos; puede haber no linealidad que capturar"},
+    {"situación": "muchas variables explicativas",
+     "qué conviene": "aprendizaje automático, con regularización"},
+    {"situación": "miles de series relacionadas",
+     "qué conviene": "un modelo global entrenado con todas a la vez"},
+    {"situación": "relación no lineal conocida",
+     "qué conviene": "aprendizaje automático, o la Parte I con la variable transformada"},
+    {"situación": "hay que explicar el pronóstico",
+     "qué conviene": "métodos de la Parte I, o modelos lineales regularizados"},
+]).set_index("situación")
+```
+
+Conviene notar que la primera fila cubre la mayor parte de M4 y buena parte de los
+problemas reales de una empresa mediana. **El aprendizaje automático no es el paso
+siguiente al que todo el mundo debería llegar: es una herramienta con requisitos, y uno
+de esos requisitos son los datos.**
+
+## Cómo está organizada esta parte {#sec-organizacion}
+
+Los capítulos que siguen se agrupan en cuatro bloques.
+
+**Los fundamentos, antes de tocar un modelo** —del @sec-los-datos al
+@sec-validacion-cruzada—: la preparación de los datos, la conversión a problema
+supervisado, el sobreajuste y cómo evaluar sin engañarse. Es la parte que más se saltea
+y la que causa más errores.
+
+**La formulación del problema** —@sec-prediccion y @sec-ingenieria—: cómo pronosticar
+varios pasos y qué características construir. Son las dos preguntas específicas de
+series de tiempo que el aprendizaje automático general no responde.
+
+**Los modelos** —del @sec-modelos-basicos al @sec-aprendizaje-profundo—: de la
+regresión regularizada a los transformadores, con los ensambles en el medio.
+
+**La incertidumbre** —@sec-bootstrapping—: cómo construir intervalos cuando no hay
+fórmula cerrada.
+
+Un aviso sobre prioridades: el @sec-sobreajuste y el @sec-validacion-cruzada son los
+dos capítulos que más se usan después. Si hubiera que leer solo dos de esta parte, son
+esos.
+
+## Referencias {.unnumbered}
+
+::: {#refs}
 :::

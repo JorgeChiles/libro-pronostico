@@ -46,7 +46,8 @@ y_t = \beta_0 + \beta_1 x_{1,t} + \beta_2 x_{2,t} + \cdots
       + \beta_k x_{k,t} + \varepsilon_t
 $$ {#eq-regresion}
 
-Los coeficientes se estiman por mínimos cuadrados, igual que en cualquier regresión.
+Los coeficientes se estiman por mínimos cuadrados, igual que en cualquier regresión;
+@hyndman2021 desarrollan el tratamiento clásico de la @eq-regresion aplicada a series.
 Lo específico de las series de tiempo no está en la estimación sino en dos cosas: **de
 dónde salen los predictores** y **qué supuestos sobre $\varepsilon_t$ se violan**.
 
@@ -192,7 +193,9 @@ construir una variable de calendario sobre fechas que no significan nada.
 Las ficticias tienen un problema de tamaño: con $m = 24$ hacen falta 23 columnas, y
 con $m = 168$ —una semana de datos horarios— hacen falta 167. Los **términos de
 Fourier** describen el mismo ciclo con muchos menos parámetros, sumando senos y
-cosenos de frecuencias crecientes:
+cosenos de frecuencias crecientes. Es la representación que usa @hyndman2021 para
+estacionalidades de período grande, y la que hace tratable el caso de la
+estacionalidad múltiple:
 
 $$
 y_t = \beta_0 + \beta_1 t
@@ -341,7 +344,7 @@ $$ {#eq-rezagos-regresion}
 
 donde $L$ es el conjunto de rezagos elegidos. Comparando la @eq-rezagos-regresion con
 la @eq-ar del @sec-identificacion se ve que **es un modelo autorregresivo escrito
-como regresión**. La diferencia no es matemática sino de enfoque: acá los rezagos son
+como regresión**, la formulación de @boxjenkins1970 vista desde el otro lado. La diferencia no es matemática sino de enfoque: acá los rezagos son
 columnas de una tabla, y se pueden elegir con criterios de selección de variables en
 vez de con el correlograma.
 
@@ -404,8 +407,9 @@ paso.
 paso adelante con valores observados, y se lo usa para predecir dieciocho con valores
 inventados por él mismo. Es una diferencia de fondo entre entrenamiento y uso.
 
-La alternativa es entrenar un modelo por horizonte —la estrategia **directa**— y la
-comparación entre las dos es el tema del @sec-prediccion.
+La alternativa es entrenar un modelo por horizonte —la estrategia **directa**—. La
+comparación entre las dos no tiene un ganador universal y sigue siendo materia de
+investigación [@petropoulos2022]; el @sec-prediccion la desarrolla.
 :::
 
 ## Regresión contra los métodos anteriores {#sec-comparacion-regresion}
