@@ -127,19 +127,23 @@ propiedad de este conjunto de datos, no una ley.
 
 ### Ejercicio 4
 
+La muestra se toma de la tabla de metadatos, que ya trae el error del naive
+calculado para cada serie de M4. Así el ejercicio no depende de bajar 30 series
+completas, y se puede resolver sin conexión:
+
 ```{python}
-muestra = cargar(frecuencia="mensual", n=30, solo_catalogo=False)
+poblacion = metadatos()
+poblacion = poblacion[
+    (poblacion["frecuencia"] == "mensual") & poblacion["error_naive_smape"].notna()
+]
 
-filas = []
-for s in muestra:
-    y = s.entrenamiento.to_numpy()
-    filas.append({
-        "serie": s.id,
-        "complejidad": s.complejidad,
-        "smape_naive": smape(s.prueba.to_numpy(), naive(y, s.horizonte)),
-    })
+muestra_df = (
+    poblacion.sample(n=30, random_state=42)
+    .rename(columns={"complexity_index": "complejidad",
+                     "error_naive_smape": "smape_naive"})
+    [["serie", "complejidad", "smape_naive"]]
+)
 
-muestra_df = pd.DataFrame(filas)
 correlacion = muestra_df["complejidad"].corr(muestra_df["smape_naive"])
 
 fig = go.Figure()
@@ -153,13 +157,9 @@ fig.update_layout(height=420, showlegend=False)
 fig.update_xaxes(title="índice de complejidad")
 mostrar(fig, titulo_y="sMAPE del naive")
 
-print(f"correlación con 30 series: {correlacion:+.3f}")
-
-poblacion = metadatos()
-poblacion = poblacion[
-    (poblacion["frecuencia"] == "mensual") & poblacion["error_naive_smape"].notna()
-]
 correlacion_total = poblacion["complexity_index"].corr(poblacion["error_naive_smape"])
+
+print(f"correlación con 30 series: {correlacion:+.3f}")
 print(f"correlación con las {len(poblacion):,} series mensuales: {correlacion_total:+.3f}")
 ```
 

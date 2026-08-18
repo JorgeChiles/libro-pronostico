@@ -66,6 +66,14 @@ DESCRIPTORES = [
     "dominant_energy_ratio",
 ]
 
+# Series que el texto nombra explícitamente y que por lo tanto tienen que viajar
+# en el repositorio, elija lo que elija el algoritmo de curación. Si un capítulo
+# usa una serie por identificador y no está acá, el libro intenta bajarla al
+# compilar y deja de compilar sin conexión. Hay una prueba que lo verifica.
+SERIES_DEL_LIBRO: dict[str, str] = {
+    "M3007": "Capítulo 1: la serie que se acelera y a la que nadie le acierta",
+}
+
 # Un fenómeno por fila: nombre, descripción para el lector, y el criterio.
 # `puntaje` recibe el DataFrame de metadatos y devuelve una serie: más alto,
 # mejor ejemplo del fenómeno. `filtro` es la condición dura que hay que cumplir.
@@ -235,6 +243,13 @@ def curar(meta: pd.DataFrame) -> pd.DataFrame:
         elegidas.append({"serie": fila["serie"], "fenomeno": fenomeno,
                          "descripcion_fenomeno": descripcion})
         usadas.add(fila["serie"])
+
+    # Primero las que el texto nombra: no son negociables.
+    for serie_id, motivo in SERIES_DEL_LIBRO.items():
+        fila = meta[meta["serie"] == serie_id]
+        if fila.empty:
+            sys.exit(f"La serie {serie_id} de SERIES_DEL_LIBRO no existe en M4.")
+        anotar(fila.iloc[0], "usada-en-el-texto", motivo)
 
     for fen in FENOMENOS:
         candidatas = meta[fen["filtro"](meta)].copy()
