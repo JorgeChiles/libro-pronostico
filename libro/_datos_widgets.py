@@ -28,6 +28,10 @@ WIDGETS: dict[str, list[tuple[str, str]]] = {
         ("D2039", "caminata aleatoria"),
         ("M32692", "quiebre de nivel"),
     ],
+    # Capítulo 2: una serie horaria, para practicar remuestreo en el navegador.
+    "cap02_horaria.csv": [
+        ("H317", "horaria con ciclo diario"),
+    ],
 }
 
 

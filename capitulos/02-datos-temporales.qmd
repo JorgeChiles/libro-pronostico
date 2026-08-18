@@ -1,7 +1,507 @@
+---
+resources:
+  - datos/cap02_horaria.csv
+---
+
 # Datos temporales en Python {#sec-datos-temporales}
 
-pandas, índices de fecha, frecuencias, remuestreo, datos faltantes.
+```{python}
+#| echo: false
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
 
-::: {.callout-note appearance="simple"}
-Capítulo en preparación.
+from libro.datos import cargar, catalogo, metadatos
+from libro.graficos import COLORES, mostrar
+```
+
+Una serie de tiempo en pandas es una `Series` con un índice de fechas. Dicho así
+suena trivial, y ahí es justamente donde vive la mayoría de los errores: en el
+índice. Un índice mal armado no da un mensaje de error, da un resultado plausible
+y equivocado.
+
+Este capítulo es sobre el índice y sobre las tres operaciones que dependen de él:
+cambiar la frecuencia, tapar huecos y construir rezagos.
+
+## La estructura {#sec-estructura}
+
+```{python}
+serie = cargar("M3007")
+serie.entrenamiento.head()
+```
+
+Dos columnas, y las dos importan. Los valores son los datos; el índice dice
+cuándo se observó cada uno. De ese índice salen tres cosas que en una lista de
+Python no existen: alinear dos series por fecha, cambiar de frecuencia, y ubicar
+correctamente el eje de un gráfico.
+
+```{python}
+indice = serie.entrenamiento.index
+print(f"tipo        : {type(indice).__name__}")
+print(f"resolución  : {indice.dtype}")
+print(f"frecuencia  : {indice.freq}")
+print(f"desde/hasta : {indice.min().date()} a {indice.max().date()}")
+```
+
+La **resolución** dice `datetime64[s]`, segundos, y no el `datetime64[ns]` que
+pandas usa por defecto. Es una decisión deliberada del módulo de datos del libro,
+y vale contarla porque es un problema que se encuentra solo cuando ya es tarde.
+
+Con resolución de nanosegundos, pandas puede representar fechas entre 1677 y
+2262. Parece de sobra hasta que aparece una serie anual larga:
+
+```{python}
+anuales = metadatos()
+anuales = anuales[anuales["frecuencia"] == "anual"]
+anuales.nlargest(3, "n_entrenamiento")[["serie", "n_entrenamiento"]]
+```
+
+Una serie anual de 835 observaciones que empieza en 1979 termina en el año 2813.
+Construir ese índice en nanosegundos falla:
+
+```{python}
+try:
+    pd.date_range("1979-01-01", periods=835, freq="YS")
+except Exception as error:
+    print(f"{type(error).__name__}: {error}")
+```
+
+Con resolución de segundos el rango representable llega mucho más lejos y el
+problema desaparece:
+
+```{python}
+pd.date_range("1979-01-01", periods=835, freq="YS", unit="s")[[0, -1]]
+```
+
+No es una particularidad de M4. Cualquier serie anual larga, o cualquier
+proyección demográfica a cien años, se choca con lo mismo.
+
+## La frecuencia es un dato del índice {#sec-frecuencia}
+
+`indice.freq` no es una anotación decorativa: es lo que le permite a pandas y a
+las bibliotecas de modelos saber qué significa "el paso siguiente". Estos son los
+alias que usa el libro:
+
+```{python}
+#| label: tbl-alias
+#| tbl-cap: "Alias de frecuencia de pandas para cada frecuencia de M4."
+from libro.datos.rutas import FRECUENCIAS
+
+marcas = [
+    "primer día del año",
+    "primer día del trimestre",
+    "primer día del mes",
+    "lunes de cada semana",
+    "cada día",
+    "cada hora",
+]
+
+pd.DataFrame([
+    {
+        "frecuencia": info.nombre,
+        "alias de pandas": info.frecuencia_pandas,
+        "qué marca": marca,
+    }
+    for info, marca in zip(FRECUENCIAS.values(), marcas)
+]).set_index("frecuencia")
+```
+
+Hay un par de alias que se confunden seguido y no dan error: `MS` marca el
+**primer** día del mes y `ME` el **último**. Mezclarlos en dos series que después
+se combinan produce un desfase de casi un mes sin ninguna advertencia.
+
+### Cuando falta una sola observación {#sec-falta-una}
+
+Acá está la trampa que más cuesta detectar. Saquemos una observación del medio de
+la serie. Una sola, de 102:
+
+```{python}
+con_hueco = serie.entrenamiento.drop(serie.entrenamiento.index[50])
+
+print(f"observaciones      : {len(con_hueco)}")
+print(f"frecuencia inferida: {pd.infer_freq(con_hueco.index)}")
+```
+
+La frecuencia ya no se puede inferir: los intervalos dejaron de ser todos
+iguales. Y ahora lo importante, que es qué hace un modelo con eso:
+
+```{python}
+import warnings
+
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+
+# Los avisos se capturan a propósito: son la parte interesante.
+with warnings.catch_warnings(record=True) as avisos:
+    warnings.simplefilter("always")
+    modelo = ExponentialSmoothing(
+        con_hueco, trend="add", initialization_method="estimated"
+    ).fit()
+    pronostico = modelo.forecast(3)
+
+print(f"tipo de índice: {type(pronostico.index).__name__}")
+print(pronostico, end="\n\n")
+for aviso in avisos:
+    print(f"aviso: {aviso.message}")
+```
+
+El pronóstico volvió con un índice de **enteros**, no de fechas. El modelo se
+ajustó, no hubo excepción, y el resultado parece utilizable. Solo que perdió toda
+referencia temporal: ya no se sabe a qué meses corresponde. Si ese pronóstico se
+cruza después con otra tabla por fecha, el cruce falla o —peor— alinea mal.
+
+La reparación es una línea, y además saca el problema a la luz:
+
+```{python}
+reparado = con_hueco.asfreq("MS")
+
+print(f"observaciones: {len(reparado)}")
+print(f"faltantes    : {reparado.isna().sum()}")
+print(f"frecuencia   : {reparado.index.freq}")
+```
+
+`asfreq` reconstruye el índice completo y el hueco aparece como lo que es: un
+`NaN` visible. De ahí en más es un problema de datos faltantes, que se trata en el
+@sec-faltantes, y no un problema silencioso.
+
+::: {.callout-tip}
+## La costumbre que conviene tomar
+
+Antes de pasarle una serie a cualquier modelo, mirar dos cosas:
+
+```python
+serie.index.freq        # tiene que decir algo, no None
+serie.isna().sum()      # tiene que ser 0
+```
+
+Cuestan dos segundos y ahorran horas.
 :::
+
+## Las fechas de M4 son un eje, no un dato {#sec-fechas-m4}
+
+Una advertencia sobre este conjunto de datos en particular. M4 declara una fecha
+de inicio para cada serie, y esas fechas son irregulares: hay series que dicen
+empezar en 1750 y otras con formatos ambiguos. El módulo del libro las usa cuando
+son razonables y recurre a una fecha de respaldo cuando no.
+
+Sirven para tener un eje temporal legible. **No** sirven para construir
+características de calendario —si un mes es diciembre, si un día es feriado—,
+porque en M4 esa correspondencia no es confiable. En el @sec-ingenieria se
+construyen esas características, y ahí se usan conjuntos de datos donde la fecha
+sí significa algo.
+
+## Remuestreo {#sec-remuestreo}
+
+Cambiar la frecuencia de una serie es la operación más común y la más
+subestimada. Tomemos una serie horaria:
+
+```{python}
+horaria = cargar("H317")
+print(horaria)
+```
+
+### Agregar: de horaria a diaria
+
+```{python}
+diaria = horaria.entrenamiento.resample("D").mean()
+print(f"de {len(horaria.entrenamiento)} horas a {len(diaria)} días")
+diaria.head()
+```
+
+`resample("D")` agrupa por día y `.mean()` decide qué hacer con las 24
+observaciones de cada grupo. **Esa elección es parte del modelo, no una
+formalidad**: el promedio responde "cuánto en un día típico", la suma responde
+"cuánto en total", `.last()` responde "cómo terminó el día". Para consumo
+eléctrico, la suma; para un precio, el promedio o el cierre; para un stock, el
+último valor. Elegir mal acá arruina todo lo que venga después.
+
+Y hay un detalle que muerde en los bordes:
+
+```{python}
+por_dia = horaria.entrenamiento.resample("D").agg(["mean", "count"])
+por_dia.iloc[[0, 1, -2, -1]]
+```
+
+El primer y el último día pueden tener menos de 24 horas, porque la serie no
+empieza ni termina en un límite de día. Su promedio se calcula sobre menos
+observaciones y no es comparable con el resto. Con `.sum()` el efecto es peor: el
+día incompleto parece una caída real de la demanda.
+
+### Agregar hace que la serie parezca más fácil {#sec-agregar-enganio}
+
+Acá viene el punto central de esta sección. Comparemos el error de un pronóstico
+naive sobre la serie horaria y sobre la misma serie agregada a días:
+
+```{python}
+def smape(real, pronostico):
+    real, pronostico = np.asarray(real, float), np.asarray(pronostico, float)
+    return 200 * np.mean(
+        np.abs(real - pronostico) / (np.abs(real) + np.abs(pronostico))
+    )
+
+
+# Naive sobre la serie horaria, a los 48 pasos que fija M4.
+y_h = horaria.entrenamiento.to_numpy()
+real_h = horaria.prueba.to_numpy()
+error_horario = smape(real_h, np.repeat(y_h[-1], len(real_h)))
+
+# Naive sobre la misma serie agregada a días.
+tr_d = horaria.entrenamiento.resample("D").mean().dropna()
+te_d = horaria.prueba.resample("D").mean().dropna()
+error_diario = smape(te_d.to_numpy(), np.repeat(tr_d.to_numpy()[-1], len(te_d)))
+
+print(f"naive horario : sMAPE {error_horario:5.2f}   ({len(real_h)} pasos)")
+print(f"naive diario  : sMAPE {error_diario:5.2f}   ({len(te_d)} pasos)")
+```
+
+```{python}
+#| echo: false
+factor = error_horario / error_diario
+```
+
+El error cae a la `{python} f"{1 / factor:.0%}"` parte: de
+`{python} f"{error_horario:.1f}"` a `{python} f"{error_diario:.1f}"`, un factor
+de `{python} f"{factor:.0f}"`.
+
+Sería un error grave leer eso como "conviene pronosticar en diario". Agregar no
+mejoró el pronóstico: **cambió la pregunta**. Al promediar 24 horas se borró toda
+la variación intradiaria, que es justamente la parte difícil y, en una serie de
+demanda horaria, la que importa para operar. El horizonte también cambió: las 48
+horas que pide M4 se volvieron `{python} f"{len(te_d)}"` días.
+
+La lección vale para todo el libro: **la predictibilidad depende del nivel de
+agregación tanto como de la serie**. Un error más chico obtenido agregando no es
+un mejor pronóstico si la decisión necesitaba el detalle. Antes de comparar dos
+errores hay que verificar que respondan la misma pregunta.
+
+### Desagregar
+
+En el otro sentido, pandas no puede inventar información:
+
+```{python}
+mensual = cargar("M3007").entrenamiento
+semanal = mensual.asfreq("W-MON")
+print(f"faltantes al pasar a semanal: {semanal.isna().sum()} de {len(semanal)}")
+```
+
+`asfreq` reindexa y deja `NaN` en todos los períodos nuevos. Rellenarlos es una
+decisión, no un cálculo, y cada opción supone algo distinto:
+
+```{python}
+pd.DataFrame({
+    "sin rellenar": semanal,
+    "ffill": semanal.ffill(),
+    "interpolada": semanal.interpolate("time"),
+}).head(6).round(1)
+```
+
+`ffill` supone que el valor se mantiene hasta la próxima observación —razonable
+para un stock, absurdo para un flujo—. `interpolate("time")` supone que el cambio
+fue gradual y lineal. Las dos inventan datos; la diferencia es qué inventan.
+
+## Datos faltantes {#sec-faltantes}
+
+Empecemos por un hecho sobre este conjunto de datos:
+
+```{python}
+sin_nan = sin_huecos = 0
+todas = cargar(n=len(catalogo()))
+for s in todas:
+    y = s.entrenamiento
+    completo = pd.date_range(y.index[0], y.index[-1], freq=y.index.freq, unit="s")
+    sin_nan += int(not y.isna().any())
+    sin_huecos += int(len(completo) == len(y))
+
+print(f"series sin valores faltantes  : {sin_nan} de {len(todas)}")
+print(f"series sin huecos en el índice: {sin_huecos} de {len(todas)}")
+```
+
+Las series de M4 vienen limpias: sin faltantes y sin huecos. Es una comodidad y
+también una limitación del conjunto de datos, porque los datos de un trabajo
+cualquiera casi nunca están así. Para mostrar las técnicas hay que ensuciar la
+serie a propósito, y este es uno de los pocos lugares del libro donde el dato es
+artificial.
+
+```{python}
+#| label: fig-faltantes
+#| fig-cap: "Tres maneras de rellenar el mismo hueco de cinco meses. Ninguna acierta: cada una supone algo distinto."
+original = cargar("M35927").entrenamiento.tail(60)
+con_faltantes = original.copy()
+con_faltantes.iloc[30:35] = np.nan
+
+opciones = {
+    "ffill": con_faltantes.ffill(),
+    "interpolate lineal": con_faltantes.interpolate(),
+    "interpolate por tiempo": con_faltantes.interpolate("time"),
+}
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=original.index, y=original.values, name="valores reales",
+    mode="lines", line=dict(color=COLORES["auxiliar"], width=5, dash="dot"),
+    hovertemplate="%{x|%b %Y}<br>%{y:,.0f}<extra>real</extra>",
+))
+for nombre, relleno in opciones.items():
+    fig.add_trace(go.Scatter(
+        x=relleno.index, y=relleno.values, name=nombre, mode="lines",
+        line=dict(width=2),
+    ))
+fig.update_layout(height=430)
+mostrar(fig, titulo_y="unidades")
+```
+
+En una serie con estacionalidad marcada las tres fallan, y fallan distinto:
+`ffill` aplana el ciclo, y las dos interpolaciones trazan una recta por encima de
+un valle que sí existía. Un relleno que respetara la estacionalidad —usar el mismo
+mes del año anterior, ajustado por nivel— andaría mejor. La herramienta para eso
+es la descomposición del @sec-descomposicion.
+
+::: {.callout-important}
+## Dos reglas sobre rellenar
+
+**Nunca rellenar usando información posterior al hueco** si el modelo va a
+pronosticar. `interpolate` mira hacia adelante y hacia atrás: usarla dentro del
+período de entrenamiento está bien, pero usarla sobre la serie completa mete el
+futuro dentro del pasado.
+
+**Nunca rellenar cruzando el límite entre entrenamiento y prueba.** Si se
+interpola sobre la serie completa y después se parte, los últimos valores de
+entrenamiento contienen información del período de prueba y toda la evaluación
+queda inflada. Es la fuga de información (*data leakage*) del @sec-los-datos, y en
+su versión temporal cuesta verla porque no deja rastro.
+:::
+
+## Rezagos y ventanas {#sec-rezagos}
+
+Tres operaciones que aparecen en todo el libro:
+
+```{python}
+y = cargar("M3007").entrenamiento.tail(6)
+
+pd.DataFrame({
+    "y": y,
+    "rezago 1": y.shift(1),
+    "diferencia": y.diff(),
+    "media móvil 3": y.rolling(3).mean(),
+}).round(1)
+```
+
+`shift(1)` corre la serie un paso hacia adelante, así que en cada fila queda el
+valor anterior: es la forma de convertir una serie en un problema supervisado, y
+de eso se trata el @sec-supervisado. `diff()` es exactamente `y - y.shift(1)`. Y
+`rolling(3).mean()` promedia cada punto con los dos anteriores.
+
+Ese "los dos anteriores" es el punto. `rolling` tiene un argumento `center` que
+parece inocente:
+
+```{python}
+x = pd.Series(range(10), dtype=float)
+
+pd.DataFrame({
+    "x": x,
+    "hacia atrás": x.rolling(3).mean(),
+    "centrada": x.rolling(3, center=True).mean(),
+}).head(5)
+```
+
+Mirá la fila 1. La ventana hacia atrás da `NaN`, porque en el instante 1 todavía
+no hay tres observaciones. La centrada da `1.0`, que es el promedio de las
+posiciones 0, 1 y 2: **usó el valor del instante 2 para calcular el del instante
+1**. Usó el futuro.
+
+Para describir una serie ya observada, una media móvil centrada es lo correcto, y
+es lo que usa la descomposición clásica del @sec-descomposicion. Para construir
+una variable que alimente un pronóstico, es fuga de información garantizada, y el
+modelo va a parecer excelente hasta que se use de verdad.
+
+## De una serie a muchas {#sec-formato-largo}
+
+Hasta acá, una serie por vez. Cuando son miles, el formato cambia: en vez de una
+`Series` por serie, una tabla larga con una columna que identifica a cuál
+pertenece cada fila.
+
+```{python}
+cargar("M3007").a_frame().head(3)
+```
+
+Los nombres `unique_id`, `ds` e `y` no son arbitrarios: son los que espera
+`statsforecast`, la biblioteca que el libro usa cuando hay que ajustar modelos
+sobre muchas series a la vez. Varias series se apilan sin más:
+
+```{python}
+varias = pd.concat([s.a_frame() for s in cargar(frecuencia="mensual", n=3)])
+varias.groupby("unique_id").agg(
+    observaciones=("y", "size"),
+    desde=("ds", "min"),
+    hasta=("ds", "max"),
+)
+```
+
+El formato largo tiene una ventaja que se aprecia recién en el @sec-caso-m4: las
+series de M4 tienen largos muy distintos —de 13 a 9.919 observaciones—, y en
+formato ancho eso obliga a una matriz llena de huecos. En formato largo, cada
+serie ocupa exactamente las filas que tiene.
+
+## Probalo {#sec-probalo-02}
+
+La celda que sigue corre en tu navegador, con la serie horaria `H317`. Cambiá la
+frecuencia de destino y la función de agregación, y mirá qué le pasa a la serie.
+
+Vale la pena probar tres cosas: `"D"` con `"mean"` y con `"sum"` —la forma del
+gráfico es la misma, la escala no—; `"6h"`, que conserva parte del ciclo diario; y
+`"W"`, que lo borra por completo y deja apenas un puñado de puntos.
+
+```{pyodide}
+#| caption: Remuestreo — cambiá `frecuencia` y `como`
+#| autorun: true
+import pandas as pd
+import matplotlib.pyplot as plt
+
+datos = pd.read_csv("datos/cap02_horaria.csv", parse_dates=["ds"])
+serie = datos[datos["split"] == "entrenamiento"].set_index("ds")["y"]
+
+frecuencia = "D"      # probá "6h", "12h", "D", "W"
+como = "mean"         # probá "mean", "sum", "max", "last"
+
+agregada = serie.resample(frecuencia).agg(como)
+
+fig, (arriba, abajo) = plt.subplots(2, 1, figsize=(9, 5), sharex=True)
+arriba.plot(serie.index, serie.values, lw=0.9)
+arriba.set_title(f"original: {len(serie)} observaciones horarias")
+abajo.plot(agregada.index, agregada.values, lw=1.8, marker="o", ms=3)
+abajo.set_title(f"{frecuencia} con {como}: {len(agregada)} observaciones")
+fig.autofmt_xdate()
+fig.tight_layout()
+plt.show()
+```
+
+## Ejercicios
+
+Las soluciones están en el @sec-soluciones-02.
+
+**1.** Cargá `H242` y comprobá que su índice tiene frecuencia y que no tiene
+faltantes. Después reconstruí el índice con
+`pd.DatetimeIndex(list(serie.index))` y volvé a mirar `.freq`. ¿Por qué se
+perdió, si las fechas son las mismas?
+
+**2.** Tomá `M35927`, quitale las observaciones en las posiciones 20, 21 y 40, y
+ajustá un `ExponentialSmoothing` con `trend="add"`. Mirá el índice del
+pronóstico. Después reparala con `asfreq` e `interpolate`, y volvé a ajustar.
+¿Cambia el pronóstico? ¿Cambia su índice?
+
+**3.** Agregá la serie `H313` a frecuencia diaria con `mean` y con `sum`.
+Graficá las dos. ¿En qué se parecen y en qué no? ¿Cuál usarías si fuera consumo
+eléctrico y tuvieras que dimensionar una red?
+
+**4.** El @sec-agregar-enganio muestra que el error del naive cae mucho al agregar
+a diario. Repetí el cálculo con `H242` y con `H282`. ¿Se repite el patrón?
+Escribí en dos frases por qué esa caída no significa que el pronóstico diario sea
+mejor.
+
+**5.** Construí una tabla con `y`, su rezago 1, su rezago 12 y una media móvil de
+12 períodos hacia atrás, para `M16834`. ¿Cuántas filas tienen algún `NaN`? ¿Por
+qué es exactamente ese número?
+
+**6.** Tomá una serie del catálogo y calculá una media móvil de 5 períodos
+centrada y otra hacia atrás. Restalas y graficá la diferencia. ¿Dónde difieren
+más? Explicá en una frase por qué usar la centrada como variable de entrada
+inflaría el desempeño medido de un modelo.
