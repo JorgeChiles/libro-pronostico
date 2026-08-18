@@ -4189,3 +4189,416 @@ Ese es el argumento del @sec-seleccion-escala y de la aplicación de pronóstico
 diseño de la evaluación no es un detalle metodológico sino la diferencia entre un experimento
 posible y uno imposible. Y la manera de bajar el costo no es apurar el cómputo: es **usar la
 estructura de la serie para no probar diez candidatos cuando tres alcanzan.**
+
+## Capítulo 12 · Los datos {#sec-soluciones-12}
+
+```{python}
+#| echo: false
+from statsmodels.tsa.holtwinters import SimpleExpSmoothing
+
+
+def racha_maxima(serie):
+    """La misma función del capítulo 12."""
+    if len(serie) == 0:
+        return 0
+    actual = mejor = 1
+    for i in range(1, len(serie)):
+        actual = actual + 1 if serie[i] == serie[i - 1] else 1
+        mejor = max(mejor, actual)
+    return mejor
+
+
+def hw(serie, h, m):
+    return np.asarray(
+        ExponentialSmoothing(serie, trend="add", seasonal="add", seasonal_periods=m,
+                             initialization_method="estimated").fit().forecast(h)
+    )
+```
+
+### Ejercicio 1 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-12-1
+#| tbl-cap: "Las cuatro series del catálogo con el cociente `únicos / n` más bajo, con el paso mínimo entre valores distintos."
+filas = []
+for identificador in catalogo()["serie"]:
+    s = cargar(identificador)
+    valores = s.completa.to_numpy()
+    unicos = np.unique(valores)
+    filas.append({
+        "serie": identificador, "frecuencia": s.frecuencia, "n": len(valores),
+        "únicos": len(unicos), "únicos / n": len(unicos) / len(valores),
+        "mínimo": valores.min(), "máximo": valores.max(),
+        "paso mínimo": float(np.min(np.diff(unicos))),
+        "racha máxima": racha_maxima(valores),
+    })
+
+repetidas = pd.DataFrame(filas).set_index("serie").sort_values("únicos / n")
+repetidas.head(4).round(3)
+```
+
+**Ninguna de las tres primeras es un defecto**, y la columna "paso mínimo" lo demuestra sin
+necesidad de mirar el gráfico: en las tres el paso mínimo entre valores distintos es exactamente
+**0,100**. Los datos están redondeados a un decimal.
+
+Con eso la cuenta se cierra sola. `H242` se mueve entre 10,1 y 17,4, así que con pasos de 0,1
+hay **74 valores posibles** en todo su rango, y la serie usa 65 de ellos en 1.008 observaciones.
+El cociente `únicos / n` de 0,064 no mide repetición patológica: mide que hay más observaciones
+que valores disponibles. Con `H282` pasa lo mismo entre 10,1 y 19,9, y con `D4099` entre 858,5 y
+1.103,3.
+
+```{python}
+#| label: fig-sol-12-1
+#| fig-cap: "Las tres series con el cociente más bajo. Ninguna tiene tramos planos largos: están redondeadas y se mueven en un rango angosto."
+fig = go.Figure()
+for identificador in repetidas.head(3).index:
+    valores = cargar(identificador).completa.to_numpy()
+    fig.add_trace(go.Scatter(
+        x=np.arange(len(valores)), y=valores / valores.mean(), mode="lines",
+        name=identificador, line=dict(width=1.4),
+    ))
+fig.update_xaxes(title="período")
+mostrar(fig, alto=380, titulo_y="valor / media de la serie")
+```
+
+El gráfico confirma que no hay mesetas: las tres oscilan sin parar. Comparado con la
+@fig-m16834, la diferencia es evidente a simple vista.
+
+**El defecto está en la cuarta fila del ranking por racha, no por cociente.** `M16834` tiene un
+cociente de 0,169 —peor que `D2039` y mejor que otras— y una racha de 435. La lección es que
+**el cociente `únicos / n` no es el indicador correcto**: mezcla redondeo con relleno. El
+indicador que separa los dos casos es la racha máxima, porque el redondeo produce muchos valores
+repetidos *dispersos* y el relleno los produce *consecutivos*.
+
+### Ejercicio 2 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-12-2
+#| tbl-cap: "Cuatro métodos sobre M16834, con las 504 observaciones y con las 69 usables."
+s = cargar("M16834")
+y_tr, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+h, m = s.horizonte, s.periodo_estacional
+arranque = int(np.argmax(y_tr != 10_000))
+
+
+def naive_(serie, h, m):
+    return np.repeat(serie[-1], h)
+
+
+def ses_(serie, h, m):
+    return SimpleExpSmoothing(serie, initialization_method="estimated").fit().forecast(h)
+
+
+def rezagos12(serie, h, m):
+    p = 12
+    X = np.array([serie[i - p:i] for i in range(p, len(serie))])
+    objetivo = np.array([serie[i] for i in range(p, len(serie))])
+    modelo = LinearRegression().fit(X, objetivo)
+    historia, salida = list(serie), []
+    for _ in range(h):
+        salida.append(float(modelo.predict([historia[-p:]])[0]))
+        historia.append(salida[-1])
+    return np.array(salida)
+
+
+filas = []
+for nombre, metodo in (("naive", naive_), ("SES", ses_),
+                       ("regresión, 12 rezagos", rezagos12),
+                       ("Holt-Winters", hw)):
+    con = smape(y_te, metodo(y_tr, h, m))
+    sin = smape(y_te, metodo(y_tr[arranque:], h, m))
+    filas.append({"método": nombre, "con las 504": con, "con las 69": sin,
+                  "diferencia": con - sin,
+                  "filas de ajuste con 69": max(0, 69 - 12) if "rezagos" in nombre else None})
+
+pd.DataFrame(filas).set_index("método").round(3)
+```
+
+Las respuestas son tres, no dos.
+
+**SES se parece a `naive`**: 2,897 con las 504 observaciones y 2,815 con las 69, una diferencia
+de 0,08. El motivo es la @eq-ses: los pesos decaen exponencialmente hacia el pasado, así que las
+observaciones de hace más de 435 períodos tienen un peso indistinguible de cero. **SES está
+inmune al relleno no porque lo detecte sino porque lo olvida.**
+
+**Holt-Winters es el caso del capítulo**: 7,634 contra 2,799. Estima doce factores estacionales
+por máxima verosimilitud sobre toda la historia y no tiene ningún mecanismo de olvido.
+
+**Y la regresión sobre 12 rezagos hace algo que no estaba en la consigna: empeora al limpiar
+los datos.** Va de 5,229 con las 504 observaciones a 11,884 con las 69, más del doble peor.
+
+Vale entender por qué, porque es un resultado incómodo y verdadero. Con 69 observaciones y una
+ventana de 12, la tabla supervisada de la @eq-ventana tiene **57 filas y 12 columnas**. Es un
+problema de estimación al borde de la degeneración, y el @sec-sobreajuste explicó exactamente qué
+pasa ahí: la varianza domina. Con las 504 observaciones hay 492 filas, y aunque 423 de ellas sean
+basura idéntica, el sistema queda mejor condicionado.
+
+La conclusión no es que convenga dejar el relleno. Es que **limpiar datos tiene un costo en
+tamaño de muestra, y hay modelos para los que ese costo supera el beneficio.** La respuesta
+correcta para esta serie no es elegir entre 504 y 69: es usar 69 observaciones con un modelo que
+no necesite 492 filas, y `SES` da 2,815 sin ninguna dificultad.
+
+### Ejercicio 3 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-12-3
+#| tbl-cap: "Series de M4 que tienen exactamente el largo mínimo de su frecuencia, y las que están a menos de tres observaciones de él."
+md = metadatos()
+minimos = md.groupby("frecuencia")["n_entrenamiento"].transform("min")
+
+resumen = md.assign(
+    en_el_piso=md["n_entrenamiento"] == minimos,
+    cerca_del_piso=md["n_entrenamiento"] <= minimos + 2,
+).groupby("frecuencia").agg(
+    series=("serie", "size"),
+    piso=("n_entrenamiento", "min"),
+    en_el_piso=("en_el_piso", "sum"),
+    cerca_del_piso=("cerca_del_piso", "sum"),
+)
+resumen["% en el piso"] = (100 * resumen["en_el_piso"] / resumen["series"]).round(2)
+resumen.sort_values("% en el piso", ascending=False)
+```
+
+**El piso solo aprieta en dos frecuencias, y por razones distintas.**
+
+En las **horarias**, 169 de 414 series —el **40,8 %**— tienen exactamente 700 observaciones. Eso
+no es un piso: es un **corte**. Un piso deja pocas series justo en el borde, porque pocas series
+del mundo tienen exactamente el largo mínimo. Que dos de cada cinco lo tengan significa que
+alguien truncó a 700 un lote de series más largas.
+
+En las **anuales**, 235 series están exactamente en 13 y 2.923 están a menos de tres del piso.
+Ahí sí parece un piso genuino: hay muchas series anuales cortas en el mundo, se filtraron las de
+menos de 13, y quedó una acumulación en el borde.
+
+En las otras cuatro frecuencias el piso es casi irrelevante: 1 o 2 series en el mínimo sobre
+decenas de miles. El mínimo mensual de 42 y el trimestral de 16 son curiosidades del conjunto,
+no restricciones que hayan moldeado su composición.
+
+La respuesta a la última pregunta es entonces que **el conjunto se armó de manera heterogénea**:
+las anuales se filtraron por largo y las horarias se truncaron. Cualquier análisis que trate a
+las seis frecuencias como muestras comparables está suponiendo una uniformidad que no existe.
+
+### Ejercicio 4 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-12-4
+#| tbl-cap: "Las 9.248 series que declaran empezar el 1 de enero de 1990, desagregadas por frecuencia y largo."
+md = md.assign(inicio=pd.to_datetime(md["fecha_inicio"], errors="coerce"))
+grupo = md[md["inicio"] == "1990-01-01"]
+
+pd.crosstab(grupo["frecuencia"], grupo["n_entrenamiento"]).loc[
+    :, lambda t: t.sum() >= 100
+]
+```
+
+```{python}
+#| label: tbl-sol-12-4b
+#| tbl-cap: "Categoría económica de las mismas series."
+pd.DataFrame({
+    "series": grupo["categoria"].value_counts(),
+    "% del grupo": (100 * grupo["categoria"].value_counts(normalize=True)).round(1),
+})
+```
+
+**No es una fuente única: son al menos tres lotes que comparten la etiqueta de fecha.**
+
+La primera tabla lo muestra: 6.355 series mensuales de 306 observaciones, 1.584 anuales de 20,
+509 trimestrales de 98, 390 mensuales de 282 y 190 anuales de 18. Cinco combinaciones
+frecuencia-largo, cada una internamente uniforme, en tres frecuencias distintas.
+
+La segunda tabla lo confirma por el otro lado: las cinco categorías económicas están
+representadas —3.017 Micro, 2.237 Macro, 1.825 Demographic, 1.144 Industry, 1.025 Finance—, así
+que el grupo no viene de un solo tipo de proceso. Lo único llamativo es la ausencia total de
+`Other`, la categoría de las horarias.
+
+**Y no, las tres reglas del @sec-fechas-ficcion no cambian.** El descubrimiento es tranquilizador
+sobre la *coherencia interna* de cada lote y no sobre el anclaje. Que 6.355 series cubran de
+verdad los mismos 306 meses no dice que esos meses hayan sido enero de 1990 a junio de 2015: el
+lote pudo trasladarse entero al anonimizar, que es exactamente lo que pasó con los 2.493 bloques
+anuales que declaran empezar en 2063.
+
+Lo que sí agrega es un matiz operativo que vale: **si alguien quisiera cruzar series de M4 entre
+sí, dentro de un mismo lote es defendible.** Cruzarlas con datos externos por fecha, o entre
+lotes, no.
+
+### Ejercicio 5 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-12-5
+#| tbl-cap: "Efecto de borrar el 10 % de las observaciones de M35927 sobre los rezagos, con y sin reindexar al calendario completo."
+s = cargar("M35927")
+y = s.entrenamiento
+h, m = s.horizonte, s.periodo_estacional
+
+generador = np.random.default_rng(5)
+a_borrar = generador.choice(len(y), size=int(0.10 * len(y)), replace=False)
+con_huecos = y.drop(y.index[a_borrar])
+
+# Posición real de cada observación sobreviviente en el calendario original.
+posicion = {fecha: i for i, fecha in enumerate(y.index)}
+indices = [posicion[f] for f in con_huecos.index]
+
+mal_1 = sum(1 for i in range(1, len(indices)) if indices[i] - indices[i - 1] != 1)
+mal_12 = sum(1 for i in range(12, len(indices)) if indices[i] - indices[i - 12] != 12)
+
+completo = con_huecos.reindex(y.index)
+tabla_bien = pd.DataFrame({"y": completo, "rez_1": completo.shift(1),
+                           "rez_12": completo.shift(12)})
+
+pd.DataFrame([
+    {"rezago": "rezago 1", "filas evaluadas": len(indices) - 1, "filas mal": mal_1,
+     "% mal": 100 * mal_1 / (len(indices) - 1)},
+    {"rezago": "rezago 12", "filas evaluadas": len(indices) - 12, "filas mal": mal_12,
+     "% mal": 100 * mal_12 / (len(indices) - 12)},
+]).set_index("rezago").round(1)
+```
+
+**Borrar el 10 % de las observaciones arruina el 9 % de los rezagos de orden 1 y el 75 % de los
+de orden 12.**
+
+El contraste es el resultado del ejercicio y tiene una explicación de una línea: si se ignoran
+los huecos, el rezago de orden $p$ de una fila es correcto solo cuando **ninguna** de las $p$
+observaciones anteriores fue borrada. Con una probabilidad $q$ de borrar cada observación, la
+probabilidad de que el rezago $p$ sobreviva es aproximadamente $(1-q)^p$, y con $q = 0{,}1$ eso
+da 0,90 para $p = 1$ y **0,28 para $p = 12$**. Los 75 % medidos son ese 72 % teórico más el
+efecto de los huecos consecutivos.
+
+La consecuencia práctica es dura: **una cantidad de faltantes que parece inocua destruye
+prácticamente todos los rezagos estacionales**, que son justo los predictores que el
+@sec-supervisado mostró que más aportan.
+
+```{python}
+#| label: tbl-sol-12-5b
+#| tbl-cap: "sMAPE de una regresión sobre los rezagos 1 y 12, según cómo se traten los huecos."
+def regresion_rezagos(tabla, serie_completa, h):
+    limpia = tabla.dropna()
+    X = limpia[["rez_1", "rez_12"]].to_numpy()
+    objetivo = limpia["y"].to_numpy()
+    modelo = LinearRegression().fit(X, objetivo)
+    historia, salida = list(serie_completa), []
+    for _ in range(h):
+        salida.append(float(modelo.predict([[historia[-1], historia[-12]]])[0]))
+        historia.append(salida[-1])
+    return np.array(salida)
+
+
+valores = con_huecos.to_numpy()
+tabla_mal = pd.DataFrame({
+    "y": valores,
+    "rez_1": pd.Series(valores).shift(1),
+    "rez_12": pd.Series(valores).shift(12),
+})
+originales = y.to_numpy()
+tabla_original = pd.DataFrame({
+    "y": originales,
+    "rez_1": pd.Series(originales).shift(1),
+    "rez_12": pd.Series(originales).shift(12),
+})
+
+y_te = s.prueba.to_numpy()
+pd.DataFrame([
+    {"tratamiento": "sin huecos (referencia)",
+     "filas de ajuste": int(tabla_original.dropna().shape[0]),
+     "sMAPE": smape(y_te, regresion_rezagos(tabla_original, originales, h))},
+    {"tratamiento": "reindexar al calendario",
+     "filas de ajuste": int(tabla_bien.dropna().shape[0]),
+     "sMAPE": smape(y_te, regresion_rezagos(tabla_bien, originales, h))},
+    {"tratamiento": "ignorar los huecos",
+     "filas de ajuste": int(tabla_mal.dropna().shape[0]),
+     "sMAPE": smape(y_te, regresion_rezagos(tabla_mal, originales, h))},
+]).set_index("tratamiento").round(3)
+```
+
+Reindexar cuesta **filas** y no cuesta **precisión**: quedan 237 filas usables de las 323
+originales, y el sMAPE va de 1,441 a 1,449, una diferencia de tres milésimas.
+
+Ignorar los huecos conserva 290 filas —53 más— y da 1,829, un **27 % peor**. Es el intercambio
+inverso al del ejercicio 2, y por eso vale ponerlos uno al lado del otro: allá sacar datos malos
+empeoraba porque el modelo necesitaba filas; acá conservar filas empeora porque las filas están
+mal armadas. **Más filas ayuda; más filas mentirosas, no.**
+
+### Ejercicio 6 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-12-6
+#| tbl-cap: "Sesgo del pronóstico de Holt-Winters y efecto de agregar, sobre las series mensuales del catálogo con $h = 18$."
+filas = []
+for identificador in catalogo()["serie"]:
+    s_i = cargar(identificador)
+    if s_i.periodo_estacional != 12 or s_i.horizonte != 18:
+        continue
+    y_entrena, y_prueba = s_i.entrenamiento.to_numpy(), s_i.prueba.to_numpy()
+    if len(y_entrena) < 28:
+        continue
+    pron = hw(y_entrena, 18, 12)
+    error = y_prueba - pron
+    filas.append({
+        "serie": identificador,
+        "sesgo medio": error.mean(),
+        "|error| medio": np.abs(error).mean(),
+        "|sesgo| / |error|": abs(error.mean()) / np.abs(error).mean(),
+        "sMAPE mensual": smape(y_prueba, pron),
+        "sMAPE anual": smape(y_prueba.reshape(-1, 18).sum(axis=1),
+                             pron.reshape(-1, 18).sum(axis=1)),
+    })
+
+sesgos = pd.DataFrame(filas).set_index("serie")
+sesgos["mejora al agregar"] = sesgos["sMAPE mensual"] - sesgos["sMAPE anual"]
+sesgos.sort_values("|sesgo| / |error|").round(2)
+```
+
+**Se cumple, con la mejora medida en términos relativos.**
+
+La columna `|sesgo| / |error|` mide qué fracción del error tiene un signo sistemático: vale 0 si
+los errores se reparten simétricamente y 1 si todos van para el mismo lado. La mejora hay que
+medirla en proporción y no en puntos de sMAPE, porque las once series tienen errores de escalas
+muy distintas.
+
+```{python}
+#| label: fig-sol-12-6
+#| fig-cap: "Mejora relativa al agregar contra la fracción sistemática del error. La correlación de Pearson es $-0{,}96$."
+sesgos["mejora relativa"] = 1 - sesgos["sMAPE anual"] / sesgos["sMAPE mensual"]
+
+fig = go.Figure(go.Scatter(
+    x=sesgos["|sesgo| / |error|"], y=sesgos["mejora relativa"],
+    mode="markers+text", text=sesgos.index, textposition="top center",
+    marker=dict(size=10, color=COLORES["observado"]),
+))
+fig.add_hline(y=0, line_dash="dot", line_width=1, line_color=COLORES["auxiliar"])
+fig.update_xaxes(title="|sesgo| / |error| medio")
+mostrar(fig, alto=420, titulo_y="1 − sMAPE anual / sMAPE mensual")
+```
+
+```{python}
+#| echo: false
+print("correlación de Pearson  : "
+      f"{sesgos['|sesgo| / |error|'].corr(sesgos['mejora relativa']):.3f}")
+print("correlación de Spearman : "
+      f"{sesgos['|sesgo| / |error|'].corr(sesgos['mejora relativa'], method='spearman'):.3f}")
+```
+
+La correlación de Pearson es $-0{,}956$, y los dos extremos se separan sin ambigüedad:
+
+**Con razón por debajo de 0,5**, la agregación borra casi todo el error. `M32571` tiene razón
+0,051 y mejora un **94,9 %** —de 19,45 a 1,00—; `M14892` tiene 0,211 y mejora un 79,3 %.
+
+**Con razón por encima de 0,9**, no mejora nada: las seis series de ese grupo dan mejoras
+relativas de 2,3 %, 1,2 %, 0,2 %, $-0{,}5$ %, $-1{,}3$ % y $-25{,}3$ %. La última es `M3007`, con
+razón 1,000: el modelo se queda corto los dieciocho meses sin una sola excepción, así que agregar
+no cancela nada y **acumula**.
+
+En el medio la relación es más floja, y conviene decirlo. `M18514` tiene razón 0,716 y no mejora
+nada, mientras que `M47356` tiene 0,798 y mejora un 17,2 %. Con once series no se puede pedir
+más: la correlación de Spearman es $-0{,}67$, bastante menor que la de Pearson, precisamente
+porque el orden en la zona media no se respeta.
+
+La regla queda entonces enunciable como aproximación, no como ley:
+
+> La mejora relativa al agregar es aproximadamente
+> $1 - |\overline{e}| \,/\, \overline{|e|}$.
+
+De ahí sale un diagnóstico gratis, y es el verdadero valor del ejercicio. **Si al agregar el
+error no mejora, el modelo está sesgado**, y eso es información que no requiere ninguna prueba
+estadística. Un modelo con sesgo sistemático se puede corregir sumándole una constante; uno con
+error simétrico grande, no. `M3007` no necesita otro modelo: necesita que alguien note el quiebre
+de nivel del @sec-soluciones-14.
