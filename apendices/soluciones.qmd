@@ -449,3 +449,248 @@ instante *t* esos valores todavía no existen.
 Es el caso más común de fuga de información en series de tiempo, y es difícil de
 notar porque el código no tiene nada de raro: `rolling(5, center=True)` se lee
 igual de bien que `rolling(5)`.
+
+## Capítulo 5 · Características de series {#sec-soluciones-05}
+
+```{python}
+#| echo: false
+from statsmodels.tsa.filters.hp_filter import hpfilter
+from statsmodels.tsa.seasonal import STL
+
+
+def fuerzas(y, m):
+    """La misma función del capítulo 5."""
+    if m > 1 and len(y) >= 2 * m:
+        d = STL(y, period=m, robust=True).fit()
+        tendencia, estacional, residuo = d.trend, d.seasonal, d.resid
+    else:
+        residuo, tendencia = hpfilter(y)
+        estacional = pd.Series(0.0, index=y.index)
+
+    def fuerza(componente):
+        return max(0.0, 1 - np.var(residuo, ddof=1)
+                   / np.var(componente + residuo, ddof=1))
+
+    return fuerza(tendencia), (fuerza(estacional) if m > 1 else 0.0)
+```
+
+### Ejercicio 1
+
+```{python}
+referencia = metadatos().set_index("serie")
+
+filas = []
+for s in cargar(fenomeno="caminata-aleatoria", n=3):
+    ft, fs = fuerzas(s.entrenamiento, s.periodo_estacional)
+    filas.append({
+        "serie": s.id,
+        "frecuencia": s.frecuencia,
+        "m": s.periodo_estacional,
+        "F_T": round(ft, 3),
+        "F_T tabla": round(referencia.loc[s.id, "trend_strength"], 3),
+        "F_S": round(fs, 3),
+        "F_S tabla": round(referencia.loc[s.id, "seasonal_strength"], 3),
+    })
+
+pd.DataFrame(filas).set_index("serie")
+```
+
+Los valores coinciden con la tabla, que es lo primero que había que comprobar.
+
+Sobre la expectativa, la respuesta es más interesante que un sí o un no: **la
+fuerza de estacionalidad da baja, pero la de tendencia no necesariamente**. Y eso
+no contradice la etiqueta del catálogo.
+
+Una caminata aleatoria acumula sus incrementos, así que su recorrido tiene rachas
+largas hacia arriba o hacia abajo. Una descomposición ve esas rachas y las asigna
+a la tendencia: el componente suave explica bastante de la variación, y $F_T$ sube.
+Lo que no hay es **estructura repetible que sirva para pronosticar**, y eso es otra
+cosa. Es exactamente lo que hace falta más de un descriptor: $F_T$ alta no
+distingue una tendencia genuina de la deriva accidental de una caminata. Para
+distinguirlas están las pruebas de estacionariedad —`adf_pvalue`, `kpss_pvalue`— y
+el exponente de Hurst.
+
+### Ejercicio 2
+
+```{python}
+meta = metadatos()
+top_quiebres = meta.nlargest(10, "change_points_per_length")
+
+top_quiebres[[
+    "serie", "frecuencia", "n_entrenamiento",
+    "change_points_per_length", "trend_strength", "seasonal_strength",
+]].set_index("serie").round(3)
+```
+
+```{python}
+print(f"F_T media, las 10 con más quiebres : "
+      f"{top_quiebres['trend_strength'].mean():.3f}")
+print(f"F_T media, todas las series        : "
+      f"{meta['trend_strength'].mean():.3f}")
+print(f"correlación quiebres vs F_T        : "
+      f"{meta['change_points_per_length'].corr(meta['trend_strength']):+.3f}")
+```
+
+El patrón se confirma, y la correlación negativa sobre las 99.935 series lo dice
+mejor que los diez casos extremos: **cuantos más quiebres tiene una serie, menor
+tiende a ser su fuerza de tendencia**. Los dos descriptores capturan cosas
+distintas, y ninguno reemplaza al otro.
+
+Conviene notar que las series con más quiebres por unidad de largo suelen ser
+también las **más cortas**: con veinte observaciones, dos quiebres dan una tasa
+altísima. Al usar descriptores normalizados por el largo hay que mirar siempre el
+largo al lado.
+
+### Ejercicio 3
+
+```{python}
+s = cargar("D2039")
+y = s.entrenamiento
+
+for m in [7, 30]:
+    ft, fs = fuerzas(y, m)
+    print(f"m = {m:2d}  ->  F_T = {ft:.3f}   F_S = {fs:.3f}")
+
+print(f"\nm que declara M4 para las diarias: {s.periodo_estacional}")
+print(f"F_S en la tabla precalculada     : "
+      f"{metadatos().set_index('serie').loc[s.id, 'seasonal_strength']:.3f}")
+```
+
+Los dos devuelven un número, y ninguno de los dos es creíble por sí mismo. Ese es
+el punto del ejercicio.
+
+`m = 7` supone un ciclo semanal y `m = 30` un ciclo mensual aproximado. Sobre una
+serie que es prácticamente una caminata aleatoria, la descomposición va a encontrar
+*algún* patrón que se repita cada 7 o cada 30 días, simplemente porque el ruido
+tiene fluctuaciones de todas las escalas. El número resultante no mide
+estacionalidad: mide cuánto ruido cayó en el componente estacional.
+
+Cuál creer, entonces: **ninguno, sin un argumento externo al cálculo**. El período
+estacional no es algo que se estime de los datos y listo; es algo que se decide
+sabiendo qué mide la serie. Si son ventas minoristas diarias, el 7 tiene sentido
+porque los sábados existen. Si es una serie financiera diaria, ni el 7 ni el 30
+significan nada.
+
+M4 declara `m = 1` para las diarias, es decir, las trata como no estacionales, y
+es una decisión defendible para este conjunto. La moraleja general: una
+característica calculada con un período estacional inventado es un número
+inventado, y no se distingue de uno legítimo mirando el número.
+
+### Ejercicio 4
+
+```{python}
+import time
+from math import factorial
+
+
+def entropia_muestral(x, m=2, r=None):
+    x = np.asarray(x, dtype=float)
+    n = len(x)
+    r = 0.2 * np.std(x) if r is None else r
+
+    def coincidencias(k):
+        total = 0
+        for i in range(n - k):
+            for j in range(i + 1, n - k):
+                if np.max(np.abs(x[i:i + k] - x[j:j + k])) <= r:
+                    total += 1
+        return total
+
+    a, b = coincidencias(m + 1), coincidencias(m)
+    return float(-np.log(a / b)) if a and b else float("nan")
+
+
+larga = cargar("D4099").entrenamiento.to_numpy()
+
+# Se mide con 1.000 y se extrapola con la regla del cuadrado.
+inicio = time.perf_counter()
+entropia_muestral(larga[:1000])
+t_1000 = time.perf_counter() - inicio
+
+n_total = len(larga)
+estimado = t_1000 * (n_total / 1000) ** 2
+
+print(f"medido con 1.000 puntos     : {t_1000:.2f} s")
+print(f"observaciones de D4099      : {n_total:,}")
+print(f"estimación para la completa : {estimado:.0f} s "
+      f"({estimado / 60:.1f} minutos)")
+```
+
+La regla es directa: si el costo va con $n^2$, multiplicar el largo por $k$
+multiplica el tiempo por $k^2$. De 1.000 a 9.919 observaciones, $k \approx 9{,}9$,
+así que el tiempo se multiplica por unas 98 veces.
+
+No medimos la serie completa acá porque el libro se compila en cada cambio y un
+capítulo no puede tardar minutos en una sola celda —que es, en pequeño, el mismo
+problema que hizo que el cálculo sobre las 100.000 series llevara 16 horas—. Si lo
+corrés, esperá un resultado del orden de la estimación, algo por encima: el costo
+real crece un poco más rápido que $n^2$ porque las series largas también degradan
+el uso de la memoria caché.
+
+Nota práctica: en un cálculo $O(n^2)$, estimar el costo total muestreando **las
+primeras** series de un archivo da un resultado muy optimista si esas series son
+más cortas que el promedio. La estimación hay que hacerla sobre una muestra
+aleatoria de largos.
+
+### Ejercicio 5
+
+```{python}
+columnas = [
+    "trend_strength", "seasonal_strength", "z_acf1",
+    "z_entropy", "complexity_index",
+]
+mensuales = metadatos()
+mensuales = mensuales[mensuales["frecuencia"] == "mensual"]
+
+correlaciones = mensuales[columnas].corr()
+correlaciones.round(3).style.background_gradient(cmap="RdBu_r", vmin=-1, vmax=1)
+```
+
+```{python}
+# Solo el triángulo superior: cada par una vez, sin la diagonal.
+triangulo = np.triu(np.ones(correlaciones.shape), k=1).astype(bool)
+
+pares = (
+    correlaciones.where(triangulo)
+    .stack()
+    .rename("correlación")
+    .to_frame()
+)
+pares["magnitud"] = pares["correlación"].abs()
+pares.sort_values("magnitud", ascending=False).round(3).head(4)
+```
+
+Los pares más correlacionados involucran al índice de complejidad, y eso es
+esperable por construcción: el índice **es** una combinación lineal de los
+descriptores, así que tiene que correlacionar fuerte con los que más pesan en él.
+
+Entre los descriptores originales, el par más correlacionado es el que junta la
+fuerza de tendencia con la autocorrelación al rezago 1, y tiene sentido: una serie
+con tendencia suave es, casi por definición, una serie donde cada valor se parece
+mucho al anterior. Son dos maneras de medir la misma propiedad.
+
+¿Justifica reducir a un índice? **Sí, con una condición.** Justifica reducir porque
+descriptores redundantes no aportan información nueva y sí aportan varianza a
+cualquier modelo que los use. La condición es que la reducción **no se puede
+interpretar por partes**: el índice es útil como escala de dificultad, pero afirmar
+"esta serie es compleja *porque* tiene poca tendencia" requiere volver a los
+descriptores, no leer el índice.
+
+### Ejercicio 6
+
+Si no se invirtiera el signo, todas las correlaciones de la
+@tbl-validacion-indice cambiarían de signo: la del índice pasaría de
+aproximadamente $+0{,}40$ a $-0{,}40$. Las de las entropías quedarían igual, porque
+no dependen de esa decisión.
+
+Cómo detectarlo sin ver el código, en dos frases: **el signo se verifica contra una
+predicción teórica, no contra el código**. Más complejidad tiene que implicar más
+error, así que una correlación negativa con el error del naive es imposible si el
+índice mide lo que dice medir; y como las entropías clásicas —que sí tienen signo
+inequívoco— correlacionan positivamente, un índice con signo opuesto a ellas es la
+señal de alarma.
+
+Es un chequeo que conviene hacer siempre con cualquier componente principal, porque
+el signo que devuelve la descomposición es arbitrario: depende de detalles
+numéricos de la implementación y puede cambiar entre versiones de la biblioteca sin
+que nada avise.
