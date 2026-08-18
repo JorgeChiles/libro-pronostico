@@ -230,6 +230,35 @@ migración del sitio.
 
 ---
 
+## Un defecto conocido del catálogo curado
+
+El @sec-los-datos —capítulo 12— documenta que `M16834` tiene sus primeras 435 de
+504 observaciones de entrenamiento en el valor 10.000 exacto: es un relleno, no
+datos. La serie está en el catálogo como ejemplar del fenómeno *tendencia y
+estacionalidad* para la frecuencia mensual, y eso es una mala elección.
+
+**Por qué pasó.** La selección de `libro/_construir_catalogo.py` usa el índice de
+complejidad estructural, que resume 29 descriptores por componentes principales.
+Ninguno de los 29 pregunta si hay una racha larga de valores idénticos. El índice
+midió bien lo que mide: la serie tiene tendencia y estacionalidad en su último
+14 %.
+
+**Cuál es la corrección.** Agregar un descriptor de racha máxima —la función
+`racha_maxima` del capítulo 12 sirve tal cual— como filtro de exclusión en
+`FENOMENOS`, y sumar `M16834` a `SERIES_DEL_LIBRO` para que siga viajando en el
+repositorio, porque los capítulos 2, 4 y 12 la usan.
+
+**Por qué no está hecho todavía.** Regenerar el catálogo cambia qué series lo
+componen, y con eso los números de las tablas agregadas de los capítulos 5, 13,
+15 y 16, que ya están escritos con valores citados en la prosa. La corrección es
+correcta y la churn es real; es una decisión de cuándo, no de si.
+
+Mientras no se haga, el defecto está explicado en el capítulo 12 a la vista del
+lector, con la medición de cuánto cuesta: Holt-Winters pasa de 2,799 a 7,634 de
+sMAPE por entrenar con el relleno, y `naive` no se entera.
+
+---
+
 ## Lo que queda por decidir
 
 1. **La versión en PDF.** Está prevista pero no probada. Los widgets y las

@@ -1,7 +1,575 @@
 # Los datos {#sec-los-datos}
 
-Tipos, escalas, limpieza y fuga de información.
+```{python}
+#| echo: false
+import warnings
 
-::: {.callout-note appearance="simple"}
-Capítulo en preparación.
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+
+from libro.datos import cargar, catalogo, metadatos
+from libro.graficos import COLORES, mostrar
+
+warnings.simplefilter("ignore")
+
+
+def smape(real, pron):
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    den = np.abs(real) + np.abs(pron)
+    den[den == 0] = 1e-9
+    return 200 * np.mean(np.abs(real - pron) / den)
+```
+
+El @sec-supervisado prometió que este capítulo trata la fuga de información en detalle, y el
+@sec-validacion-cruzada volvió a señalarlo. Cumple con eso al final. Pero antes hay algo más
+básico que hacer, y es mirar los datos.
+
+Este libro usa M4 en todos sus ejemplos, y M4 es el conjunto de series más usado de la
+literatura de pronóstico. Eso no lo hace limpio. Este capítulo muestra qué contiene, qué no
+contiene, y una serie que va a incomodar.
+
+## Qué es M4 {#sec-que-es-m4}
+
+```{python}
+#| label: tbl-composicion
+#| tbl-cap: "Las 99.935 series de M4 por frecuencia y categoría económica."
+md = metadatos()
+pd.crosstab(md["frecuencia"], md["categoria"], margins=True, margins_name="total")
+```
+
+Dos hechos de la @tbl-composicion condicionan todo lo que este libro puede decir.
+
+**M4 es, sobre todo, mensual y trimestral.** 48.000 series mensuales y 24.000 trimestrales
+contra 414 horarias y 294 semanales. Cualquier promedio sobre "las series de M4" es en la
+práctica un promedio sobre series mensuales y trimestrales, y cualquier conclusión sobre datos
+de alta frecuencia se apoya en menos del 1 % del conjunto.
+
+**Las categorías no están repartidas parejo entre frecuencias.** Las 414 horarias son todas
+`Other`, y las 294 semanales tienen 6 series industriales contra 164 financieras. Comparar
+frecuencias es entonces comparar también composiciones distintas, y una diferencia que uno
+atribuye a la frecuencia puede ser de la categoría.
+
+```{python}
+#| label: tbl-largos
+#| tbl-cap: "Largo del período de entrenamiento por frecuencia. El mínimo de cada fila es una decisión de diseño de la competencia, no una propiedad de los datos."
+resumen = md.groupby("frecuencia").agg(
+    series=("serie", "size"),
+    mínimo=("n_entrenamiento", "min"),
+    mediana=("n_entrenamiento", "median"),
+    máximo=("n_entrenamiento", "max"),
+    m=("periodo_estacional", "first"),
+    h=("horizonte", "first"),
+)
+resumen["mínimo / h"] = (resumen["mínimo"] / resumen["h"]).round(1)
+resumen.sort_values("mediana")
+```
+
+Los mínimos de la @tbl-largos contestan algo que el @sec-particiones dejó abierto. Ahí un
+ejercicio buscaba series de M4 con menos de $2m$ observaciones de ajuste después de apartar una
+validación, y el resultado era **cero**. La @tbl-largos explica por qué: M4 exigió al menos 13
+observaciones anuales, 16 trimestrales, 42 mensuales, 93 diarias, 247 semanales y 700 horarias
+[@makridakis2018]. Los pisos están puestos precisamente para que los métodos estacionales se
+puedan ajustar.
+
+La última columna muestra qué tan apretado es cada piso medido en horizontes. Las anuales
+arrancan con 2,2 horizontes de historia y las horarias con 14,6. **La serie anual más corta de
+M4 tiene poco más del doble de lo que se le pide pronosticar**, y eso no es una anomalía: es el
+borde del conjunto por diseño.
+
+::: {.callout-note}
+## Lo que esto implica para cualquier conclusión de este libro
+
+Un conjunto de datos con pisos por frecuencia **no es una muestra del mundo**. Las series
+mensuales cortas que existen en la realidad —un producto lanzado hace ocho meses, un sensor
+instalado en marzo— quedaron afuera de M4 por construcción.
+
+Por eso las conclusiones de la Parte II se enuncian como "sobre estas series", y por eso el
+@sec-produccion insiste en que una aplicación de pronóstico tiene que manejar casos que M4 no
+contiene. @godahewa2021 armaron un archivo con criterios distintos justamente para que la
+literatura no dependa de un solo conjunto.
+:::
+
+## Las fechas no son de fiar {#sec-fechas-ficcion}
+
+M4 trae una fecha de inicio por serie. Conviene mirarla antes de usarla.
+
+```{python}
+#| label: tbl-fechas
+#| tbl-cap: "Fechas de inicio declaradas en M4. La competencia se publicó en 2018."
+md = md.assign(inicio=pd.to_datetime(md["fecha_inicio"], errors="coerce"))
+
+pd.DataFrame({
+    "series": md.groupby("frecuencia").size(),
+    "inicio más viejo": md.groupby("frecuencia")["inicio"].min().dt.date,
+    "inicio más nuevo": md.groupby("frecuencia")["inicio"].max().dt.date,
+    "fechas distintas": md.groupby("frecuencia")["inicio"].nunique(),
+    "empiezan después de 2018": md.assign(
+        futura=md["inicio"] > "2018-01-01"
+    ).groupby("frecuencia")["futura"].sum(),
+})
+```
+
+La última columna es el problema: **15.838 series de M4 declaran empezar después de 2018**, el
+año en que se publicó la competencia, y 10.886 series anuales declaran empezar después de 2050.
+Una serie que arranca en 2072 y tiene 38 observaciones anuales termina en 2110.
+
+```{python}
+#| label: tbl-fechas-repetidas
+#| tbl-cap: "Las seis fechas de inicio más repetidas en M4."
+(md["inicio"].value_counts().head(6).rename("series")
+ .to_frame().rename_axis("fecha de inicio"))
+```
+
+Las fechas también están **muy reutilizadas**: 9.248 series comparten el 1 de enero de 1990 y
+6.258 comparten el 31 de enero de 2010, mientras que las 23.000 series anuales usan en total 218
+fechas distintas.
+
+Pero acá hay que tener cuidado con la conclusión fácil, porque la repetición no es descuido.
+
+```{python}
+#| label: tbl-bloques
+#| tbl-cap: "Las series que comparten cada una de las cuatro fechas de inicio más frecuentes, con su largo más común."
+filas = []
+for fecha in ("1990-01-01", "2010-01-31", "2063-12-31", "2069-01-01"):
+    grupo = md[md["inicio"] == fecha]
+    largos = grupo["n_entrenamiento"].value_counts()
+    filas.append({
+        "fecha de inicio": fecha,
+        "series": len(grupo),
+        "frecuencia dominante": grupo["frecuencia"].mode().iloc[0],
+        "largo más común": int(largos.index[0]),
+        "series con ese largo": int(largos.iloc[0]),
+    })
+
+pd.DataFrame(filas).set_index("fecha de inicio")
+```
+
+Cada fecha repetida es un **bloque de procedencia**. De las 9.248 series que arrancan el 1 de
+enero de 1990, **6.355 tienen exactamente 306 observaciones mensuales**: son un lote que cubre el
+mismo tramo, seguramente de una misma fuente. Lo mismo con las 5.862 de 69 observaciones que
+arrancan en enero de 2010, y con las 2.493 series anuales de 29 observaciones que arrancan en
+diciembre de 2063.
+
+Y las convenciones se ven: 23.980 series mensuales empiezan un día 31 —cierre de mes— y 14.267
+series anuales empiezan en diciembre —cierre de año—. Eso es contabilidad real, no relleno.
+
+La caracterización precisa es entonces más matizada que "las fechas son inventadas":
+
+**Dentro de un bloque, las fechas son coherentes.** El orden, el espaciado y la posición
+estacional están bien, y las series de un mismo lote probablemente cubran de verdad el mismo
+tramo.
+
+**El anclaje absoluto no es de fiar para una sexta parte del conjunto.** Un bloque de 2.493
+series anuales que declara empezar en 2063 es internamente consistente y su año es imposible.
+
+De ahí salen tres reglas, para este libro y para cualquier trabajo sobre M4.
+
+**No se pueden usar características de calendario.** Nada de "es diciembre", "es feriado", "es
+fin de trimestre fiscal". El @sec-ingenieria construye características a partir de la posición
+dentro del ciclo estacional —el mes $1$ al $12$ *de la serie*— y no a partir de meses del
+calendario, porque esos meses no significan nada.
+
+**No se pueden cruzar series por fecha.** Dos series que declaran el mismo enero no vivieron el
+mismo enero, así que agregar una variable macroeconómica externa por fecha sería agregar ruido
+con apariencia de información.
+
+**El índice temporal es un contador, no un reloj.** Sirve para ordenar y para saber la posición
+estacional. Para nada más, y eso alcanza: ningún método de este libro necesita saber en qué año
+está.
+
+::: {.callout-important}
+## Una consecuencia de ingeniería
+
+Las series anuales largas con fechas de inicio arbitrarias se van del rango de fechas que pandas
+maneja por omisión. `Y21290` tiene 671 observaciones anuales de entrenamiento y empieza en 1979,
+así que termina en el año **2655**, y `datetime64[ns]` no llega más allá de 2262.
+
+Por eso el módulo de datos de este libro construye sus índices con resolución de segundos:
+
+```python
+pd.date_range(start=inicio, periods=n, freq=..., unit="s")
+```
+
+Es el tipo de detalle que no aparece en ningún artículo y hace fallar la primera compilación. El
+@sec-suavizado documenta la vez que el mismo techo reapareció cuando `statsmodels` extendía el
+índice para etiquetar un pronóstico.
+:::
+
+## Una serie que no es una serie {#sec-m16834}
+
+`M16834` está en el catálogo curado de este libro. Es una serie mensual con 504 observaciones
+de entrenamiento, categoría `Micro`, dificultad `media_alta`. Todo eso es cierto y nada de eso
+sirve.
+
+```{python}
+#| label: fig-m16834
+#| fig-cap: "M16834 completa. Los primeros 435 valores son exactamente 10.000."
+s = cargar("M16834")
+y = s.completa.to_numpy()
+n_tr = len(s.entrenamiento)
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=np.arange(n_tr), y=y[:n_tr], mode="lines", name="entrenamiento",
+    line=dict(color=COLORES["observado"], width=2),
+))
+fig.add_trace(go.Scatter(
+    x=np.arange(n_tr, len(y)), y=y[n_tr:], mode="lines", name="prueba",
+    line=dict(color=COLORES["prueba"], width=2),
+))
+fig.update_xaxes(title="período")
+mostrar(fig, alto=380, titulo_y="unidades")
+```
+
+```{python}
+#| label: tbl-m16834
+#| tbl-cap: "M16834: cuánto de la serie es el valor 10.000 exacto."
+y_tr = s.entrenamiento.to_numpy()
+donde_arranca = int(np.argmax(y_tr != 10_000))
+
+pd.DataFrame([{
+    "observaciones de entrenamiento": len(y_tr),
+    "iguales a 10.000 exacto": int((y_tr == 10_000).sum()),
+    "% del entrenamiento": 100 * (y_tr == 10_000).mean(),
+    "primera observación distinta": donde_arranca,
+    "observaciones usables": len(y_tr) - donde_arranca,
+    "ciclos anuales usables": (len(y_tr) - donde_arranca) / 12,
+}], index=["M16834"]).round(2).T
+```
+
+**Las primeras 435 de las 504 observaciones de entrenamiento son el número 10.000 exacto.** No
+son un valor plausible ni un tramo de baja variabilidad: son un relleno. Después del período 435
+la serie arranca alrededor de 2.450 y se comporta como una serie mensual normal, con tendencia y
+estacionalidad.
+
+Dicho de otra manera: `M16834` no es una serie de 504 observaciones con un tramo raro. Es una
+serie de **69 observaciones** —cinco ciclos anuales y tres cuartos— con 435 valores inventados
+delante.
+
+### A quién le hace daño {#sec-a-quien-dana}
+
+Lo interesante no es que el defecto exista. Es que **el daño depende de qué modelo se use**.
+
+```{python}
+#| label: tbl-m16834-dano
+#| tbl-cap: "sMAPE de prueba sobre M16834, ajustando con las 504 observaciones o solo con las 69 usables."
+h, m = s.horizonte, s.periodo_estacional
+y_te = s.prueba.to_numpy()
+
+
+def naive(serie, h, m):
+    return np.repeat(serie[-1], h)
+
+
+def snaive(serie, h, m):
+    return np.array([serie[-m + (i % m)] for i in range(h)])
+
+
+def holt_winters(serie, h, m):
+    return (ExponentialSmoothing(serie, trend="add", seasonal="add",
+                                 seasonal_periods=m,
+                                 initialization_method="estimated")
+            .fit().forecast(h))
+
+
+filas = []
+for nombre, metodo in (("naive", naive), ("snaive", snaive),
+                       ("Holt-Winters", holt_winters)):
+    con = smape(y_te, metodo(y_tr, h, m))
+    sin = smape(y_te, metodo(y_tr[donde_arranca:], h, m))
+    filas.append({
+        "método": nombre,
+        "con las 504": con,
+        "con las 69 usables": sin,
+        "cuánto cuesta el relleno": con - sin,
+    })
+
+pd.DataFrame(filas).set_index("método").round(3)
+```
+
+**`naive` y `snaive` no notan nada.** Los dos miran solo el final de la serie, así que los 435
+valores falsos les son invisibles: 3,018 y 21,144 en los dos casos.
+
+**Holt-Winters pasa de 2,799 a 7,634: un 173 % peor.** Estima nivel, tendencia y doce factores
+estacionales por máxima verosimilitud sobre toda la historia, y esa historia es en un 86 %
+mentira. El método que usa más información es el que se envenena.
+
+Esa asimetría es la lección del capítulo, y va en contra de la intuición cómoda. **Un problema
+de datos no perjudica a todos los modelos por igual: perjudica exactamente a los que uno eligió
+porque aprovechan más los datos.** Un equipo que compare naive contra Holt-Winters en una
+cartera con series así va a concluir que Holt-Winters no sirve, cuando lo que no sirve son los
+datos.
+
+::: {.callout-warning}
+## Un defecto del catálogo de este libro
+
+`M16834` está en el catálogo curado como ejemplar del fenómeno *tendencia y estacionalidad* para
+la frecuencia mensual. Es una mala elección, y el motivo es instructivo.
+
+La curación usa el índice de complejidad estructural del @sec-caracteristicas, que resume 29
+descriptores por componentes principales. Ninguno de esos 29 descriptores pregunta "¿hay una
+racha larga de valores idénticos?". El índice vio una serie con tendencia y estacionalidad
+—porque las tiene, en su último 14 %— y la etiquetó bien según lo que mide.
+
+Queda documentado acá en vez de corregido en silencio, por dos razones. La primera es que
+`M16834` se usa en los ejercicios del @sec-datos-temporales y del @sec-descomposicion, y quien
+mire la tabla de rezagos de la solución del primero va a ver doce valores idénticos: ahora sabe
+por qué. La segunda es que **la corrección no es cambiar la serie sino agregar el descriptor que
+falta**, y eso cambia el catálogo entero y con él los números de varios capítulos. Es una
+decisión que se toma a la vista, no en una nota al pie.
+:::
+
+## Cómo encontrar estas cosas {#sec-diagnostico}
+
+Nada de lo anterior requiere estadística. Requiere cuatro conteos, que conviene hacer antes de
+ajustar cualquier cosa.
+
+```{python}
+#| label: tbl-diagnostico
+#| tbl-cap: "Diagnóstico elemental sobre las 34 series del catálogo; solo las que levantan alguna bandera. La racha es la cantidad máxima de valores idénticos consecutivos."
+def racha_maxima(serie):
+    """Cuántos valores idénticos consecutivos, como máximo."""
+    if len(serie) == 0:
+        return 0
+    actual = mejor = 1
+    for i in range(1, len(serie)):
+        actual = actual + 1 if serie[i] == serie[i - 1] else 1
+        mejor = max(mejor, actual)
+    return mejor
+
+
+def diagnosticar(identificador):
+    s = cargar(identificador)
+    valores = s.completa.to_numpy()
+    return {
+        "serie": identificador,
+        "frecuencia": s.frecuencia,
+        "n": len(valores),
+        "ceros": int((valores == 0).sum()),
+        "negativos": int((valores < 0).sum()),
+        "faltantes": int(np.isnan(valores).sum()),
+        "racha máxima": racha_maxima(valores),
+        "únicos / n": len(np.unique(valores)) / len(valores),
+        "todos enteros": bool(np.all(valores == np.round(valores))),
+    }
+
+
+diagnostico = pd.DataFrame(
+    [diagnosticar(i) for i in catalogo()["serie"]]
+).set_index("serie")
+
+diagnostico[
+    (diagnostico["racha máxima"] >= 5) | (diagnostico["únicos / n"] < 0.2)
+].sort_values("racha máxima", ascending=False).round(3)
+```
+
+De 34 series, once levantan alguna bandera —seis por la racha y siete por el cociente, con dos
+que caen en las dos— y **no todas son un problema**. Ahí está la gracia del diagnóstico: separa
+lo que hay que mirar de lo que hay que arreglar.
+
+`M16834` es un defecto. `H242`, con 1.008 observaciones y 65 valores distintos, no lo es: es una
+serie horaria muy cuantizada —probablemente un conteo con pocos niveles posibles— y su racha
+máxima es corta. `D4099` tiene 9.933 observaciones, 846 valores distintos y rachas de hasta 10:
+una serie diaria suave y redondeada, no una serie rota.
+
+La regla es entonces: **la bandera indica dónde mirar el gráfico, no qué concluir.** Un
+diagnóstico automático que decida por su cuenta qué borrar va a borrar datos buenos.
+
+```{python}
+#| label: tbl-enteros
+#| tbl-cap: "Series del catálogo cuyos valores son todos enteros exactos."
+diagnostico[diagnostico["todos enteros"]][
+    ["frecuencia", "n", "únicos / n"]
+].round(3)
+```
+
+Doce de las 34 series tienen valores enteros exactos, y eso tampoco es un defecto: es una pista
+sobre qué son. Un conteo —unidades vendidas, personas, transacciones— no es una cantidad
+continua, y los métodos de este libro le van a asignar probabilidad a 3,7 unidades vendidas.
+Cuando los valores son chicos eso importa mucho y tiene literatura propia [@kolassa2016]; cuando
+son grandes, como acá, la aproximación continua es inocua. Lo que no conviene es no haberlo
+notado.
+
+## Lo que M4 no tiene {#sec-lo-que-no-tiene}
+
+```{python}
+#| label: tbl-lo-que-no-tiene
+#| tbl-cap: "Recuento de los tres problemas de datos más comunes, sobre las 34 series del catálogo."
+pd.DataFrame([{
+    "series con valores faltantes": int((diagnostico["faltantes"] > 0).sum()),
+    "series con ceros": int((diagnostico["ceros"] > 0).sum()),
+    "series con valores negativos": int((diagnostico["negativos"] > 0).sum()),
+    "valor mínimo de todo el catálogo": float(
+        min(cargar(i).completa.min() for i in catalogo()["serie"])
+    ),
+}], index=["catálogo"]).T
+```
+
+Cero, cero y cero. M4 garantiza series **estrictamente positivas y sin huecos**: los
+organizadores descartaron o completaron todo lo demás [@makridakis2020]. Es la misma decisión que
+toma casi cualquier repositorio de series, y la razón por la que los libros de pronóstico
+—incluido @hyndman2021— tratan los datos faltantes en una sección corta y no en un capítulo.
+
+Eso es cómodo, y es una limitación que hay que declarar. **Este libro no puede enseñar el manejo
+de datos faltantes con sus propios ejemplos**, porque sus ejemplos no tienen datos faltantes. Lo
+que sí puede hacer es dejar la lista de lo que cambia cuando aparecen, para que nadie llegue a
+esa situación creyendo que las técnicas de la Parte II se aplican sin modificación.
+
+| lo que aparece en datos reales | qué se rompe | qué hacer |
+|---|---|---|
+| huecos en el índice | los rezagos de la @eq-ventana dejan de ser rezagos: la fila mira $p$ *filas* atrás, no $p$ *períodos* | reindexar al calendario completo antes de construir características, y decidir explícitamente qué es un hueco |
+| ceros | el sMAPE se indefine y el MAPE explota | métricas con denominador de escala, como el MASE del @sec-metricas |
+| negativos | el logaritmo y Box-Cox del @sec-logaritmo no aplican | modelar sin transformar, o transformar con un corrimiento declarado |
+| series intermitentes, con mayoría de ceros | la estacionalidad y la tendencia dejan de ser el fenómeno dominante | métodos específicos, que este libro no cubre |
+| revisiones de datos publicados | el valor que hoy se ve para el mes pasado no es el que se veía el mes pasado | guardar la versión *tal como estaba* en cada fecha |
+
+: Lo que M4 no obliga a resolver y los datos reales sí. {#tbl-datos-reales}
+
+La última fila merece un párrafo aparte, porque es la más traicionera y la que conecta con la
+sección siguiente.
+
+## Fuga de información {#sec-fuga}
+
+El @sec-trampa listó tres formas concretas de usar información no disponible. Acá está el
+criterio general del que las tres son casos particulares.
+
+Vale decir de entrada que no es un problema de principiantes. @kapoor2023 revisaron 294
+artículos de diecisiete disciplinas que usaban aprendizaje automático y encontraron fuga en
+buena parte de ellos, con resultados publicados que no se sostienen al corregirla. En series de
+tiempo el riesgo es mayor que en otros dominios, porque el orden de los datos es justamente lo
+que hay que respetar.
+
+Sea $\mathcal{F}_t$ el conjunto de todo lo que se podía saber en el momento $t$. Un pronóstico
+para el período $t + k$ es admisible si y solo si
+
+$$
+\hat{y}_{t+k} = g\!\left( \mathcal{F}_t \right),
+\qquad
+\mathcal{F}_t = \big\{\, y_s,\; x_s \;:\; s \leq t,\ \text{con el valor que tenían en } t \,\big\}
+$$ {#eq-conjunto-informacion}
+
+La cláusula final de la @eq-conjunto-informacion es la que se olvida. No basta con que el dato
+sea de un período anterior: tiene que haber **estado disponible** entonces, y con el valor que
+tenía entonces.
+
+Con eso, las formas de fuga se ordenan de la más obvia a la más difícil de ver.
+
+**1. Usar el futuro directamente.** Un rezago negativo, una ventana centrada, un `shift(-1)`. Es
+la del @sec-rezagos y se detecta leyendo el código.
+
+**2. Usar estadísticas del conjunto completo.** Ajustar un `StandardScaler`, imputar con la
+media, seleccionar variables o fijar hiperparámetros mirando todos los datos. El valor de cada
+observación no vino del futuro, pero la *transformación* sí. Se evita con `Pipeline`.
+
+**3. Elegir el modelo con el conjunto de prueba.** Es el @sec-particiones entero, y la
+@tbl-optimismo le puso número: 3,45 puntos de sMAPE con diez candidatos.
+
+**4. Usar datos revisados.** Las series económicas se corrigen después de publicarse. Un modelo
+entrenado con la versión final de la historia aprendió de números que en su momento nadie tenía,
+y en producción va a recibir primeras estimaciones. Es fuga aunque el índice temporal esté
+perfecto y no haya ninguna ventana centrada, y **ningún chequeo de código la detecta**: hace
+falta saber cómo se produjo el dato.
+
+**5. Usar información de la selección de la muestra.** El caso de este mismo capítulo. Los pisos
+de la @tbl-largos significan que "esta serie está en M4" ya informa que tiene al menos 42
+observaciones mensuales. Un modelo global entrenado en M4 hereda ese supuesto sin que aparezca en
+ninguna variable, y lo va a aplicar a una serie de ocho meses que nunca habría entrado en la
+competencia.
+
+::: {.callout-tip}
+## La prueba que detecta las cinco
+
+Antes de creer un resultado, contesta una pregunta concreta: **¿podría haber corrido este código
+exactamente igual el día del pronóstico?** No "¿es correcto?" ni "¿usé bien la biblioteca?",
+sino si el programa habría funcionado, tal cual, con los datos disponibles ese día.
+
+Si la respuesta obliga a decir "tendría que haber esperado a que publicaran la revisión" o
+"tendría que haber sabido cuál era el mejor modelo", hay fuga. Las cinco formas de arriba fallan
+esa pregunta, y ninguna otra prueba las detecta todas.
+:::
+
+## Agregación temporal {#sec-agregacion-temporal}
+
+Una última propiedad de los datos que se decide antes de modelar: a qué frecuencia mirarlos. Una
+serie mensual se puede sumar a trimestral, y el error del mismo pronóstico cambia.
+
+$$
+y^{(k)}_{j} = \sum_{t \,=\, (j-1)k + 1}^{jk} y_t
+$$ {#eq-agregacion-temporal}
+
+```{python}
+#| label: tbl-agregacion
+#| tbl-cap: "El mismo pronóstico de Holt-Winters, medido a distintos niveles de agregación de la @eq-agregacion-temporal. Series mensuales del catálogo con $h = 18$."
+filas = []
+for identificador in catalogo()["serie"]:
+    s_i = cargar(identificador)
+    if s_i.periodo_estacional != 12 or s_i.horizonte != 18:
+        continue
+    y_entrena, y_prueba = s_i.entrenamiento.to_numpy(), s_i.prueba.to_numpy()
+    if len(y_entrena) < 2 * 12 + 4:
+        continue
+    pron = np.asarray(holt_winters(y_entrena, 18, 12))
+    fila = {"serie": identificador}
+    for nombre, k in (("mensual", 1), ("trimestral", 3), ("semestral", 6),
+                      ("anual", 18)):
+        fila[nombre] = smape(y_prueba.reshape(-1, k).sum(axis=1),
+                             pron.reshape(-1, k).sum(axis=1))
+    filas.append(fila)
+
+agregacion = pd.DataFrame(filas).set_index("serie")
+pd.concat([agregacion, agregacion.agg(["mean", "median"])]).round(2)
+```
+
+El error **baja al agregar en 7 de las 11 series** y el promedio va de 21,35 mensual a 18,69
+semestral. El mecanismo es aritmético y no tiene nada de sutil: los errores mensuales de signo
+opuesto se cancelan al sumarse, y lo que queda es el error del total.
+
+Dos consecuencias prácticas.
+
+**El nivel de agregación es parte de la definición del problema, no del método.** Un sMAPE de 21
+mensual y uno de 19 semestral describen el mismo pronóstico, así que comparar métodos medidos a
+distintos niveles no significa nada. Hay que fijarlo antes y decirlo.
+
+**Si a quien pide el pronóstico le importa el total del trimestre, hay que medir el total del
+trimestre.** El @sec-que-reportar insiste en reportar la métrica que corresponde a la decisión;
+esto es lo mismo un paso antes, en la definición de la unidad.
+
+Y el caso que rompe la regla vale mirarlo: en `M3007` el error **empeora** al agregar, de 50,75 a
+63,57. Es la serie con el quiebre de nivel del @sec-soluciones-14, y sus errores mensuales no se
+cancelan porque tienen todos el mismo signo: el modelo se queda corto todos los meses. **La
+cancelación al agregar es un beneficio de los errores sin sesgo; con un modelo sesgado, agregar
+acumula el sesgo.**
+
+## Ejercicios
+
+Las soluciones están en el @sec-soluciones-12.
+
+**1.** Grafica las tres series del catálogo con el cociente `únicos / n` más bajo de la
+@tbl-diagnostico. Decide para cada una si es un defecto o una propiedad, y justifica con el
+gráfico.
+
+**2.** Repite la @tbl-m16834-dano con `SES` y con una regresión sobre 12 rezagos. ¿Se parecen más
+a `naive` o a Holt-Winters? Explica el resultado por cómo cada método usa la historia.
+
+**3.** Usando `metadatos()`, cuenta cuántas series de cada frecuencia tienen exactamente el largo
+mínimo de su frecuencia. ¿Es un largo frecuente o un caso aislado? ¿Qué dice eso sobre cómo se
+armó el conjunto?
+
+**4.** La @tbl-bloques sugiere que cada fecha repetida es un lote de procedencia. Comprueba si
+las 9.248 series del 1 de enero de 1990 comparten además categoría, y decide si el lote es una
+fuente única o varias. ¿Cambia eso alguna de las tres reglas del @sec-fechas-ficcion?
+
+**5.** Toma una serie mensual del catálogo, borra al azar el 10 % de las observaciones y compara
+los rezagos que salen de reindexar al calendario completo contra los que salen de ignorar los
+huecos. ¿Cuántas filas quedan mal y cuánto cambia el sMAPE?
+
+**6.** Calcula el sesgo de un pronóstico de Holt-Winters sobre `M3007` —el error medio con signo,
+no el absoluto— y sobre `M35927`. Después mide el error de los dos a nivel mensual y anual.
+¿Se cumple lo que dice el @sec-agregacion-temporal sobre los modelos sesgados?
+
+## Referencias {.unnumbered}
+
+::: {#refs}
 :::
