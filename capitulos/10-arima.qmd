@@ -1,7 +1,777 @@
+---
+resources:
+  - datos/cap04_estacionales.csv
+---
+
 # ARIMA {#sec-arima}
 
-Estacionariedad, diferenciación, ACF y PACF, identificación, ARIMA estacional y selección automática.
+```{python}
+#| echo: false
+import warnings
 
-::: {.callout-note appearance="simple"}
-Capítulo en preparación.
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+from libro.datos import cargar, catalogo, metadatos
+from libro.graficos import COLORES, mostrar
+
+warnings.simplefilter("ignore")
+
+
+def smape(real, pron):
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    return 200 * np.mean(np.abs(real - pron) / (np.abs(real) + np.abs(pron)))
+```
+
+El suavizado exponencial del @sec-suavizado modela **componentes**: nivel,
+tendencia, estacionalidad. ARIMA modela otra cosa: la **autocorrelación** de la
+serie. En vez de preguntar "¿cuál es el nivel actual?", pregunta "¿cuánto de lo que
+pasa hoy queda explicado por lo que pasó ayer, y por el error de ayer?".
+
+Las dos familias se solapan pero no coinciden. Hay modelos ETS que no tienen
+equivalente ARIMA y viceversa, y en la práctica ganan en series distintas. Este
+capítulo es el más técnico del libro, y conviene decir de entrada cuál es el
+recorrido: **estacionariedad → diferenciación → identificación → estimación →
+diagnóstico**.
+
+## Estacionariedad {#sec-estacionariedad}
+
+ARIMA supone que la serie es **estacionaria** (*stationary*): que sus propiedades
+estadísticas no dependen del momento en que se la mire. Formalmente, una serie es
+estacionaria en sentido débil si para todo $t$ y todo $k$:
+
+$$
+\mathbb{E}[y_t] = \mu, \qquad
+\operatorname{Var}(y_t) = \sigma^2, \qquad
+\operatorname{Cov}(y_t, y_{t-k}) = \gamma_k
+$$ {#eq-estacionariedad}
+
+Es decir: media constante, varianza constante, y una autocovarianza que depende de
+la distancia $k$ pero no de dónde se la mida. Una serie con tendencia no cumple la
+primera condición; una con amplitud creciente —como la del
+@sec-aditiva-multiplicativa— no cumple la segunda.
+
+La razón por la que hace falta es simple: si las propiedades cambian con el tiempo,
+lo que se estima en el pasado no describe el futuro. Un modelo estimado sobre una
+serie no estacionaria describe un promedio de regímenes distintos.
+
+### Dos pruebas que se contradicen {#sec-pruebas}
+
+Hay dos pruebas estándar, y lo primero que hay que saber de ellas es que sus
+hipótesis nulas son **opuestas**:
+
+```{python}
+#| label: tbl-pruebas
+#| tbl-cap: "Las dos pruebas de estacionariedad y cómo se leen. Sus hipótesis nulas son opuestas, así que sus p-valores se interpretan al revés."
+pd.DataFrame([
+    {
+        "prueba": "ADF (Dickey-Fuller aumentada)",
+        "hipótesis nula": "la serie tiene raíz unitaria (NO es estacionaria)",
+        "p < 0,05 significa": "hay evidencia de estacionariedad",
+    },
+    {
+        "prueba": "KPSS",
+        "hipótesis nula": "la serie es estacionaria",
+        "p < 0,05 significa": "hay evidencia CONTRA la estacionariedad",
+    },
+]).set_index("prueba")
+```
+
+La de @dickeyfuller1979 tiene como nula la no estacionariedad; la de @kpss1992
+tiene como nula la estacionariedad. Confundir la dirección de lectura es un error
+frecuente y silencioso, porque el código corre igual.
+
+```{python}
+#| label: tbl-adf-kpss-serie
+#| tbl-cap: "Las dos pruebas sobre tres series del catálogo, antes y después de diferenciar una vez."
+from statsmodels.tsa.stattools import adfuller, kpss
+
+filas = []
+for serie_id in ["Q1915", "M35927", "D2039"]:
+    s = cargar(serie_id)
+    y = s.entrenamiento.to_numpy()
+    for etiqueta, datos in (("original", y), ("diferenciada", np.diff(y))):
+        p_adf = adfuller(datos, autolag="AIC")[1]
+        p_kpss = kpss(datos, regression="c", nlags="auto")[1]
+        filas.append({
+            "serie": s.id,
+            "versión": etiqueta,
+            "p ADF": p_adf,
+            "p KPSS": p_kpss,
+            "ADF dice": "estacionaria" if p_adf < 0.05 else "no estacionaria",
+            "KPSS dice": "estacionaria" if p_kpss >= 0.05 else "no estacionaria",
+        })
+
+pd.DataFrame(filas).set_index(["serie", "versión"]).round(4)
+```
+
+Y acá viene un resultado que rara vez se cuantifica. Las dos pruebas están
+calculadas para las 99.935 series de M4 en la tabla de metadatos, así que se puede
+medir **cuán seguido se contradicen**:
+
+```{python}
+#| label: tbl-desacuerdo
+#| tbl-cap: "Acuerdo y desacuerdo entre ADF y KPSS sobre las 99.935 series de M4."
+meta = metadatos()
+
+adf_estacionaria = meta["adf_pvalue"] < 0.05
+kpss_estacionaria = meta["kpss_pvalue"] >= 0.05
+
+cruce = pd.crosstab(
+    adf_estacionaria.map({True: "ADF: estacionaria", False: "ADF: no estacionaria"}),
+    kpss_estacionaria.map({True: "KPSS: estacionaria", False: "KPSS: no estacionaria"}),
+)
+cruce
+```
+
+```{python}
+#| echo: false
+desacuerdo = (adf_estacionaria != kpss_estacionaria).mean()
+n_desacuerdo = int((adf_estacionaria != kpss_estacionaria).sum())
+```
+
+Las dos pruebas discrepan en `{python} f"{100 * desacuerdo:.1f}"` % de los casos:
+`{python} f"{n_desacuerdo:,}"` series donde una dice estacionaria y la otra dice
+que no. Y el desacuerdo no está repartido de manera uniforme:
+
+```{python}
+#| label: tbl-desacuerdo-frecuencia
+#| tbl-cap: "Proporción de series estacionarias según cada prueba, y porcentaje de desacuerdo, por frecuencia."
+comparacion = (
+    meta.assign(adf=adf_estacionaria, kpss=kpss_estacionaria)
+    .groupby("frecuencia", observed=True)
+    .agg(
+        series=("serie", "size"),
+        pct_adf=("adf", lambda c: 100 * c.mean()),
+        pct_kpss=("kpss", lambda c: 100 * c.mean()),
+    )
+)
+comparacion["% desacuerdo"] = (
+    meta.assign(d=adf_estacionaria != kpss_estacionaria)
+    .groupby("frecuencia", observed=True)["d"]
+    .mean() * 100
+)
+comparacion.columns = ["series", "% estac. ADF", "% estac. KPSS", "% desacuerdo"]
+comparacion.loc[
+    ["anual", "trimestral", "mensual", "semanal", "diaria", "horaria"]
+].round(1)
+```
+
+En las series horarias las pruebas discrepan en más de una de cada cuatro; en las
+diarias, en apenas el 6 %. Y hay algo más notable en la columna de ADF: **solo
+alrededor del 12 % de las series de M4 son estacionarias**. La gran mayoría necesita
+transformarse antes de que ARIMA sea aplicable.
+
+::: {.callout-important}
+## Qué hacer cuando las pruebas no coinciden
+
+No hay una respuesta automática, y por eso conviene tener un criterio declarado de
+antemano. Tres opciones razonables:
+
+1. **Ser conservador**: si alguna de las dos indica no estacionariedad, diferenciar.
+   Cuesta un grado de libertad y poco más.
+2. **Mirar el gráfico**, que es lo que recomienda @hyndman2021. Una tendencia
+   visible decide la cuestión sin necesidad de pruebas.
+3. **Dejar que el criterio de información elija**, ajustando con y sin diferencia y
+   comparando por AICc. Es lo que hace la selección automática del
+   @sec-auto-arima, con una salvedad importante: los AICc de modelos con distinto
+   $d$ **no son comparables**, porque no están calculados sobre la misma variable.
+
+El error a evitar es probar las dos pruebas y quedarse con la que dice lo que uno
+quería escuchar. Si en el 14,5 % de los casos se contradicen, elegir después de ver
+el resultado es elegir el resultado.
+:::
+
+## Diferenciación {#sec-diferenciacion}
+
+La transformación estándar para lograr estacionariedad es la **diferenciación**:
+trabajar con los cambios en vez de los niveles.
+
+$$
+y'_t = y_t - y_{t-1}
+$$ {#eq-diferencia}
+
+Si una diferencia no alcanza —porque la tendencia misma cambia de pendiente— se
+aplica una segunda:
+
+$$
+y''_t = y'_t - y'_{t-1} = y_t - 2y_{t-1} + y_{t-2}
+$$ {#eq-segunda-diferencia}
+
+Y cuando el problema es estacional, se diferencia contra el mismo período del ciclo
+anterior:
+
+$$
+y^{(m)}_t = y_t - y_{t-m}
+$$ {#eq-diferencia-estacional}
+
+Conviene una notación compacta. El **operador de retardo** $B$ se define por
+$B y_t = y_{t-1}$, de modo que $B^k y_t = y_{t-k}$. Con él, las tres
+transformaciones anteriores se escriben $(1-B) y_t$, $(1-B)^2 y_t$ y
+$(1-B^m) y_t$. Esa notación es la que hace legibles las ecuaciones del
+@sec-modelo-arima.
+
+```{python}
+#| label: tbl-cuantas-diferencias
+#| tbl-cap: "Cuántas diferencias necesita cada serie del catálogo según la prueba ADF aplicada de manera sucesiva."
+def diferencias_necesarias(y: np.ndarray, maximo: int = 2) -> int:
+    """Aplica ADF sucesivamente hasta que la serie pase por estacionaria."""
+    serie = np.asarray(y, dtype=float)
+    for d in range(maximo):
+        if adfuller(serie, autolag="AIC")[1] < 0.05:
+            return d
+        serie = np.diff(serie)
+    return maximo
+
+
+conteo = {}
+for s in cargar(n=len(catalogo())):
+    d = diferencias_necesarias(s.entrenamiento.to_numpy())
+    conteo[d] = conteo.get(d, 0) + 1
+
+pd.DataFrame(
+    [{"diferencias": d, "series": n} for d, n in sorted(conteo.items())]
+).set_index("diferencias")
+```
+
+De las `{python} f"{sum(conteo.values())}"` series del catálogo,
+`{python} f"{conteo.get(0, 0)}"` ya son estacionarias,
+`{python} f"{conteo.get(1, 0)}"` necesitan una diferencia y
+`{python} f"{conteo.get(2, 0)}"` necesitan dos.
+
+::: {.callout-warning}
+## Sobrediferenciar tiene costo
+
+Diferenciar de más no es inocuo. Cada diferencia amplifica el ruido de alta
+frecuencia e introduce autocorrelación negativa artificial en el rezago 1. Una
+serie sobrediferenciada muestra un $r_1$ marcadamente negativo que no estaba en los
+datos: es un artefacto de la transformación.
+
+La regla práctica: **usar la menor cantidad de diferencias que logre
+estacionariedad**, y desconfiar de $d = 2$ salvo que haya un argumento claro. En
+series económicas, $d > 2$ casi nunca se justifica.
+:::
+
+## Identificación con ACF y PACF {#sec-identificacion}
+
+El @sec-autocorrelacion introdujo la autocorrelación y la parcial. Acá se vuelven
+una herramienta de diagnóstico: sirven para leer, del gráfico, qué órdenes probar.
+
+Un proceso **autorregresivo** de orden $p$ —AR($p$)— expresa el valor actual como
+combinación de los $p$ anteriores más un error:
+
+$$
+y_t = c + \phi_1 y_{t-1} + \phi_2 y_{t-2} + \cdots + \phi_p y_{t-p}
+      + \varepsilon_t
+$$ {#eq-ar}
+
+Un proceso de **media móvil** de orden $q$ —MA($q$)— lo expresa como combinación de
+los errores pasados:
+
+$$
+y_t = c + \varepsilon_t + \theta_1 \varepsilon_{t-1}
+      + \theta_2 \varepsilon_{t-2} + \cdots + \theta_q \varepsilon_{t-q}
+$$ {#eq-ma}
+
+Los dos dejan huellas distintas y reconocibles, y es más claro verlas sobre
+procesos simulados —uno de los pocos lugares del libro donde el dato artificial
+enseña mejor que el real, porque acá se conoce la respuesta:
+
+```{python}
+#| label: fig-firmas
+#| fig-cap: "Autocorrelación y parcial de cuatro procesos simulados. En un AR(p) la parcial se corta en p; en un MA(q) la autocorrelación se corta en q."
+from statsmodels.tsa.arima_process import ArmaProcess
+from statsmodels.tsa.stattools import acf, pacf
+
+generador = np.random.default_rng(7)
+procesos = [
+    ("AR(1), φ = 0,8", [1, -0.8], [1]),
+    ("AR(2)", [1, -0.6, -0.3], [1]),
+    ("MA(1), θ = 0,8", [1], [1, 0.8]),
+    ("MA(2)", [1], [1, 0.7, 0.4]),
+]
+REZAGOS, N = 8, 500
+banda = 1.96 / np.sqrt(N)
+
+fig = make_subplots(
+    rows=2, cols=4, shared_yaxes=True, vertical_spacing=0.16,
+    subplot_titles=[t for t, _, _ in procesos] + ["", "", "", ""],
+)
+
+for col, (titulo, ar, ma) in enumerate(procesos, start=1):
+    muestra = ArmaProcess(np.array(ar), np.array(ma)).generate_sample(
+        N, distrvs=generador.standard_normal
+    )
+    for fila, (funcion, color) in enumerate(
+        ((acf, COLORES["observado"]), (pacf, COLORES["pronostico"])), start=1
+    ):
+        valores = funcion(muestra, nlags=REZAGOS)
+        fig.add_trace(go.Bar(
+            x=list(range(1, REZAGOS + 1)), y=valores[1:], marker_color=color,
+            hovertemplate="rezago %{x}<br>%{y:.3f}<extra></extra>",
+        ), row=fila, col=col)
+        for signo in (1, -1):
+            fig.add_hline(y=signo * banda, line_dash="dot", line_width=1,
+                          line_color=COLORES["prueba"], row=fila, col=col)
+
+fig.update_layout(height=520, showlegend=False, bargap=0.4)
+fig.update_yaxes(title_text="ACF", row=1, col=1)
+fig.update_yaxes(title_text="PACF", row=2, col=1)
+mostrar(fig)
+```
+
+La regla de lectura, que viene de @boxjenkins1970:
+
+```{python}
+#| label: tbl-firmas
+#| tbl-cap: "Cómo identificar el orden a partir de la autocorrelación y la parcial."
+pd.DataFrame([
+    {"proceso": "AR(p)", "autocorrelación": "decae gradualmente",
+     "parcial": "se corta después del rezago p"},
+    {"proceso": "MA(q)", "autocorrelación": "se corta después del rezago q",
+     "parcial": "decae gradualmente"},
+    {"proceso": "ARMA(p,q)", "autocorrelación": "decae gradualmente",
+     "parcial": "decae gradualmente"},
+]).set_index("proceso")
+```
+
+La tercera fila es la razón por la que este método tiene límites: cuando hay
+componentes AR y MA a la vez, ninguna de las dos funciones se corta y la
+identificación visual no alcanza. De ahí la necesidad de la búsqueda automática del
+@sec-auto-arima.
+
+## El modelo ARIMA {#sec-modelo-arima}
+
+Juntando las tres piezas —diferenciación, parte autorregresiva y parte de media
+móvil— se llega al modelo **ARIMA($p,d,q$)**. Con el operador de retardo:
+
+$$
+\underbrace{(1 - \phi_1 B - \cdots - \phi_p B^p)}_{\text{AR}(p)}\;
+\underbrace{(1-B)^d}_{d \text{ diferencias}}\, y_t
+= c + \underbrace{(1 + \theta_1 B + \cdots + \theta_q B^q)}_{\text{MA}(q)}\,
+\varepsilon_t
+$$ {#eq-arima}
+
+Los tres órdenes tienen lectura directa: $p$ es cuántos valores pasados entran, $d$
+cuántas diferencias se aplicaron, y $q$ cuántos errores pasados entran. Varios
+modelos conocidos son casos particulares:
+
+| Modelo | Equivale a |
+|---|---|
+| ARIMA(0,0,0) | ruido blanco |
+| ARIMA(0,1,0) | naive, o caminata aleatoria |
+| ARIMA(0,1,0) con $c \neq 0$ | naive con deriva |
+| ARIMA($p$,0,0) | autorregresivo puro |
+| ARIMA(0,0,$q$) | media móvil pura |
+
+Que el naive sea un caso particular de ARIMA explica algo del @sec-que-es-pronosticar:
+cuando ningún ARIMA le gana al naive, lo que está diciendo la evidencia es que
+$p = q = 0$ era la especificación correcta.
+
+## ARIMA estacional {#sec-sarima}
+
+Para series con estacionalidad se agrega un segundo juego de términos que opera
+sobre múltiplos del período $m$. La notación es
+**ARIMA($p,d,q$)($P,D,Q$)$_m$**, y la ecuación:
+
+$$
+\Phi_P(B^m)\, \phi_p(B)\, (1-B^m)^D (1-B)^d\, y_t
+= c + \Theta_Q(B^m)\, \theta_q(B)\, \varepsilon_t
+$$ {#eq-sarima}
+
+donde $\phi_p$ y $\theta_q$ son los polinomios de la @eq-arima y $\Phi_P$, $\Theta_Q$
+sus análogos estacionales, evaluados en $B^m$ en vez de $B$. En palabras: la misma
+estructura, aplicada dos veces, una a rezagos consecutivos y otra a rezagos
+separados por un ciclo completo.
+
+Un `SARIMA(1,1,1)(1,1,1)₁₂` sobre datos mensuales tiene entonces cuatro parámetros
+más una constante, y modela a la vez la dependencia mes a mes y la dependencia
+entre el mismo mes de años consecutivos.
+
+::: {.callout-note}
+## El período estacional que se le pasa importa, y mucho
+
+En el @sec-horizonte vimos que M4 declara $m = 1$ para las series semanales y
+diarias. En un SARIMA eso no es un detalle de notación: con $m = 1$ los términos
+estacionales se vuelven redundantes con los no estacionales y el modelo cambia de
+naturaleza.
+
+Hay además un costo computacional que conviene anticipar. En la evaluación de
+modelos que acompaña a este libro, ajustar SARIMA con $m = 52$ sobre series
+semanales largas tardaba **más de 39 minutos por serie** hasta que se limitaron los
+hilos de BLAS a uno; con `OMP_NUM_THREADS=1` bajó a unos **37 segundos**, un factor
+de 60. La causa es que las matrices del filtro son chicas y los hilos pasan más
+tiempo sincronizándose que calculando. Si se paraleliza con procesos, hay que fijar
+los hilos de BLAS **antes** de importar numpy, o cada proceso abre su propio abanico
+y el conjunto rinde peor que la versión secuencial.
+:::
+
+## Muévelo {#sec-widget-10}
+
+Elegir $(p,d,q)$ a mano es el ejercicio clásico de este capítulo, y se entiende
+mucho mejor haciéndolo. El widget ajusta el modelo con los órdenes que elijas y
+muestra las tres cosas que hay que mirar: el pronóstico, la autocorrelación de los
+residuos y el resultado de la prueba de @ljungbox1978.
+
+Lo que hay que buscar es un modelo cuyos **residuos parezcan ruido**: barras dentro
+de la banda y p-valor alto. Tres cosas para probar:
+
+- Con $d = 0$ en una serie con tendencia, los residuos quedan claramente
+  autocorrelacionados.
+- Subir $p$ y $q$ casi siempre baja el AIC un poco, pero **no** siempre mejora el
+  pronóstico: es sobreajuste, el tema del @sec-sobreajuste.
+- Comparar el AIC entre modelos con distinto $d$ **no** es válido, aunque el widget
+  te deje hacerlo. Están calculados sobre variables distintas.
+
+```{shinylive-python}
+#| standalone: true
+#| viewerHeight: 900
+#| components: [viewer]
+
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from shiny import App, reactive, render, ui
+from statsmodels.stats.diagnostic import acorr_ljungbox
+from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tsa.stattools import acf, pacf
+
+AQUI = Path(__file__).parent
+datos = pd.read_csv(AQUI / "cap04_estacionales.csv", parse_dates=["ds"])
+ETIQUETAS = list(dict.fromkeys(datos["etiqueta"]))
+
+
+def smape(real, pron):
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    return 200 * np.mean(np.abs(real - pron) / (np.abs(real) + np.abs(pron)))
+
+
+app_ui = ui.page_fluid(
+    ui.layout_columns(
+        ui.input_select("serie", "Serie", ETIQUETAS, selected=ETIQUETAS[0]),
+        ui.input_slider("p", "p  autorregresivo", 0, 4, 1),
+        ui.input_slider("d", "d  diferencias", 0, 2, 1),
+        ui.input_slider("q", "q  media móvil", 0, 4, 1),
+        col_widths=[3, 3, 3, 3],
+    ),
+    ui.output_ui("resumen"),
+    ui.output_plot("grafico", height="560px"),
+)
+
+
+def servidor(input, output, session):
+
+    @reactive.calc
+    def ajuste():
+        g = datos[datos["etiqueta"] == input.serie()].sort_values("ds")
+        entrenamiento = g[g["split"] == "entrenamiento"]
+        prueba = g[g["split"] == "prueba"]
+        y = entrenamiento["y"].to_numpy()
+        orden = (int(input.p()), int(input.d()), int(input.q()))
+        try:
+            resultado = ARIMA(y, order=orden).fit()
+        except Exception:
+            return None, y, prueba, orden
+        return resultado, y, prueba, orden
+
+    @render.ui
+    def resumen():
+        resultado, y, prueba, orden = ajuste()
+        if resultado is None:
+            return ui.markdown(
+                f"**ARIMA{orden}** no converge sobre esta serie. "
+                "Prueba con órdenes más bajos."
+            )
+        residuos = pd.Series(resultado.resid).dropna()
+        rezagos = min(20, max(4, len(residuos) // 5))
+        p_valor = float(
+            acorr_ljungbox(residuos, lags=[rezagos], return_df=True)["lb_pvalue"].iloc[0]
+        )
+        pron = resultado.forecast(len(prueba))
+        veredicto = "los residuos pasan por ruido" if p_valor > 0.05 else \
+                    "los residuos NO pasan por ruido"
+        return ui.markdown(
+            f"**ARIMA{orden}**  ·  AIC **{resultado.aic:.1f}**  ·  "
+            f"sMAPE **{smape(prueba['y'].to_numpy(), pron):.2f}**  ·  "
+            f"Ljung-Box p = **{p_valor:.4f}** — {veredicto}"
+        )
+
+    @render.plot
+    def grafico():
+        resultado, y, prueba, orden = ajuste()
+        fig, ejes = plt.subplots(3, 1, figsize=(9, 6.6))
+
+        cola = min(len(y), 150)
+        ejes[0].plot(range(len(y) - cola, len(y)), y[-cola:], lw=1.3,
+                     color="#1f4e79", label="entrenamiento")
+        indice_prueba = range(len(y), len(y) + len(prueba))
+        ejes[0].plot(indice_prueba, prueba["y"].to_numpy(), lw=1.6, ls="--",
+                     color="#c0504d", label="observado (prueba)")
+        if resultado is not None:
+            ejes[0].plot(indice_prueba, resultado.forecast(len(prueba)), lw=2,
+                         color="#2e8b57", label="pronóstico")
+        ejes[0].legend(loc="upper left", fontsize=8)
+        ejes[0].set_title("serie y pronóstico", fontsize=9)
+
+        if resultado is None:
+            for eje in ejes[1:]:
+                eje.text(0.5, 0.5, "el modelo no converge", ha="center",
+                         va="center", fontsize=10)
+                eje.set_xticks([])
+            fig.tight_layout()
+            return fig
+
+        residuos = pd.Series(resultado.resid).dropna().to_numpy()
+        banda = 1.96 / np.sqrt(len(residuos))
+        rezagos = 20
+        for eje, (funcion, titulo) in zip(
+            ejes[1:], ((acf, "autocorrelación de los residuos"),
+                       (pacf, "parcial de los residuos"))
+        ):
+            valores = funcion(residuos, nlags=rezagos)
+            eje.bar(range(1, rezagos + 1), valores[1:], color="#7f7f7f", width=0.5)
+            eje.axhline(banda, ls=":", color="#c0504d")
+            eje.axhline(-banda, ls=":", color="#c0504d")
+            eje.axhline(0, color="black", lw=0.6)
+            eje.set_title(titulo, fontsize=9)
+            eje.set_xlabel("rezago", fontsize=8)
+
+        fig.tight_layout()
+        return fig
+
+
+app = App(app_ui, servidor)
+
+## file: cap04_estacionales.csv
+{{< include datos/cap04_estacionales.csv >}}
+```
+
+## Selección automática {#sec-auto-arima}
+
+Identificar a mano funciona con una serie y no escala a mil. @hyndman2008
+propusieron un algoritmo que hoy es el estándar: elegir $d$ y $D$ con pruebas de
+raíz unitaria, y después buscar los órdenes restantes con una búsqueda dirigida que
+minimiza el AICc de la @eq-aicc, empezando por unos pocos modelos candidatos y
+moviéndose hacia los vecinos que mejoran.
+
+Acá corresponde `statsforecast`, por lo dicho en el @sec-ets: la selección
+automática es su especialidad.
+
+```{python}
+serie = cargar("M35927")
+datos_ajuste = serie.a_frame(incluir_prueba=False)[["unique_id", "ds", "y"]]
+
+from statsforecast import StatsForecast
+from statsforecast.models import AutoARIMA
+
+sf = StatsForecast(
+    models=[AutoARIMA(season_length=serie.periodo_estacional)],
+    freq="MS", n_jobs=1,
+)
+pronostico = sf.forecast(df=datos_ajuste, h=serie.horizonte)
+sf.fit(df=datos_ajuste)
+
+elegido = sf.fitted_[0][0].model_
+print(f"modelo elegido: {elegido['arma']}")
+print(f"sMAPE          : "
+      f"{smape(serie.prueba.to_numpy(), pronostico['AutoARIMA'].to_numpy()):.2f}")
+```
+
+La tupla `arma` que devuelve la biblioteca lista, en orden,
+$(p, q, P, Q, m, d, D)$.
+
+### Contra qué compararlo {#sec-comparacion-arima}
+
+```{python}
+#| label: tbl-comparacion-arima
+#| tbl-cap: "AutoARIMA, AutoETS y naive estacional sobre las series del catálogo."
+from statsforecast.models import AutoETS, SeasonalNaive
+
+from libro.datos.rutas import FRECUENCIAS
+
+filas = []
+for s in cargar(n=len(catalogo())):
+    if s.frecuencia == "diaria" and s.n > 3000:
+        continue        # las series muy largas hacen lenta la compilación
+    m_s = s.periodo_estacional
+    sf_s = StatsForecast(
+        models=[
+            AutoARIMA(season_length=m_s),
+            AutoETS(season_length=m_s),
+            SeasonalNaive(season_length=m_s),
+        ],
+        freq=FRECUENCIAS[s.frecuencia].frecuencia_pandas,
+        n_jobs=1,
+    )
+    try:
+        fc = sf_s.forecast(
+            df=s.a_frame(incluir_prueba=False)[["unique_id", "ds", "y"]],
+            h=s.horizonte,
+        )
+    except Exception:
+        continue
+    real = s.prueba.to_numpy()
+    filas.append({
+        "serie": s.id,
+        "AutoARIMA": smape(real, fc["AutoARIMA"].to_numpy()),
+        "AutoETS": smape(real, fc["AutoETS"].to_numpy()),
+        "naive estacional": smape(real, fc["SeasonalNaive"].to_numpy()),
+    })
+
+resultados = pd.DataFrame(filas).set_index("serie")
+metodos = ["AutoARIMA", "AutoETS", "naive estacional"]
+
+resumen = resultados[metodos].agg(["mean", "median", "count"]).T
+resumen.columns = ["sMAPE medio", "sMAPE mediano", "series"]
+resumen.round(2)
+```
+
+```{python}
+#| label: tbl-ganadores-arima
+#| tbl-cap: "En cuántas series gana cada método."
+resultados[metodos].idxmin(axis=1).value_counts().rename("series donde gana").to_frame()
+```
+
+La tabla dice algo incómodo y honesto: **los promedios de los tres métodos son casi
+iguales**. La diferencia aparece en la mediana, donde AutoARIMA y AutoETS le sacan
+varios puntos al naive estacional, y en el conteo de victorias.
+
+Que el promedio y la mediana cuenten historias distintas es exactamente la
+advertencia del @sec-saturacion. Con 33 series, además, ninguna de estas diferencias
+es estadísticamente concluyente: se necesitan cientos de series para distinguir
+métodos que difieren en un punto de sMAPE.
+
+::: {.callout-note}
+## Lo que dice la evidencia a escala
+
+En la evaluación de 26 modelos sobre 4.773 series de M4 que acompaña a este libro,
+**ARIMA quedó primero**, con un OWA de 0,936 contra el 1,000 del benchmark
+`Naive2`, seguido de cerca por SARIMA con 0,938. Solo seis de los 26 modelos
+superaron al benchmark.
+
+Ese resultado conviene leerlo junto al de la @tbl-arima-vs-naive del
+@sec-que-es-pronosticar, que muestra al ARIMA(1,1,1) **perdiendo** contra el naive
+en las series diarias y horarias. Las dos cosas son verdad: ARIMA es el mejor de los
+modelos evaluados **en promedio sobre la población de M4**, y es peor que repetir el
+último valor en dos de las seis frecuencias.
+
+Para comparar: el ganador de la competencia, un híbrido de suavizado exponencial y
+redes recurrentes [@smyl2020], obtuvo 0,821.
+:::
+
+## Diagnóstico de residuos {#sec-diagnostico}
+
+Un modelo ARIMA está terminado cuando sus residuos no tienen estructura. Cuatro
+cosas para revisar, en orden:
+
+```{python}
+#| label: fig-diagnostico
+#| fig-cap: "Diagnóstico de los residuos de un ARIMA(1,1,1) sobre M3007: serie de residuos, autocorrelación e histograma."
+from statsmodels.stats.diagnostic import acorr_ljungbox
+from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tsa.stattools import acf
+
+serie_diag = cargar("M3007")
+y_diag = serie_diag.entrenamiento.to_numpy()
+modelo = ARIMA(y_diag, order=(1, 1, 1)).fit()
+residuos = pd.Series(modelo.resid).dropna().to_numpy()
+
+fig = make_subplots(
+    rows=1, cols=3,
+    subplot_titles=["residuos en el tiempo", "autocorrelación", "distribución"],
+)
+fig.add_trace(go.Scatter(
+    y=residuos, mode="lines", line=dict(color=COLORES["auxiliar"], width=1),
+), row=1, col=1)
+
+REZAGOS = 20
+r = acf(residuos, nlags=REZAGOS)
+banda = 1.96 / np.sqrt(len(residuos))
+fig.add_trace(go.Bar(
+    x=list(range(1, REZAGOS + 1)), y=r[1:], marker_color=COLORES["observado"],
+), row=1, col=2)
+for signo in (1, -1):
+    fig.add_hline(y=signo * banda, line_dash="dot", line_width=1,
+                  line_color=COLORES["prueba"], row=1, col=2)
+
+fig.add_trace(go.Histogram(
+    x=residuos, nbinsx=25, marker_color=COLORES["pronostico"],
+), row=1, col=3)
+
+fig.update_layout(height=350, showlegend=False, bargap=0.3)
+mostrar(fig)
+
+prueba_lb = acorr_ljungbox(residuos, lags=[REZAGOS], return_df=True)
+print(f"media de los residuos    : {residuos.mean():.3f}")
+print(f"Ljung-Box, p-valor       : {prueba_lb['lb_pvalue'].iloc[0]:.4f}")
+```
+
+1. **Media cercana a cero.** Si no, el pronóstico tiene sesgo sistemático y hay que
+   revisar la constante.
+2. **Sin autocorrelación.** La prueba de @ljungbox1978 lo resume en un número, y es
+   preferible a mirar rezago por rezago por el problema de comparaciones múltiples
+   del @sec-autocorrelacion.
+3. **Varianza constante.** Si el gráfico de residuos se abre como un embudo, falta
+   una transformación —logaritmo o Box-Cox [@boxcox1964]—.
+4. **Distribución aproximadamente normal.** Es la condición menos importante para el
+   pronóstico puntual, y la más importante para los intervalos: como vimos en el
+   @sec-intervalos, es de donde viene la subcobertura.
+
+Que los residuos no pasen la prueba no invalida el modelo para pronosticar: los
+pronósticos pueden seguir siendo útiles. Lo que invalida es la **cuantificación de
+la incertidumbre**, porque los intervalos se calculan suponiendo residuos sin
+estructura.
+
+## ETS o ARIMA {#sec-ets-o-arima}
+
+Una pregunta razonable al terminar los dos capítulos. La respuesta corta es que no
+hay ganador general, y la @tbl-comparacion-arima lo muestra.
+
+Algunas orientaciones que sí se sostienen:
+
+- **ARIMA puede modelar autocorrelación que ETS no ve.** Si el correlograma tiene
+  estructura después de sacar tendencia y estacionalidad, ARIMA tiene algo que
+  hacer.
+- **ETS maneja mejor la estacionalidad multiplicativa**, que en ARIMA requiere
+  transformar la serie.
+- **ETS no exige estacionariedad**, así que evita todo el problema del
+  @sec-pruebas.
+- **Combinar los dos suele ganarle a cada uno.** Es uno de los resultados más
+  robustos de la literatura de pronóstico [@petropoulos2022], y la razón por la que
+  el @sec-ensambles existe.
+
+## Ejercicios
+
+Las soluciones están en el @sec-soluciones-10.
+
+**1.** Aplica ADF y KPSS a `Q22252` en su nivel, con una diferencia y con dos. ¿En
+qué punto coinciden las dos pruebas? ¿Cuántas diferencias usarías?
+
+**2.** Busca en `metadatos()` cuántas series mensuales tienen desacuerdo entre las
+dos pruebas y compara su complejidad promedio con la del resto. ¿Las series donde
+las pruebas discrepan son más complejas?
+
+**3.** Simula un AR(1) con $\phi = 0{,}95$ de 200 observaciones y aplícale ADF.
+¿Rechaza la hipótesis de raíz unitaria? Repite con $\phi = 0{,}5$. ¿Qué dice esto
+sobre la potencia de la prueba cuando el proceso está cerca de tener raíz unitaria?
+
+**4.** Ajusta a `M3007` un ARIMA(1,1,1) y un ARIMA(2,1,2), y compara AIC, sMAPE y el
+p-valor de Ljung-Box de cada uno. ¿El modelo con mejor AIC es el de mejor
+pronóstico?
+
+**5.** Sobrediferencia a propósito: toma `M35927`, aplícale tres diferencias y
+grafica la autocorrelación del resultado. ¿Aparece la autocorrelación negativa
+artificial que anticipa el aviso del @sec-diferenciacion?
+
+**6.** Corre `AutoARIMA` sobre las series trimestrales del catálogo y anota los
+órdenes que elige. ¿Cuántas veces elige $d = 1$? ¿Cuántas veces incluye términos
+estacionales?
+
+## Referencias {.unnumbered}
+
+::: {#refs}
 :::
