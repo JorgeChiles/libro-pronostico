@@ -3001,3 +3001,331 @@ aplicar la solución.
 **Con pocas series el enfoque global no rinde.** Siete series y 589 filas no son
 suficientes para que un modelo global le gane a uno ajustado serie por serie. El enfoque
 global paga con miles de series, y eso se ve en el @sec-caso-m4.
+
+## Capítulo 14 · Sobreajuste {#sec-soluciones-14}
+
+```{python}
+#| echo: false
+from sklearn.linear_model import Lasso, Ridge
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import PolynomialFeatures, StandardScaler
+
+
+def rmse(real, pronostico):
+    return float(np.sqrt(np.mean((np.asarray(real) - np.asarray(pronostico)) ** 2)))
+
+
+def indice_escalado(desde, hasta, corte):
+    """El índice temporal dividido por el corte, como en el capítulo 14."""
+    return (np.arange(desde, hasta) / corte).reshape(-1, 1)
+
+
+def tabla_rezagos(y, p):
+    y = np.asarray(y, dtype=float)
+    X = np.array([y[i - p:i] for i in range(p, len(y))])
+    return X, np.array([y[i] for i in range(p, len(y))])
+
+
+def recursivo(modelo, y, p, h):
+    historia = list(y)
+    salida = []
+    for _ in range(h):
+        valor = float(modelo.predict([historia[-p:]])[0])
+        salida.append(valor)
+        historia.append(valor)
+    return np.array(salida)
+```
+
+### Ejercicio 1 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-14-1
+#| tbl-cap: "La @tbl-grados repetida sobre M3007 y sobre Q1915."
+filas = []
+for identificador in ("M3007", "Q1915"):
+    y = cargar(identificador).completa.to_numpy()
+    corte = int(len(y) * 0.7)
+    t_tr = indice_escalado(0, corte, corte)
+    t_te = indice_escalado(corte, len(y), corte)
+    for grado in (1, 2, 3, 4, 5, 8, 12, 15):
+        modelo = make_pipeline(PolynomialFeatures(grado), LinearRegression()).fit(
+            t_tr, y[:corte]
+        )
+        filas.append({
+            "serie": identificador,
+            "grado": grado,
+            "RMSE entrenamiento": rmse(y[:corte], modelo.predict(t_tr)),
+            "RMSE prueba": rmse(y[corte:], modelo.predict(t_te)),
+        })
+
+pd.DataFrame(filas).set_index(["serie", "grado"]).round(1)
+```
+
+Los mínimos del error de prueba están en **grado 2 para M3007** (5.066) y en **grado 1 para
+Q1915** (26,5). En M39292 estaba en grado 1. Tres series, tres respuestas: **la capacidad
+correcta no es una propiedad del método sino de la combinación de método y serie.**
+
+Vale mirar el grado 2 de Q1915: baja el error de entrenamiento de 11,8 a 3,3 —lo mejora casi
+cuatro veces— y empeora el de prueba de 26,5 a 46,5. Un lector que solo mirara la primera
+columna elegiría el peor modelo con total convicción.
+
+La segunda parte del enunciado es más interesante. El mejor polinomio de M3007 tiene un RMSE
+de prueba de 5.066 y el de M39292 tiene 88. La diferencia no es de escala: dividido por la
+media del período de prueba, el error es del **49,5 % en M3007 y del 2,4 % en M39292**.
+
+```{python}
+#| label: fig-sol-14-1
+#| fig-cap: "M3007 completa, con el corte al 70 %. El nivel se multiplica por 2,3 dentro del período de prueba."
+y = cargar("M3007").completa.to_numpy()
+corte = int(len(y) * 0.7)
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=np.arange(corte), y=y[:corte], mode="lines", name="entrenamiento",
+    line=dict(color=COLORES["observado"], width=2),
+))
+fig.add_trace(go.Scatter(
+    x=np.arange(corte, len(y)), y=y[corte:], mode="lines", name="prueba",
+    line=dict(color=COLORES["prueba"], width=2),
+))
+fig.add_vline(x=corte, line_dash="dot", line_width=1,
+              line_color=COLORES["auxiliar"])
+mostrar(fig, alto=380, titulo_y="unidades")
+```
+
+La respuesta está en el gráfico: **en el período 111 la serie salta de 9.728 a 22.458**, un
+factor de 2,3 de un mes al siguiente. El corte está en el 84, así que el quiebre cae dentro
+del período de prueba, y todo el tramo posterior vive en un nivel que nunca apareció en el
+entrenamiento.
+
+Ninguna elección de grado podía evitar eso. El polinomio —cualquier polinomio— extrapola la
+forma que vio, y lo que vio fue una serie que se movía entre 4.400 y 7.100. Como referencia,
+el naive del @sec-caja-de-herramientas da 7.022 de RMSE en ese mismo período de prueba: peor
+que el polinomio de grado 2, pero del mismo orden. **El piso del error acá no lo pone la
+capacidad del modelo sino el término irreducible de la @eq-sesgo-varianza**, y en esta serie
+ese término es gigante.
+
+De ahí la razón de haber elegido M39292 para la tabla del capítulo. Con una serie quebrada,
+la columna de prueba mezcla dos cosas —el sobreajuste y el evento imposible— y no se puede
+atribuir el error a una ni a la otra. Es una regla general para diseñar cualquier
+experimento de este libro: **si quieres medir un efecto, elige un caso donde el efecto sea
+lo único que varía.**
+
+### Ejercicio 2 {.unnumbered}
+
+```{python}
+#| label: fig-sol-14-2
+#| fig-cap: "Desviación estándar de la predicción a través de 30 submuestras, por grado del polinomio. Escala logarítmica."
+generador = np.random.default_rng(0)
+y = cargar("M35927").entrenamiento.to_numpy()
+punto = np.array([[1.05]])
+
+grados = list(range(1, 13))
+desviaciones = []
+for grado in grados:
+    predicciones = []
+    for _ in range(30):
+        indices = np.sort(
+            generador.choice(len(y), size=int(len(y) * 0.7), replace=False)
+        )
+        modelo = make_pipeline(PolynomialFeatures(grado), LinearRegression()).fit(
+            (indices / len(y)).reshape(-1, 1), y[indices]
+        )
+        predicciones.append(float(modelo.predict(punto).item()))
+    desviaciones.append(float(np.std(predicciones)))
+
+fig = go.Figure(go.Scatter(
+    x=grados, y=desviaciones, mode="lines+markers",
+    line=dict(color=COLORES["prueba"], width=2), name="desviación",
+))
+fig.update_yaxes(type="log")
+fig.update_xaxes(title="grado del polinomio", dtick=1)
+mostrar(fig, alto=380, titulo_y="desviación entre corridas")
+```
+
+```{python}
+#| label: tbl-sol-14-2
+#| tbl-cap: "Los mismos valores en tabla, con el factor de crecimiento respecto del grado anterior."
+tabla = pd.DataFrame({"grado": grados, "desviación": desviaciones})
+tabla["factor"] = tabla["desviación"] / tabla["desviación"].shift(1)
+tabla.set_index("grado").round(2)
+```
+
+Hasta el grado 5 la desviación se mueve entre 4 y 17 unidades sin una tendencia clara. A
+partir del 6 crece de manera sostenida y con factores de 1,5 a 2 por grado, hasta llegar a
+casi 100 en el grado 12: **más de veinte veces la del grado 1**.
+
+Ese es el término de varianza de la @eq-sesgo-varianza medido directamente. No crece de
+manera suave y proporcional: hay una zona de calma y después una aceleración. La zona de
+calma es donde conviene estar.
+
+### Ejercicio 3 {.unnumbered}
+
+```{python}
+#| label: fig-sol-14-3
+#| fig-cap: "sMAPE de prueba contra $\\lambda$ en Ridge, escala logarítmica en el eje horizontal. La U del compromiso."
+s = cargar("M35927")
+y_tr, y_te, h, P = (
+    s.entrenamiento.to_numpy(), s.prueba.to_numpy(), s.horizonte, 24
+)
+X, objetivo = tabla_rezagos(y_tr, P)
+
+lambdas = np.logspace(-3, 3, 13)
+errores = []
+for lam in lambdas:
+    modelo = make_pipeline(StandardScaler(), Ridge(alpha=lam)).fit(X, objetivo)
+    errores.append(smape(y_te, recursivo(modelo, y_tr, P, h)))
+
+mejor = int(np.argmin(errores))
+
+fig = go.Figure(go.Scatter(
+    x=lambdas, y=errores, mode="lines+markers",
+    line=dict(color=COLORES["observado"], width=2), name="sMAPE",
+))
+fig.add_trace(go.Scatter(
+    x=[lambdas[mejor]], y=[errores[mejor]], mode="markers",
+    marker=dict(color=COLORES["pronostico"], size=12, symbol="circle-open",
+                line=dict(width=3)),
+    name=f"mínimo, λ = {lambdas[mejor]:.3g}",
+))
+fig.update_xaxes(type="log", title="λ")
+mostrar(fig, alto=400, titulo_y="sMAPE de prueba")
+```
+
+La U aparece con claridad. El mínimo está cerca de $\lambda = 1$ con un sMAPE de 0,84,
+mientras que en los dos extremos el error es peor: 0,93 con $\lambda = 10^{-3}$ —que es
+prácticamente mínimos cuadrados— y 1,91 con $\lambda = 10^{3}$.
+
+Conviene notar la forma: la rama izquierda es plana y la derecha es empinada. **Regularizar
+de menos cuesta poco; regularizar de más cuesta mucho.** Y que el mínimo esté en 1 no es una
+constante universal: depende de la escala de los datos estandarizados, de la cantidad de
+columnas y del largo de la serie.
+
+### Ejercicio 4 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-14-4
+#| tbl-cap: "Rezagos con coeficiente distinto de cero. La columna $j$ de la tabla supervisada corresponde al rezago $P - j$."
+filas = []
+for nombre, estimador in (
+    ("Ridge, λ = 1", Ridge(alpha=1.0)),
+    ("Lasso, λ = 0,1", Lasso(alpha=0.1, max_iter=50_000)),
+    ("Lasso, λ = 1", Lasso(alpha=1.0, max_iter=50_000)),
+    ("Lasso, λ = 5", Lasso(alpha=5.0, max_iter=50_000)),
+):
+    modelo = make_pipeline(StandardScaler(), estimador).fit(X, objetivo)
+    coeficientes = modelo[-1].coef_
+    vivos = sorted(P - j for j in range(P) if abs(coeficientes[j]) > 1e-6)
+    filas.append({
+        "modelo": nombre,
+        "cuántos": len(vivos),
+        "rezagos": ", ".join(str(v) for v in vivos),
+    })
+
+pd.DataFrame(filas).set_index("modelo")
+```
+
+Ridge conserva los veinticuatro, como se esperaba de la @eq-ridge: encoge pero no anula.
+
+Lasso hace una selección, y responde la pregunta del enunciado con un sí matizado:
+
+**El rezago 1 sobrevive en los tres niveles de $\lambda$.** Es el predictor más informativo,
+y es coherente con todo lo visto desde el @sec-caja-de-herramientas: el naive es difícil de
+superar porque el último valor es el mejor predictor individual.
+
+**El rezago estacional 12 sobrevive con $\lambda = 0{,}1$ y con $\lambda = 1$, pero no con
+$\lambda = 5$.** Con la penalización más fuerte quedan solo los rezagos 1, 5 y 6, y la
+estacionalidad se pierde. Es un ejemplo de que **regularizar de más no borra información
+aleatoria: borra estructura real**. El modelo con tres rezagos ya no puede representar el
+ciclo anual, y su sMAPE lo paga.
+
+También aparece algo que el @sec-ingenieria retoma: entre rezagos correlacionados Lasso se
+queda con uno de manera bastante arbitraria. Que sobrevivan el 5 y el 6 y no el 4 o el 7 no
+dice que el quinto mes atrás importe y el cuarto no; dice que el grupo importa y Lasso
+eligió un representante.
+
+### Ejercicio 5 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-14-5
+#| tbl-cap: "La @tbl-regularizacion sin estandarizar. Se agrega un $\\lambda$ absurdamente grande para mostrar dónde empieza a hacer algo."
+filas = []
+for nombre, estimador in (
+    ("sin regularizar", LinearRegression()),
+    ("Ridge, λ = 1", Ridge(alpha=1.0)),
+    ("Ridge, λ = 100", Ridge(alpha=100.0)),
+    ("Ridge, λ = 10⁶", Ridge(alpha=1e6)),
+):
+    modelo = estimador.fit(X, objetivo)          # sin StandardScaler
+    filas.append({
+        "modelo": nombre,
+        "R² entrenamiento": modelo.score(X, objetivo),
+        "sMAPE prueba": smape(y_te, recursivo(modelo, y_tr, P, h)),
+    })
+
+pd.DataFrame(filas).set_index("modelo").round(6)
+```
+
+Sin estandarizar, **$\lambda$ deja de ser un dial**. Con $\lambda = 1$ el $R^2$ coincide con
+el de mínimos cuadrados hasta el sexto decimal, y con $\lambda = 100$ el sMAPE cambia de
+0,931 a 0,928: nada. Hay que llegar a $\lambda = 10^6$ para que la penalización empiece a
+morder.
+
+La razón está en el aviso del @sec-regularizacion. La serie tiene valores del orden de 1.000
+y sus coeficientes de regresión son del orden de 0,1 a 1. La suma de cuadrados de los
+residuos es del orden de $10^5$; la suma de cuadrados de los coeficientes, del orden de la
+unidad. Cuando la @eq-ridge suma los dos términos, un $\lambda$ de 100 aporta una
+penalización de $10^2$ frente a un error de $10^5$: **tres órdenes de magnitud de
+diferencia**.
+
+La consecuencia práctica es que la comparación de la @tbl-regularizacion habría sido
+imposible: todos los modelos habrían dado el mismo número y la conclusión habría sido que la
+regularización no sirve. El escalado no es un detalle de implementación acá, es una condición
+para que el experimento signifique algo.
+
+### Ejercicio 6 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-14-6
+#| tbl-cap: "Polinomio de grado 12 sobre M35927 con tres cortes distintos."
+y = cargar("M35927").completa.to_numpy()
+
+filas = []
+for fraccion in (0.5, 0.7, 0.9):
+    corte = int(len(y) * fraccion)
+    t_tr = indice_escalado(0, corte, corte)
+    t_te = indice_escalado(corte, len(y), corte)
+    modelo = make_pipeline(PolynomialFeatures(12), LinearRegression()).fit(
+        t_tr, y[:corte]
+    )
+    filas.append({
+        "corte": f"{fraccion:.0%}",
+        "n entrenamiento": corte,
+        "n prueba": len(y) - corte,
+        "RMSE entrenamiento": rmse(y[:corte], modelo.predict(t_tr)),
+        "RMSE prueba": rmse(y[corte:], modelo.predict(t_te)),
+    })
+
+pd.DataFrame(filas).set_index("corte").round(1)
+```
+
+El error de entrenamiento no se mueve: 20,3, 19,2 y 20,9. El de prueba cae de veintiún
+millones a 1.483, **cuatro órdenes de magnitud**.
+
+Los dos hechos juntos son la lectura de la @eq-sesgo-varianza. El sesgo del polinomio de
+grado 12 es el mismo en los tres casos —es el mismo modelo, con la misma flexibilidad— y el
+error de entrenamiento, que lo refleja, no cambia. Lo que cambia es la varianza: con 176
+puntos los coeficientes de grado alto están mal determinados y la extrapolación se dispara;
+con 317 están mucho mejor determinados.
+
+De ahí sale la tercera fila de la @tbl-sintomas y una regla práctica: **más datos permiten
+sostener más capacidad**. El mismo modelo que sobreajusta con la mitad de la serie es
+razonable con el 90 %. Por eso la Parte II vuelve una y otra vez sobre el largo de las
+series: con 51 % de las series de M4 por debajo de 100 observaciones, la capacidad que se
+puede sostener es poca.
+
+Y una advertencia sobre el diseño de este ejercicio: los tres cortes tienen períodos de
+prueba de largos distintos —168, 97 y 27 puntos—, y los períodos más largos incluyen
+extrapolaciones más lejanas, donde el polinomio se dispara más. Parte de la mejora es eso y
+no solo la varianza. El @sec-validacion-cruzada arma la comparación de manera que este
+problema no aparezca.
