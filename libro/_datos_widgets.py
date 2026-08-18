@@ -32,6 +32,14 @@ WIDGETS: dict[str, list[tuple[str, str]]] = {
     "cap02_horaria.csv": [
         ("H317", "horaria con ciclo diario"),
     ],
+    # Capítulo 4: cuatro series estacionales para el widget de STL. Todas con
+    # m > 1, porque sin estacionalidad el deslizador no tiene qué mover.
+    "cap04_estacionales.csv": [
+        ("M35927", "estacionalidad marcada"),
+        ("M3007", "estacionalidad débil"),
+        ("Q15481", "amplitud creciente"),
+        ("M32692", "quiebre de nivel"),
+    ],
 }
 
 

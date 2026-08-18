@@ -450,6 +450,268 @@ Es el caso más común de fuga de información en series de tiempo, y es difíci
 notar porque el código no tiene nada de raro: `rolling(5, center=True)` se lee
 igual de bien que `rolling(5)`.
 
+## Capítulo 4 · Descomposición {#sec-soluciones-04}
+
+```{python}
+#| echo: false
+from statsmodels.stats.diagnostic import acorr_ljungbox
+from statsmodels.tsa.seasonal import STL, seasonal_decompose
+
+varianza = lambda x: np.var(x, ddof=1)
+
+
+def tendencia_movil(y, m):
+    """La misma función del capítulo 4."""
+    if m % 2 == 0:
+        return (
+            y.rolling(m, center=True).mean()
+            .rolling(2, center=True).mean()
+            .shift(-1)
+        )
+    return y.rolling(m, center=True).mean()
+```
+
+### Ejercicio 1
+
+```{python}
+s = cargar("Q22252")
+y, m = s.entrenamiento, s.periodo_estacional
+d = STL(y, period=m, robust=True).fit()
+
+reconstruida = d.trend + d.seasonal + d.resid
+print(f"serie: {s.n} observaciones, m = {m}")
+print(f"diferencia máxima: {np.max(np.abs(reconstruida - y.to_numpy())):.2e}")
+```
+
+La diferencia es del orden de $10^{-13}$, que es la precisión de la aritmética de
+punto flotante. No es que la descomposición sea "muy buena": la identidad
+$y = T + S + R$ vale **por construcción**, porque el residuo se define como lo que
+sobra después de estimar las otras dos.
+
+Vale la pena tenerlo claro para no confundirse: que la suma reconstruya la serie no
+valida nada sobre la calidad de la descomposición. Es un chequeo de que el código no
+tiene errores, no una medida de ajuste. Lo que sí dice algo es **qué tan grande** es
+el residuo, y eso es lo que mide la columna "residuo %" de la @tbl-ventana.
+
+### Ejercicio 2
+
+```{python}
+s = cargar("M16834")
+y, m = s.entrenamiento, s.periodo_estacional
+
+clasica = tendencia_movil(y, m)
+stl = pd.Series(STL(y, period=m, robust=True).fit().trend, index=y.index)
+
+print(f"serie: {s.n} observaciones, m = {m}")
+print(f"sin tendencia con la clásica: {int(clasica.isna().sum())}")
+print(f"sin tendencia con STL       : {int(stl.isna().sum())}")
+print(f"\nprimeras fechas sin tendencia clásica: "
+      f"{[str(f.date()) for f in clasica[clasica.isna()].index[:3]]}")
+```
+
+La clásica pierde 12 observaciones y STL no pierde ninguna. Difieren porque estiman
+la tendencia de maneras distintas.
+
+Una media móvil centrada de orden 12 necesita seis observaciones a cada lado. En los
+primeros y últimos seis puntos no las hay, así que no hay promedio posible: el
+resultado es `NaN`. Es una limitación aritmética, no una decisión.
+
+STL usa regresión local: en el borde ajusta una recta a los puntos disponibles y la
+evalúa ahí. Siempre devuelve un valor. Eso es una ventaja real —los extremos son
+justo donde uno quiere mirar, porque son el presente— pero conviene saber que **la
+tendencia estimada en los bordes es menos confiable** que en el medio: está apoyada
+en menos datos y en un solo lado.
+
+### Ejercicio 3
+
+```{python}
+s = cargar("Q15481")
+y, m = s.entrenamiento, s.periodo_estacional
+
+filas = []
+for etiqueta, serie in [("en nivel", y), ("en logaritmo", np.log(y))]:
+    d = STL(serie, period=m, robust=True).fit()
+    fuerza = lambda comp: max(
+        0.0, 1 - varianza(d.resid) / varianza(comp + d.resid)
+    )
+    filas.append({
+        "escala": etiqueta,
+        "F_T": round(fuerza(d.trend), 3),
+        "F_S": round(fuerza(d.seasonal), 3),
+        "residuo %": round(100 * varianza(d.resid) / varianza(serie), 1),
+    })
+
+pd.DataFrame(filas).set_index("escala")
+```
+
+En logaritmo la fuerza de estacionalidad da más alta, y también la de tendencia.
+
+**No**, eso no significa que la serie sea "más estacional" en logaritmo. La serie es
+la misma; lo que cambió es que el modelo aditivo describe mejor a la serie
+transformada. En nivel, la descomposición aditiva tiene que ajustar un patrón
+estacional fijo a un ciclo cuya amplitud crece, así que no le calza en ningún tramo:
+se queda corta al principio y se pasa al final, y todo ese desajuste va al residuo.
+En logaritmo la amplitud es aproximadamente constante y el patrón fijo sí calza.
+
+La conclusión correcta es sobre el método, no sobre la serie: **la fuerza de
+estacionalidad no es una propiedad de la serie sino de la descomposición que se le
+aplicó**. Comparar $F_S$ entre dos series solo tiene sentido si se calcularon en la
+misma escala y con los mismos parámetros. Es una advertencia importante para el
+@sec-caracteristicas, donde estos descriptores se usan para comparar cien mil series
+entre sí: en ese caso lo que garantiza la comparabilidad es que el pipeline aplicó
+exactamente el mismo procedimiento a todas.
+
+### Ejercicio 4
+
+Primero, lo que había que notar antes de empezar:
+
+```{python}
+elegida = cargar(fenomeno="atipicos")
+print(f"cargar(fenomeno='atipicos') devuelve {elegida.id}: "
+      f"{elegida.frecuencia}, m = {elegida.periodo_estacional}")
+```
+
+Es una serie **anual**, y M4 declara las anuales como no estacionales, con $m = 1$.
+STL necesita un período mayor que 1 para tener algo que estimar, así que sobre esa
+serie no se puede correr. Por eso el ejercicio nombra `M47356`, que es la otra serie
+de atípicos del catálogo y es mensual.
+
+Es un tropiezo que conviene tener: pedir "una serie con tal fenómeno" no garantiza
+que sirva para el método que uno tenía en mente. El fenómeno y la frecuencia son
+condiciones independientes.
+
+```{python}
+s = cargar("M47356")
+y, m = s.entrenamiento, s.periodo_estacional
+
+d_robusta = STL(y, period=m, robust=True).fit()
+d_simple = STL(y, period=m, robust=False).fit()
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=y.index, y=d_simple.resid, mode="lines", name="robust=False",
+    line=dict(color=COLORES["prueba"], width=1.4),
+))
+fig.add_trace(go.Scatter(
+    x=y.index, y=d_robusta.resid, mode="lines", name="robust=True",
+    line=dict(color=COLORES["observado"], width=1.4),
+))
+fig.update_layout(height=420)
+mostrar(fig, titulo_y="residuo")
+
+comparacion = pd.DataFrame([
+    {
+        "ajuste": etiqueta,
+        "desvío del residuo": round(float(np.std(d.resid, ddof=1)), 1),
+        "residuo máximo": round(float(np.max(np.abs(d.resid))), 1),
+        "residuo %": round(100 * varianza(d.resid) / varianza(y), 1),
+    }
+    for etiqueta, d in [("robust=True", d_robusta), ("robust=False", d_simple)]
+]).set_index("ajuste")
+comparacion
+```
+
+La diferencia se ve **en los picos**, y en dos lugares a la vez.
+
+En el punto atípico mismo, el residuo de la versión robusta es más grande: la
+descomposición robusta le baja el peso a ese punto, no intenta explicarlo, y lo deja
+íntegro en el residuo. Es lo que uno quiere, porque un atípico es precisamente algo
+que el modelo no debería explicar.
+
+Y en el resto de la serie, el residuo de la versión robusta es más chico. Al no
+haber dejado que el atípico distorsione la tendencia y el patrón estacional, todo lo
+demás queda mejor ajustado. Ese es el punto de `robust=True`: no elimina el problema,
+lo **confina**.
+
+### Ejercicio 5
+
+```{python}
+s = cargar("M35927")
+y, m = s.entrenamiento, s.periodo_estacional
+
+angosta = pd.Series(
+    STL(y, period=m, seasonal=7, robust=True).fit().seasonal, index=y.index
+)
+ancha = pd.Series(
+    STL(y, period=m, seasonal=51, robust=True).fit().seasonal, index=y.index
+)
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=angosta.index, y=angosta.values, mode="lines", name="seasonal = 7",
+    line=dict(color=COLORES["prueba"], width=1.4),
+))
+fig.add_trace(go.Scatter(
+    x=ancha.index, y=ancha.values, mode="lines", name="seasonal = 51",
+    line=dict(color=COLORES["observado"], width=1.4),
+))
+fig.update_layout(height=430)
+mostrar(fig, titulo_y="componente estacional")
+
+diferencia = (angosta - ancha).abs()
+tercio = len(diferencia) // 3
+print(f"diferencia media           : {diferencia.mean():.2f}")
+print(f"diferencia máxima          : {diferencia.max():.2f} "
+      f"({diferencia.idxmax().date()})")
+print(f"media en el primer tercio  : {diferencia.iloc[:tercio].mean():.2f}")
+print(f"media en el último tercio  : {diferencia.iloc[-tercio:].mean():.2f}")
+```
+
+Las dos componentes son parecidas en forma general, y difieren más **al principio de
+la serie**: la diferencia media del primer tercio es casi el doble que la del último.
+
+La lectura es que el patrón estacional de esta serie **sí cambió**, y cambió sobre
+todo en los primeros años. La ventana ancha impone un perfil casi único para toda la
+serie, y ese perfil se parece más al de los años recientes —que son mayoría— que al
+de los primeros. La ventana angosta puede seguir el perfil de cada época y por eso se
+separa donde el perfil era distinto.
+
+Esto explica el resultado de la @tbl-ventana que a primera vista sorprende: en
+`M35927`, ensanchar la ventana **baja** la fuerza estacional. No es que haya menos
+estacionalidad, es que un patrón fijo no puede representar una estacionalidad que se
+movió, y lo que no logra representar se va al residuo.
+
+### Ejercicio 6
+
+```{python}
+filas = []
+for serie_id in ["M35927", "Q22252", "H242"]:
+    s = cargar(serie_id)
+    y, m = s.entrenamiento, s.periodo_estacional
+    d = STL(y, period=m, robust=True).fit()
+    prueba = acorr_ljungbox(pd.Series(d.resid).dropna(), lags=[2 * m],
+                            return_df=True)
+    filas.append({
+        "serie": s.id,
+        "observaciones": s.n,
+        "m": m,
+        "estadístico": round(float(prueba["lb_stat"].iloc[0]), 2),
+        "p-valor": float(prueba["lb_pvalue"].iloc[0]),
+        "¿pasa por ruido?": "sí" if prueba["lb_pvalue"].iloc[0] > 0.05 else "no",
+    })
+
+pd.DataFrame(filas).set_index("serie")
+```
+
+Dos de las tres fallan la prueba con p-valores minúsculos: sus residuos conservan
+autocorrelación clara. **`Q22252` la pasa**, con un p-valor alto.
+
+Y acá está lo que el ejercicio quería que mirases: `Q22252` tiene 56 observaciones.
+La prueba de Ljung-Box con 8 rezagos sobre 56 puntos tiene **muy poca potencia**: no
+detectaría una autocorrelación moderada aunque estuviera ahí. Que el residuo "pase
+por ruido" no significa que sea ruido; significa que con estos datos no se puede
+distinguir de ruido.
+
+Es la asimetría de cualquier prueba de hipótesis, y en series cortas es la regla más
+que la excepción. Rechazar es informativo —hay estructura—; no rechazar no dice casi
+nada si la muestra es chica. En el @sec-evaluacion vuelve a aparecer el mismo problema
+al comparar modelos sobre pocas series.
+
+Sobre lo que falta modelar en las dos que fallan: la descomposición sacó la tendencia
+y el ciclo estacional, y quedó **autocorrelación de corto plazo**, la clase de
+estructura donde el valor de un mes depende del anterior más allá de la tendencia
+general. Eso es exactamente lo que modela un ARIMA, @sec-arima.
+
 ## Capítulo 5 · Características de series {#sec-soluciones-05}
 
 ```{python}
