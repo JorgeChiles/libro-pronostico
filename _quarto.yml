@@ -59,6 +59,14 @@ format:
     theme:
       light: [cosmo, estilos/claro.scss]
       dark: [cosmo, estilos/oscuro.scss]
+    # La columna central es más ancha que el valor por omisión de Quarto
+    # (800 px): el libro tiene tablas de seis y siete columnas y figuras con
+    # cuatro paneles que quedaban apretadas.
+    grid:
+      sidebar-width: 290px
+      body-width: 1080px
+      margin-width: 260px
+      gutter-width: 1.5rem
     toc: true
     toc-title: "En esta página"
     number-sections: true

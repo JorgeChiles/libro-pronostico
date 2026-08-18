@@ -1545,3 +1545,251 @@ naive simple es una vara baja en cualquier serie con estacionalidad, y superarlo
 dice mucho. La referencia honesta es el mejor método simple disponible, no el más
 fácil de vencer.
 
+## Capítulo 9 · Suavizado exponencial {#sec-soluciones-09}
+
+```{python}
+#| echo: false
+from statsmodels.tsa.holtwinters import Holt, SimpleExpSmoothing
+```
+
+### Ejercicio 1
+
+```{python}
+#| label: tbl-sol-09-1
+#| tbl-cap: "Suavizado exponencial simple sobre D2039 con tres valores de α."
+s = cargar("D2039")
+tr, te, h = s.entrenamiento, s.prueba.to_numpy(), s.horizonte
+
+filas = []
+for etiqueta, argumentos in [
+    ("α = 0,1", {"smoothing_level": 0.1, "optimized": False}),
+    ("α = 0,5", {"smoothing_level": 0.5, "optimized": False}),
+    ("α optimizado", {}),
+]:
+    ajuste = SimpleExpSmoothing(tr, initialization_method="estimated").fit(**argumentos)
+    filas.append({
+        "configuración": etiqueta,
+        "α resultante": round(ajuste.params["smoothing_level"], 3),
+        "sMAPE": round(smape(te, ajuste.forecast(h).to_numpy()), 3),
+    })
+
+pd.DataFrame(filas).set_index("configuración")
+```
+
+El método eligió un α muy bajo, cercano a 0,08. Con la @eq-pesos eso significa que
+la última observación recibe apenas el 8 % del peso y el resto se reparte entre unas
+cuarenta observaciones anteriores: el método está promediando mucho, es decir,
+tratando casi todo el movimiento reciente de la serie como ruido.
+
+Tiene sentido para `D2039`, que es la caminata aleatoria del catálogo. Cuando no hay
+señal que seguir, la mejor defensa es promediar.
+
+Pero hay un detalle que conviene notar y que sorprende: **el α optimizado da un
+sMAPE ligeramente peor que α = 0,1**. No es un error de cálculo ni una casualidad
+molesta, es una consecuencia del criterio. El α se elige minimizando los errores de
+pronóstico **a un paso dentro de la muestra de entrenamiento**, y se lo evalúa
+después sobre catorce pasos fuera de la muestra. Son dos objetivos distintos, y el
+óptimo de uno no tiene por qué ser el óptimo del otro.
+
+La diferencia acá es de centésimas, así que no cambia ninguna conclusión. La lección
+sí importa: cuando se lee "parámetros óptimos" hay que preguntar **óptimos respecto
+de qué**.
+
+### Ejercicio 2
+
+Los pesos de la @eq-pesos son $\alpha(1-\alpha)^j$ para $j = 0, 1, 2, \ldots$ La
+proporción acumulada en las primeras $k$ observaciones es la suma de una progresión
+geométrica:
+
+$$
+\sum_{j=0}^{k-1} \alpha(1-\alpha)^j = 1 - (1-\alpha)^k
+$$
+
+Con $k = 5$: para $\alpha = 0{,}2$ da $1 - 0{,}8^5 = 0{,}672$; para
+$\alpha = 0{,}8$ da $1 - 0{,}2^5 = 0{,}99968$.
+
+```{python}
+for alfa in (0.2, 0.8):
+    pesos = alfa * (1 - alfa) ** np.arange(500)
+    acumulado = pesos[:5].sum()
+    print(f"α = {alfa}:  numérico {acumulado:.5f}   "
+          f"fórmula {1 - (1 - alfa) ** 5:.5f}")
+```
+
+Con $\alpha = 0{,}2$ las últimas cinco observaciones concentran el 67 % del peso;
+con $\alpha = 0{,}8$, prácticamente el 100 %. Dicho de otro modo, con α alto el
+método no tiene memoria más allá de unos pocos períodos, y con α bajo la conserva
+durante decenas.
+
+Una regla útil que sale de la misma fórmula: la cantidad de observaciones que
+concentran el 95 % del peso es aproximadamente $\log(0{,}05)/\log(1-\alpha)$, que
+para $\alpha = 0{,}2$ da unas 13 observaciones y para $\alpha = 0{,}05$ da unas 58.
+
+### Ejercicio 3
+
+```{python}
+#| label: tbl-sol-09-3
+#| tbl-cap: "Holt con y sin amortiguamiento sobre Q1915, la serie de tendencia limpia."
+s = cargar("Q1915")
+tr, te, h = s.entrenamiento, s.prueba.to_numpy(), s.horizonte
+
+sin_amortiguar = Holt(tr, initialization_method="estimated").fit()
+con_amortiguar = Holt(tr, damped_trend=True, initialization_method="estimated").fit()
+
+pd.DataFrame([
+    {"método": "Holt", "φ": np.nan,
+     "sMAPE": round(smape(te, sin_amortiguar.forecast(h).to_numpy()), 3)},
+    {"método": "Holt amortiguado",
+     "φ": round(con_amortiguar.params["damping_trend"], 3),
+     "sMAPE": round(smape(te, con_amortiguar.forecast(h).to_numpy()), 3)},
+]).set_index("método")
+```
+
+$\phi$ se estimó en **0,995**, prácticamente 1. Y ahí está la respuesta al
+ejercicio: amortiguar **no perjudica** cuando la tendencia es genuina, porque el
+método estima un $\phi$ tan cercano a 1 que la @eq-holt-amortiguado se vuelve casi
+idéntica a la @eq-holt.
+
+La diferencia de sMAPE entre los dos es de centésimas sobre valores de una décima:
+ruido, no señal. En esta serie los dos métodos son el mismo método.
+
+Y eso completa el argumento del @sec-amortiguada. Amortiguar tiene un costo casi
+nulo cuando la tendencia es real —el parámetro se acomoda solo— y evita un desastre
+cuando no lo es, como en la @tbl-amortiguado. Una opción que no pierde casi nada en
+el mejor caso y gana mucho en el peor es una buena opción por omisión.
+
+### Ejercicio 4
+
+```{python}
+#| label: tbl-sol-09-4
+#| tbl-cap: "Límite de la pendiente acumulada para cada φ estimado, comparado con el horizonte de 48 pasos."
+filas = []
+for s in cargar(n=len(catalogo())):
+    if s.frecuencia != "horaria":
+        continue
+    ajuste = Holt(
+        s.entrenamiento, damped_trend=True, initialization_method="estimated"
+    ).fit()
+    phi = ajuste.params["damping_trend"]
+    pasos = np.arange(1, s.horizonte + 1)
+    acumulada = np.cumsum(phi ** pasos)
+    filas.append({
+        "serie": s.id,
+        "φ": phi,
+        "límite φ/(1−φ)": phi / (1 - phi),
+        "acumulada a h=48": acumulada[-1],
+        "% del límite alcanzado": 100 * acumulada[-1] / (phi / (1 - phi)),
+    })
+
+pd.DataFrame(filas).set_index("serie").round(2)
+```
+
+La última columna es la que responde la pregunta. Mide qué fracción del freno total
+llega a aplicarse dentro de las 48 horas del horizonte de M4.
+
+En las series con $\phi$ bajo —cerca de 0,80— la suma geométrica prácticamente
+alcanza su límite antes del paso 48: el amortiguamiento actúa por completo y el
+pronóstico ya está plano mucho antes del final del horizonte. En las series con
+$\phi$ alto —cerca de 0,94— la acumulación todavía está creciendo al llegar al paso
+48, así que el freno actúa solo en parte.
+
+La consecuencia práctica es que **el amortiguamiento es más relevante cuanto más
+largo es el horizonte**. Con $h = 1$ es irrelevante: $\phi^1$ apenas cambia el
+pronóstico. Con $h = 48$ y una serie que Holt llevaría a valores negativos, es la
+diferencia entre un pronóstico usable y uno absurdo.
+
+### Ejercicio 5
+
+```{python}
+#| label: tbl-sol-09-5
+#| tbl-cap: "Holt-Winters aditivo y multiplicativo sobre M35927: criterio de información contra error de prueba."
+s = cargar("M35927")
+tr, te = s.entrenamiento, s.prueba.to_numpy()
+h, m = s.horizonte, s.periodo_estacional
+
+filas = []
+for etiqueta, tipo in (("estacionalidad aditiva", "add"),
+                       ("estacionalidad multiplicativa", "mul")):
+    ajuste = ExponentialSmoothing(
+        tr, trend="add", seasonal=tipo, seasonal_periods=m,
+        initialization_method="estimated",
+    ).fit()
+    filas.append({
+        "modelo": etiqueta,
+        "AIC": round(ajuste.aic, 1),
+        "AICc": round(ajuste.aicc, 1),
+        "sMAPE fuera de muestra": round(smape(te, ajuste.forecast(h).to_numpy()), 3),
+    })
+
+pd.DataFrame(filas).set_index("modelo")
+```
+
+Los dos criterios coinciden: el modelo multiplicativo tiene menor AICc **y** menor
+sMAPE fuera de muestra. En este caso el criterio de información acertó.
+
+Vale la pena entender por qué eso no está garantizado. El AICc de la @eq-aicc se
+calcula **enteramente dentro de la muestra de entrenamiento**: mide qué tan bien el
+modelo explica los datos que vio, penalizado por su complejidad. El sMAPE de la
+última columna se calcula sobre datos que el modelo no vio. Que coincidan es lo
+habitual y es la razón por la que el criterio sirve; que no coincidan pasa, sobre
+todo en series cortas donde el AICc tiene mucha varianza.
+
+La ventaja práctica del criterio de información es grande y conviene decirla: **no
+consume datos de prueba**. Se puede usar para elegir entre dieciocho modelos sin
+gastar ni una observación del período de evaluación, que es exactamente lo que hace
+la selección automática del @sec-seleccion-ets.
+
+### Ejercicio 6
+
+```{python}
+#| label: tbl-sol-09-6
+#| tbl-cap: "Modelo que AutoETS elige para cada serie mensual del catálogo."
+from statsforecast import StatsForecast
+from statsforecast.models import AutoETS
+
+filas = []
+for s in cargar(n=len(catalogo())):
+    if s.frecuencia != "mensual":
+        continue
+    datos_ajuste = s.a_frame(incluir_prueba=False)[["unique_id", "ds", "y"]]
+    sf = StatsForecast(
+        models=[AutoETS(season_length=s.periodo_estacional)], freq="MS", n_jobs=1
+    )
+    sf.fit(df=datos_ajuste)
+    filas.append({
+        "serie": s.id,
+        "observaciones": s.n,
+        "fenómeno": s.fenomeno or "—",
+        "modelo elegido": sf.fitted_[0][0].model_["method"],
+    })
+
+elegidos = pd.DataFrame(filas).set_index("serie")
+elegidos
+```
+
+```{python}
+modelos = elegidos["modelo elegido"]
+print(f"series analizadas          : {len(modelos)}")
+print(f"con tendencia amortiguada  : {modelos.str.contains(r'Ad').sum()}")
+print(f"con error multiplicativo   : {modelos.str.startswith('ETS(M').sum()}")
+print(f"sin tendencia (N)          : {modelos.str.contains(r',N,').sum()}")
+```
+
+Las respuestas directas: la tendencia amortiguada se elige **una sola vez**, y el
+error multiplicativo **ocho de once veces**.
+
+Pero el resultado más llamativo es el tercero, que el ejercicio no preguntaba: en
+nueve de las once series el algoritmo elige **ninguna tendencia**. Incluso en series
+que a ojo parecen tener una.
+
+La explicación está en el criterio. Una componente de tendencia agrega dos
+parámetros —$\beta^*$ y el estado inicial $b_0$— y la @eq-aicc los penaliza. Si la
+tendencia no mejora la verosimilitud lo suficiente para pagar esa penalización, el
+criterio la descarta. En series mensuales de M4, que tienen entre 60 y 500
+observaciones y bastante ruido, muchas veces no la paga.
+
+Esto conecta con dos cosas del libro. Primero, con el @sec-caracteristicas: una
+fuerza de tendencia alta no implica que convenga **modelar** la tendencia; son
+preguntas distintas. Y segundo, con la razón por la que el suavizado exponencial
+simple ganaba en ocho series de la @tbl-ganadores: el modelo más simple gana seguido,
+y no por casualidad.
