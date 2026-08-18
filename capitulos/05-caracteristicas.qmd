@@ -1,7 +1,567 @@
+---
+resources:
+  - datos/cap01_series.csv
+---
+
 # Características de series {#sec-caracteristicas}
 
-Fuerza de tendencia y estacionalidad, entropía y autocorrelación como descriptores. Acá entra el índice de complejidad estructural.
+```{python}
+#| echo: false
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
 
-::: {.callout-note appearance="simple"}
-Capítulo en preparación.
+from libro.datos import cargar, catalogo, metadatos
+from libro.graficos import COLORES, mostrar
+```
+
+Con una serie, se la mira. Con cien mil, no.
+
+Ese es todo el problema de este capítulo. Cuando hay una serie, el gráfico del
+@sec-visualizacion dice casi todo lo que hace falta saber. Cuando hay cien mil
+—o mil, o cincuenta— hay que reemplazar la mirada por números: **características**
+(*features*) que resuman cada serie en unos pocos valores comparables entre sí.
+
+Sirven para tres cosas distintas, y conviene tenerlas separadas:
+
+1. **Anticipar la dificultad.** Saber, antes de ajustar nada, si esta serie va a
+   ser fácil o imposible.
+2. **Elegir el modelo.** Si una serie no tiene estacionalidad, no hace falta
+   probar seis modelos estacionales.
+3. **Agrupar series parecidas**, para tratar juntas las que se comportan igual.
+
+## Dos números que describen casi todo {#sec-fuerzas}
+
+Empecemos por los dos más útiles. La idea es descomponer la serie en tendencia,
+estacionalidad y residuo —el procedimiento está en el @sec-descomposicion— y
+preguntar cuánta de la variación explica cada componente.
+
+Si $T$ es la tendencia, $S$ la estacionalidad y $R$ el residuo:
+
+$$
+F_T = \max\left(0,\; 1 - \frac{\operatorname{Var}(R)}{\operatorname{Var}(T + R)}\right)
+\qquad
+F_S = \max\left(0,\; 1 - \frac{\operatorname{Var}(R)}{\operatorname{Var}(S + R)}\right)
+$$
+
+Las dos van de 0 a 1, y la lectura es directa: si al sacarle la tendencia a la
+serie la varianza casi no baja, la tendencia no explicaba nada y $F_T \approx 0$;
+si baja muchísimo, $F_T \approx 1$.
+
+En código son cinco líneas:
+
+```{python}
+from statsmodels.tsa.filters.hp_filter import hpfilter
+from statsmodels.tsa.seasonal import STL
+
+
+def fuerzas(y: pd.Series, m: int) -> tuple[float, float]:
+    """Fuerza de tendencia y de estacionalidad de una serie."""
+    if m > 1 and len(y) >= 2 * m:
+        d = STL(y, period=m, robust=True).fit()
+        tendencia, estacional, residuo = d.trend, d.seasonal, d.resid
+    else:
+        # Sin estacionalidad, alcanza con separar tendencia y residuo.
+        residuo, tendencia = hpfilter(y)
+        estacional = pd.Series(0.0, index=y.index)
+
+    def fuerza(componente):
+        return max(0.0, 1 - np.var(residuo, ddof=1)
+                   / np.var(componente + residuo, ddof=1))
+
+    return fuerza(tendencia), (fuerza(estacional) if m > 1 else 0.0)
+```
+
+Y esto es lo que dicen sobre seis series del catálogo:
+
+```{python}
+#| label: tbl-fuerzas
+#| tbl-cap: "Fuerza de tendencia y de estacionalidad, calculadas acá y comparadas con la tabla precalculada de las 99.935 series."
+referencia = metadatos().set_index("serie")
+
+filas = []
+for serie_id in ["Q1915", "M35927", "M3007", "D1", "H317", "M32692"]:
+    s = cargar(serie_id)
+    ft, fs = fuerzas(s.entrenamiento, s.periodo_estacional)
+    filas.append({
+        "serie": s.id,
+        "fenómeno": s.fenomeno or "—",
+        "m": s.periodo_estacional,
+        "F_T": ft,
+        "F_T tabla": referencia.loc[s.id, "trend_strength"],
+        "F_S": fs,
+        "F_S tabla": referencia.loc[s.id, "seasonal_strength"],
+    })
+
+pd.DataFrame(filas).set_index("serie").round(3)
+```
+
+::: {.callout-note}
+## Por qué están las dos columnas
+
+Las columnas "tabla" vienen de los descriptores precalculados sobre las 99.935
+series de M4, que el libro trae en `metadatos()`. Las otras se acaban de calcular
+con el código de arriba.
+
+Coinciden hasta el tercer decimal. No es un adorno: significa que cualquier cosa
+que este capítulo diga sobre las cien mil series se puede verificar sobre una sola,
+con quince líneas de código. Un descriptor que no se puede recalcular es un
+descriptor en el que no conviene confiar.
 :::
+
+### $F_T$ no significa "tiene tendencia" {#sec-ft-no-es-tendencia}
+
+Mirá la última fila de la tabla. `M32692` es la serie que el catálogo etiqueta como
+quiebre de nivel, y su $F_T$ es `{python} f"{filas[-1]['F_T']:.2f}"`, bajísima. Y
+sin embargo la serie cambia de nivel de manera evidente:
+
+```{python}
+#| label: fig-quiebre
+#| fig-cap: "M32692: la serie cambia de nivel de golpe. Su fuerza de tendencia es baja de todas formas."
+y = cargar("M32692").entrenamiento
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=y.index, y=y.values, mode="lines", name="M32692",
+    line=dict(color=COLORES["observado"], width=1.6),
+    hovertemplate="%{x|%b %Y}<br>%{y:,.0f}<extra></extra>",
+))
+fig.update_layout(height=380, showlegend=False)
+mostrar(fig, titulo_y="unidades")
+```
+
+No hay contradicción: $F_T$ no mide "si la serie sube o baja", mide **cuánta de la
+variación no estacional explica una tendencia suave**. Un salto abrupto no es una
+tendencia suave, y la descomposición lo reparte en buena parte al residuo.
+
+Es la primera lección importante del capítulo: **una característica mide
+exactamente lo que dice su fórmula, no lo que sugiere su nombre**. Un quiebre de
+nivel necesita su propio descriptor —el pipeline usa `change_points_per_length`—
+porque $F_T$ no lo ve.
+
+### El mapa del catálogo {#sec-mapa-catalogo}
+
+Con dos números por serie se puede dibujar un mapa:
+
+```{python}
+#| label: fig-mapa-catalogo
+#| fig-cap: "Las series del catálogo en el plano de las dos fuerzas. Pasá el cursor para ver de cuál se trata."
+cat = catalogo()
+
+fig = go.Figure()
+for fenomeno, grupo in cat.groupby("fenomeno"):
+    fig.add_trace(go.Scatter(
+        x=grupo["trend_strength"], y=grupo["seasonal_strength"],
+        mode="markers", name=fenomeno,
+        marker=dict(size=11, line=dict(width=1, color="white")),
+        text=grupo["serie"] + " · " + grupo["frecuencia"].astype(str),
+        hovertemplate="%{text}<br>F_T %{x:.2f}<br>F_S %{y:.2f}<extra></extra>",
+    ))
+
+fig.update_layout(height=520, legend=dict(orientation="v", y=1, x=1.02))
+fig.update_xaxes(title="fuerza de tendencia", range=[-0.05, 1.05])
+fig.update_yaxes(title="fuerza de estacionalidad", range=[-0.05, 1.05])
+mostrar(fig)
+```
+
+Las cuatro esquinas del mapa son cuatro problemas de pronóstico distintos. Abajo a
+la derecha, tendencia sin estacionalidad: la deriva funciona. Arriba a la derecha,
+las dos cosas a la vez: el territorio de Holt-Winters, @sec-suavizado. Arriba a la
+izquierda, estacionalidad sobre un nivel plano: el naive estacional cuesta de
+superar. Y abajo a la izquierda, ni una ni otra: nada que modelar, como vimos en el
+@sec-que-es-pronosticar.
+
+## El mapa de M4 {#sec-mapa-m4}
+
+El mismo gráfico sobre las 99.935 series muestra algo que el catálogo no puede
+mostrar: dónde vive cada frecuencia.
+
+```{python}
+#| label: fig-mapa-m4
+#| fig-cap: "Una muestra de series de M4 en el plano de las dos fuerzas. Conviene apagar frecuencias en la leyenda y mirarlas de a una."
+meta = metadatos()
+
+# Una muestra por frecuencia: alcanza para ver la forma de cada nube y mantiene
+# la página liviana.
+muestra = pd.concat([
+    g.sample(min(len(g), 700), random_state=42)
+    for _, g in meta.groupby("frecuencia", observed=True)
+])
+
+fig = go.Figure()
+for frecuencia in ["anual", "trimestral", "mensual", "semanal", "diaria", "horaria"]:
+    g = muestra[muestra["frecuencia"] == frecuencia]
+    fig.add_trace(go.Scatter(
+        x=g["trend_strength"].astype(float).tolist(),
+        y=g["seasonal_strength"].astype(float).tolist(),
+        mode="markers", name=f"{frecuencia} ({len(g):,})",
+        marker=dict(size=4, opacity=0.5),
+        hovertemplate="F_T %{x:.2f}<br>F_S %{y:.2f}<extra>" + frecuencia + "</extra>",
+    ))
+
+fig.update_layout(height=540)
+fig.update_xaxes(title="fuerza de tendencia")
+fig.update_yaxes(title="fuerza de estacionalidad")
+mostrar(fig)
+```
+
+```{python}
+#| label: tbl-fuerzas-frecuencia
+#| tbl-cap: "Fuerza de tendencia y de estacionalidad promedio por frecuencia, sobre las 99.935 series."
+resumen = (
+    meta.groupby("frecuencia", observed=True)
+    .agg(
+        series=("serie", "size"),
+        f_t=("trend_strength", "mean"),
+        f_s=("seasonal_strength", "mean"),
+        estacionales=("seasonal_strength", lambda s: 100 * (s > 0.6).mean()),
+    )
+    .loc[["anual", "trimestral", "mensual", "semanal", "diaria", "horaria"]]
+)
+resumen.columns = ["series", "F_T media", "F_S media", "% con F_S > 0,6"]
+resumen.round(3)
+```
+
+Las series **horarias** son las más estructuradas de M4 en las dos dimensiones:
+ciclo diario marcado y tendencia clara. Las **anuales** tienen tendencia y, por la
+convención de la competencia, estacionalidad cero. Y las **diarias** son las que
+menos estructura estacional tienen, lo que explica por qué en el
+@sec-que-es-pronosticar ningún modelo le ganaba al naive ahí.
+
+## Entropía: cuánta sorpresa tiene la serie {#sec-entropia}
+
+Las dos fuerzas describen estructura que se puede nombrar: sube, o se repite cada
+doce meses. La entropía apunta a otra cosa: **cuán impredecible es la serie sin
+importar de qué forma**.
+
+Hay varias, y no miden lo mismo:
+
+| Medida | Qué captura |
+|---|---|
+| **Entropía espectral** | Cuán repartida está la energía entre frecuencias. Baja si un ciclo domina. |
+| **Entropía de permutación** | Cuán variados son los patrones de orden entre valores vecinos. |
+| **Entropía muestral** | Cuán poco se repiten los subpatrones a lo largo de la serie. |
+| **Complejidad de Lempel-Ziv** | Cuánto se puede comprimir la serie discretizada. |
+
+Las cuatro están en `metadatos()`. Y acá hay que decir algo que los textos sobre
+características de series casi nunca dicen.
+
+### El costo importa {#sec-costo-entropia}
+
+La entropía muestral es $O(n^2)$: compara cada subsecuencia con todas las demás.
+Medido sobre una serie real:
+
+```{python}
+#| label: tbl-costo
+#| tbl-cap: "Costo de calcular dos entropías sobre la misma serie, según el largo."
+import time
+from math import factorial
+
+
+def entropia_permutacion(x: np.ndarray, orden: int = 3) -> float:
+    """Cuán variados son los patrones de orden entre vecinos."""
+    n = len(x) - orden + 1
+    conteo: dict[tuple, int] = {}
+    for i in range(n):
+        patron = tuple(np.argsort(x[i:i + orden]))
+        conteo[patron] = conteo.get(patron, 0) + 1
+    p = np.array(list(conteo.values()), dtype=float) / n
+    return float(-np.sum(p * np.log(p)) / np.log(factorial(orden)))
+
+
+def entropia_muestral(x: np.ndarray, m: int = 2, r: float | None = None) -> float:
+    """Cuán poco se repiten los subpatrones. Cuidado: es O(n²)."""
+    x = np.asarray(x, dtype=float)
+    n = len(x)
+    r = 0.2 * np.std(x) if r is None else r
+
+    def coincidencias(k: int) -> int:
+        total = 0
+        for i in range(n - k):
+            for j in range(i + 1, n - k):
+                if np.max(np.abs(x[i:i + k] - x[j:j + k])) <= r:
+                    total += 1
+        return total
+
+    a, b = coincidencias(m + 1), coincidencias(m)
+    return float(-np.log(a / b)) if a and b else float("nan")
+
+
+larga = cargar("D4099").entrenamiento.to_numpy()
+
+mediciones = []
+for n in [500, 1000, 2000]:
+    x = larga[:n]
+
+    inicio = time.perf_counter()
+    entropia_permutacion(x)
+    t_permutacion = time.perf_counter() - inicio
+
+    inicio = time.perf_counter()
+    entropia_muestral(x)
+    t_muestral = time.perf_counter() - inicio
+
+    mediciones.append({
+        "observaciones": n,
+        "permutación (ms)": round(t_permutacion * 1000, 2),
+        "muestral (s)": round(t_muestral, 2),
+        "cociente": round(t_muestral / t_permutacion),
+    })
+
+costos = pd.DataFrame(mediciones).set_index("observaciones")
+costos
+```
+
+```{python}
+#| echo: false
+factor_largo = int(costos["cociente"].iloc[-1])
+crecimiento = costos["muestral (s)"].iloc[-1] / costos["muestral (s)"].iloc[0]
+```
+
+Al duplicar el largo, la entropía muestral no tarda el doble: tarda unas cuatro
+veces más. De 500 a 2.000 observaciones —cuatro veces más datos— el tiempo se
+multiplicó por `{python} f"{crecimiento:.0f}"`. Y con 2.000 observaciones ya es
+unas `{python} f"{factor_largo:,}"` veces más lenta que la de permutación.
+
+Eso tiene una consecuencia práctica. Calcular estos descriptores sobre las 100.000
+series de M4 llevó **20 horas**, y la entropía muestral se llevó 16 horas y media
+de esas 20: el 99,99 % del costo del cálculo de entropías. Las series diarias solas
+—4.227 series de 2.357 observaciones promedio— consumieron 12,5 de esas 16,5 horas.
+
+::: {.callout-warning}
+## Un descriptor que no se puede calcular no sirve
+
+La entropía muestral es una buena medida, y en la @tbl-validacion-indice se ve que
+aporta información real. Pero si el objetivo es calcular características **en
+línea** —una aplicación que recibe una serie y responde en un segundo—, una
+implementación $O(n^2)$ en Python puro está fuera de discusión. Hay dos salidas:
+vectorizar el cálculo, o precomputar los descriptores y guardarlos.
+
+Vale como criterio general: al elegir características, **el costo de calcularlas es
+parte de la decisión**, igual que su poder descriptivo. Es una restricción que
+aparece recién cuando el trabajo pasa de un cuaderno a producción, y por eso casi
+nunca se menciona.
+:::
+
+## De veintinueve descriptores a uno {#sec-indice}
+
+El pipeline que produjo `metadatos()` calcula 29 descriptores por serie: las dos
+fuerzas, cuatro medidas de entropía, autocorrelaciones a distintos rezagos,
+p-valores de dos pruebas de estacionariedad, proporción de valores atípicos, puntos
+de giro, exponente de Hurst, cambios de varianza, puntos de quiebre.
+
+Veintinueve números por serie es demasiado para ordenar nada. Y están muy
+correlacionados entre sí: una serie con tendencia fuerte también tiene
+autocorrelación alta al rezago 1, y probablemente entropía espectral baja. La
+salida es reducir.
+
+El **índice de complejidad estructural** es la primera componente principal de esos
+29 descriptores estandarizados, con el signo invertido:
+
+```python
+X = descriptores_estandarizados            # 99.935 × 29
+pc1 = PCA(n_components=0.90).fit_transform(X)[:, 0]
+complexity_index = -pc1                    # más alto = menos estructura
+```
+
+La inversión de signo no es un capricho: la primera componente apunta hacia **más
+estructura explotable**, y lo que queremos que crezca es la dificultad. Es la clase
+de decisión que hay que declarar, porque el signo de una componente principal es
+arbitrario y confundirlo invierte todas las conclusiones.
+
+### ¿Sirve de algo? {#sec-validacion}
+
+Un índice puede ser elegante y no medir nada. La prueba honesta es contra un
+resultado externo: el error que un método simple comete en cada serie. Si el índice
+mide dificultad, tiene que correlacionar con el error del naive.
+
+```{python}
+#| label: tbl-validacion-indice
+#| tbl-cap: "Correlación de cada medida con el error del naive, sobre las series de M4 con error disponible."
+con_error = meta.dropna(subset=["error_naive_smape"])
+
+medidas = {
+    "índice de complejidad": "complexity_index",
+    "Lempel-Ziv": "lz_complexity",
+    "entropía muestral": "sample_entropy",
+    "entropía de permutación": "perm_entropy",
+}
+
+pd.DataFrame([
+    {
+        "medida": nombre,
+        "Pearson": con_error[col].corr(con_error["error_naive_smape"]),
+        "Spearman": con_error[col].corr(
+            con_error["error_naive_smape"], method="spearman"
+        ),
+    }
+    for nombre, col in medidas.items()
+]).set_index("medida").round(3)
+```
+
+El índice correlaciona mejor que cualquiera de las entropías clásicas en
+correlación lineal. Pero mirá con cuidado la segunda columna: **Lempel-Ziv gana en
+correlación de rangos**. Las dos cosas son verdad a la vez, y hay que decirlas
+juntas.
+
+Y una pregunta más exigente: ¿el índice aporta algo *además* de lo que ya dicen las
+entropías, o es una manera cara de decir lo mismo?
+
+```{python}
+#| label: tbl-anidadas
+#| tbl-cap: "Varianza del error del naive explicada por cada conjunto de variables."
+from sklearn.linear_model import LinearRegression
+
+entropias = ["sample_entropy", "perm_entropy", "lz_complexity"]
+objetivo = "error_naive_smape"
+
+
+def r2_de(columnas: list[str]) -> tuple[float, int]:
+    datos = (
+        con_error[columnas + [objetivo]]
+        .replace([np.inf, -np.inf], np.nan)
+        .dropna()
+    )
+    X, y = datos[columnas].to_numpy(), datos[objetivo].to_numpy()
+    return LinearRegression().fit(X, y).score(X, y), len(datos)
+
+
+modelos = {
+    "solo el índice": ["complexity_index"],
+    "solo las tres entropías": entropias,
+    "las cuatro juntas": ["complexity_index"] + entropias,
+}
+
+resultados = {nombre: r2_de(cols) for nombre, cols in modelos.items()}
+
+pd.DataFrame([
+    {"modelo": nombre, "R²": round(r2, 4), "series": n}
+    for nombre, (r2, n) in resultados.items()
+]).set_index("modelo")
+```
+
+```{python}
+#| echo: false
+r2_indice = resultados["solo el índice"][0]
+r2_entropias = resultados["solo las tres entropías"][0]
+r2_ambos = resultados["las cuatro juntas"][0]
+aporte_del_indice = 100 * (r2_ambos / r2_entropias - 1)
+aporte_de_entropias = 100 * (r2_ambos / r2_indice - 1)
+```
+
+**El índice solo explica más varianza que las tres entropías juntas.** Y el aporte
+incremental es asimétrico: agregarle las entropías al índice sube el R² un
+`{python} f"{aporte_de_entropias:.0f}"` %, mientras que agregarle el índice a las
+entropías lo sube un `{python} f"{aporte_del_indice:.0f}"` %.
+
+La lectura correcta de las dos tablas, sin exagerar en ninguna dirección:
+Lempel-Ziv **ordena** las series algo mejor; el índice modela mejor la **magnitud**
+del error. Y el índice tiene una ventaja que una medida de compresión no puede
+tener: como se construye por componentes principales, sus pesos dicen qué lo
+compone. Lempel-Ziv devuelve un escalar y no explica nada.
+
+## Dos grupos, y qué frecuencias los habitan {#sec-clusters}
+
+Con los descriptores estandarizados se puede además agrupar. Sobre las 99.935
+series, la separación más nítida es en dos grupos: uno grande de series regulares y
+uno chico de series irregulares.
+
+```{python}
+#| label: tbl-clusters
+#| tbl-cap: "Proporción de series asignadas al grupo irregular, por frecuencia."
+grupos = (
+    meta.groupby("frecuencia", observed=True)
+    .agg(
+        series=("cluster", "size"),
+        pct_irregular=("cluster", lambda s: 100 * (s == 1).mean()),
+        complejidad=("complexity_index", "mean"),
+    )
+    .sort_values("pct_irregular", ascending=False)
+)
+grupos.columns = ["series", "% irregular", "complejidad media"]
+grupos.round(1)
+```
+
+El orden de esa tabla es el resultado más consistente del capítulo. **Las horarias
+son las que más se separan** —casi cuatro de cada diez caen en el grupo irregular—
+y las **diarias las que menos**, con menos del 2 %.
+
+Que las diarias casi no se separen quiere decir que son homogéneamente poco
+estructuradas: no hay dos poblaciones ahí, hay una sola nube. Es coherente con todo
+lo demás que sabemos de ellas: el índice casi no correlaciona con el error en
+diarias, y ningún modelo le gana al naive.
+
+Cuando tres métodos distintos —un índice, un agrupamiento y una competencia de
+modelos— dicen lo mismo sobre el mismo subconjunto, probablemente estén
+describiendo una propiedad real de los datos y no un artefacto de ninguno de los
+tres. Es la mejor evidencia disponible cuando no hay una verdad de referencia
+contra la que comparar.
+
+## Probalo {#sec-probalo-05}
+
+La celda que sigue calcula las dos fuerzas en tu navegador, con `statsmodels`.
+Cambiá la serie y el período estacional.
+
+Vale la pena probar dos cosas. Primero, poner `m = 12` en la caminata aleatoria: la
+fuerza de estacionalidad va a devolver un número igual, porque el cálculo siempre
+devuelve un número, aunque el período no signifique nada para esa serie. Segundo,
+comparar el quiebre de nivel con la tendencia limpia y ver la diferencia de $F_T$
+que comentamos en el @sec-ft-no-es-tendencia.
+
+```{pyodide}
+#| caption: Fuerza de tendencia y de estacionalidad — cambiá `cual` y `m`
+#| autorun: true
+import numpy as np
+import pandas as pd
+from statsmodels.tsa.seasonal import STL
+
+datos = pd.read_csv("datos/cap01_series.csv", parse_dates=["ds"])
+
+# "tendencia limpia", "estacionalidad marcada", "caminata aleatoria",
+# "quiebre de nivel"
+cual = "estacionalidad marcada"
+m = 12                            # período estacional
+
+serie = datos[(datos["etiqueta"] == cual) & (datos["split"] == "entrenamiento")]
+y = serie.set_index("ds")["y"].to_numpy()
+
+d = STL(y, period=m, robust=True).fit()
+var = lambda v: np.var(v, ddof=1)
+
+f_t = max(0.0, 1 - var(d.resid) / var(d.trend + d.resid))
+f_s = max(0.0, 1 - var(d.resid) / var(d.seasonal + d.resid))
+
+print(f"serie: {cual}  ({len(y)} observaciones, m = {m})")
+print(f"fuerza de tendencia      F_T = {f_t:.3f}")
+print(f"fuerza de estacionalidad F_S = {f_s:.3f}")
+```
+
+## Ejercicios
+
+Las soluciones están en el @sec-soluciones-05.
+
+**1.** Calculá $F_T$ y $F_S$ para las series de caminata aleatoria del catálogo con
+`cargar(fenomeno="caminata-aleatoria", n=3)`. ¿Dan los valores bajos que
+esperabas? Compará con lo que dice `metadatos()`.
+
+**2.** El @sec-ft-no-es-tendencia muestra que un quiebre de nivel no se refleja en
+$F_T$. Buscá en `metadatos()` las diez series con el `change_points_per_length` más
+alto y mirá qué $F_T$ tienen. ¿Se confirma el patrón?
+
+**3.** Tomá una serie diaria del catálogo y calculá $F_S$ con `m = 7` y con
+`m = 30`. Los dos dan un número. ¿Cuál creerías, y por qué? ¿Qué dice esto sobre
+usar características sin decidir antes el período estacional?
+
+**4.** El @sec-costo-entropia mide que la entropía muestral es $O(n^2)$. Estimá,
+con los tiempos de la @tbl-costo, cuánto tardaría sobre `D4099` completa, que tiene
+9.919 observaciones. Después medilo, si tenés paciencia. ¿Le acertó la estimación?
+
+**5.** Calculá la matriz de correlación entre `trend_strength`,
+`seasonal_strength`, `z_acf1`, `z_entropy` y `complexity_index` sobre las series
+mensuales. ¿Qué pares están más correlacionados? ¿Justifica eso reducir los
+descriptores a un índice?
+
+**6.** El índice se construye invirtiendo el signo de la primera componente
+principal. Si alguien se olvidara de invertirlo, ¿qué pasaría con la
+@tbl-validacion-indice? Escribí en dos frases cómo detectarías el error sin ver el
+código que lo produjo.
