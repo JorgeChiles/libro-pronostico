@@ -7,6 +7,7 @@ title: "Soluciones a los ejercicios"
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
 
 from libro.datos import cargar, metadatos
 from libro.graficos import COLORES, mostrar
@@ -223,3 +224,228 @@ pronóstico puntual óptimo no es el valor central de la distribución.
 **Está dicho si hace falta el intervalo.** Si la decisión tiene una restricción
 que no se puede violar —capacidad de una red, un contrato con penalidad— el
 intervalo es el producto y el número central es secundario.
+
+## Capítulo 2 · Datos temporales en Python {#sec-soluciones-02}
+
+### Ejercicio 1
+
+```{python}
+serie = cargar("H242")
+
+print(f"frecuencia   : {serie.entrenamiento.index.freq}")
+print(f"faltantes    : {serie.entrenamiento.isna().sum()}")
+
+reconstruido = pd.Series(
+    serie.entrenamiento.values,
+    index=pd.DatetimeIndex(list(serie.entrenamiento.index)),
+)
+print(f"tras reconstruir: {reconstruido.index.freq}")
+print(f"pero se puede inferir: {pd.infer_freq(reconstruido.index)}")
+```
+
+Las fechas son las mismas y la serie sigue siendo regular. Lo que se perdió es el
+**atributo** `freq`, que no se deduce de las fechas: es una etiqueta que pandas
+guarda cuando construye el índice con `date_range` o `asfreq`, y que se descarta al
+crear un `DatetimeIndex` a partir de una lista.
+
+La diferencia entre `.freq` y `pd.infer_freq()` es justamente esa: el primero es
+lo que el índice *declara*, el segundo es lo que se puede *deducir* de los datos.
+Cuando `.freq` es `None` pero `infer_freq` devuelve algo, la serie está bien y
+alcanza con `serie.asfreq(pd.infer_freq(serie.index))` para recuperar la etiqueta.
+Cuando `infer_freq` también devuelve `None`, hay un hueco de verdad.
+
+### Ejercicio 2
+
+```{python}
+import warnings
+
+completa = cargar("M35927").entrenamiento
+con_huecos = completa.drop(completa.index[[20, 21, 40]])
+
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    modelo_roto = ExponentialSmoothing(
+        con_huecos, trend="add", initialization_method="estimated"
+    ).fit()
+pronostico_roto = modelo_roto.forecast(3)
+
+print("índice con la serie dañada:", type(pronostico_roto.index).__name__)
+print(pronostico_roto.round(1).tolist())
+```
+
+```{python}
+reparada = con_huecos.asfreq("MS").interpolate("time")
+
+modelo_ok = ExponentialSmoothing(
+    reparada, trend="add", initialization_method="estimated"
+).fit()
+pronostico_ok = modelo_ok.forecast(3)
+print("índice con la serie reparada:", type(pronostico_ok.index).__name__)
+print(pronostico_ok.round(1))
+```
+
+Cambian las dos cosas, y por motivos distintos.
+
+**El índice** cambia porque con la serie dañada statsmodels no puede inferir la
+frecuencia y devuelve enteros; con la serie reparada devuelve fechas. Este es el
+cambio importante, porque el índice de enteros es el que rompe silenciosamente
+cualquier cruce posterior.
+
+**El pronóstico** cambia porque los valores no son los mismos: al quitar tres
+observaciones se acortó la serie y se corrieron todas las posteriores un lugar,
+así que el modelo estimó sus parámetros sobre datos distintos. Reparar con
+`interpolate` no devuelve los valores originales —inventa tres— pero devuelve la
+estructura temporal, que es lo que el modelo necesita para no desalinearse.
+
+### Ejercicio 3
+
+```{python}
+serie = cargar("H313").entrenamiento
+promedio = serie.resample("D").mean()
+suma = serie.resample("D").sum()
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=promedio.index, y=promedio.values, name="mean", mode="lines+markers",
+    line=dict(color=COLORES["observado"], width=2),
+))
+fig.add_trace(go.Scatter(
+    x=suma.index, y=suma.values, name="sum", mode="lines+markers",
+    line=dict(color=COLORES["prueba"], width=2), yaxis="y2",
+))
+fig.update_layout(
+    height=430,
+    yaxis=dict(title="mean"),
+    yaxis2=dict(title="sum", overlaying="y", side="right", showgrid=False),
+)
+mostrar(fig)
+
+print(f"cociente suma/promedio, mínimo y máximo: "
+      f"{(suma / promedio).min():.1f} a {(suma / promedio).max():.1f}")
+```
+
+Las dos curvas tienen **exactamente la misma forma**, porque en los días completos
+la suma es 24 veces el promedio. Lo único que cambia es la escala. La excepción
+está en los bordes: si el primer o el último día están incompletos, el cociente
+deja de ser 24 y ahí las curvas dejan de ser proporcionales.
+
+Para dimensionar una red eléctrica, **ninguna de las dos**. La suma diaria da la
+energía total del día y el promedio da el consumo típico, pero una red se
+dimensiona por el **pico**: el instante de máxima demanda simultánea. La agregación
+correcta sería `.max()`, y con datos horarios incluso eso subestima el pico real,
+porque un pico de quince minutos queda promediado dentro de su hora.
+
+Es el mismo argumento del @sec-agregar-enganio visto desde el otro lado: la función
+de agregación tiene que salir de la decisión que el pronóstico va a alimentar.
+
+### Ejercicio 4
+
+```{python}
+filas = []
+for serie_id in ["H317", "H242", "H282"]:
+    s = cargar(serie_id)
+    real = s.prueba.to_numpy()
+    horario = smape(real, np.repeat(s.entrenamiento.to_numpy()[-1], len(real)))
+
+    tr = s.entrenamiento.resample("D").mean().dropna()
+    te = s.prueba.resample("D").mean().dropna()
+    diario = smape(te.to_numpy(), np.repeat(tr.to_numpy()[-1], len(te)))
+
+    filas.append({
+        "serie": serie_id,
+        "sMAPE horario": round(horario, 2),
+        "pasos horarios": len(real),
+        "sMAPE diario": round(diario, 2),
+        "pasos diarios": len(te),
+        "factor": round(horario / diario, 1),
+    })
+
+pd.DataFrame(filas).set_index("serie")
+```
+
+El patrón se repite en las tres series, con factores muy distintos entre sí. Esa
+variabilidad ya es informativa: cuánto "mejora" el error al agregar depende de
+cuánta de la varianza de la serie era intradiaria, y eso cambia de serie en serie.
+
+Por qué no significa que el pronóstico diario sea mejor:
+
+**Primero, no responde la misma pregunta.** El pronóstico horario dice cuánto va a
+consumirse mañana entre las 19 y las 20; el diario dice cuánto va a consumirse
+mañana en total. Un operador que tiene que despachar generación necesita el
+primero, y el segundo no se lo da: no hay forma de recuperar el perfil horario a
+partir del total del día.
+
+**Segundo, el horizonte se encogió.** Las 48 horas que pide M4 se convirtieron en
+dos días. Un error medido sobre dos observaciones no es comparable con uno medido
+sobre 48, ni tiene la misma precisión estadística.
+
+### Ejercicio 5
+
+```{python}
+y = cargar("M16834").entrenamiento
+
+tabla = pd.DataFrame({
+    "y": y,
+    "rezago_1": y.shift(1),
+    "rezago_12": y.shift(12),
+    "media_movil_12": y.rolling(12).mean(),
+})
+
+con_nan = tabla.isna().any(axis=1).sum()
+print(f"filas totales      : {len(tabla)}")
+print(f"filas con algún NaN: {con_nan}")
+tabla.head(13).round(1)
+```
+
+Son 12 filas, y el número no es casual: es el **máximo** de los tres desfases, no
+la suma.
+
+- `rezago_1` no tiene valor en la fila 0: falta 1.
+- `rezago_12` no tiene valor en las filas 0 a 11: faltan 12.
+- `media_movil_12` necesita 12 observaciones, así que su primer valor está en la
+  fila 11: faltan 11.
+
+Como los tres huecos empiezan en la fila 0 y se superponen, las filas afectadas
+son las 12 primeras. La regla general: al construir características con rezagos y
+ventanas, se pierden tantas observaciones iniciales como el desfase más largo que
+se use. Con datos mensuales y un rezago de 12, se pierde un año completo, y en una
+serie corta eso puede ser la mitad de los datos.
+
+### Ejercicio 6
+
+```{python}
+y = cargar("M32692").entrenamiento
+
+centrada = y.rolling(5, center=True).mean()
+hacia_atras = y.rolling(5).mean()
+diferencia = (centrada - hacia_atras).dropna()
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=diferencia.index, y=diferencia.values, mode="lines",
+    line=dict(color=COLORES["prueba"], width=1.6),
+    hovertemplate="%{x|%b %Y}<br>%{y:,.1f}<extra></extra>",
+))
+fig.add_hline(y=0, line_width=1, line_color=COLORES["auxiliar"])
+fig.update_layout(height=400, showlegend=False)
+mostrar(fig, titulo_y="centrada − hacia atrás")
+
+peor = diferencia.abs().idxmax()
+print(f"máxima diferencia en {peor.date()}: {diferencia.loc[peor]:,.1f}")
+```
+
+La diferencia es más grande donde la serie cambia más rápido: en las subidas y
+bajadas pronunciadas, y sobre todo alrededor del quiebre de nivel de esta serie.
+Donde la serie es plana, las dos ventanas dan casi lo mismo. Tiene sentido: la
+ventana centrada va dos pasos adelantada respecto de la de hacia atrás, y ese
+adelanto solo importa cuando hay algo que cambiar.
+
+Por qué inflaría el desempeño medido: la media móvil centrada en el instante *t*
+contiene los valores de *t+1* y *t+2*. Si se usa como variable de entrada para
+predecir *y* en *t*, el modelo está recibiendo el futuro entre sus datos. Va a
+lograr un error de validación bajísimo, y va a fallar en producción, donde en el
+instante *t* esos valores todavía no existen.
+
+Es el caso más común de fuga de información en series de tiempo, y es difícil de
+notar porque el código no tiene nada de raro: `rolling(5, center=True)` se lee
+igual de bien que `rolling(5)`.
