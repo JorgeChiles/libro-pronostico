@@ -1,7 +1,489 @@
+---
+resources:
+  - datos/cap04_estacionales.csv
+---
+
 # Descomposición {#sec-descomposicion}
 
-Tendencia, estacionalidad y residuo; medias móviles y STL.
+```{python}
+#| echo: false
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
-::: {.callout-note appearance="simple"}
-Capítulo en preparación.
+from libro.datos import cargar
+from libro.graficos import COLORES, mostrar
+```
+
+Una serie de tiempo suele estar hecha de cosas superpuestas: un nivel que se mueve
+despacio, un patrón que se repite cada año, y lo que queda cuando se sacan las
+dos. Descomponer es separarlas para poder mirarlas de a una.
+
+Se hace por cuatro razones distintas:
+
+1. **Para ver.** Una tendencia suave escondida detrás de un ciclo fuerte no se nota
+   en el gráfico de la serie, y salta a la vista en el de la tendencia.
+2. **Para medir.** Las características del @sec-caracteristicas —la fuerza de
+   tendencia y de estacionalidad— se calculan sobre las componentes.
+3. **Para ajustar.** Comparar dos meses distintos requiere sacar antes el efecto
+   estacional. Casi todos los indicadores económicos que se publican están
+   desestacionalizados.
+4. **Para pronosticar.** Pronosticar cada componente por separado y volver a
+   combinarlas es una estrategia válida, y es lo que hace el `Naive2` con el que M4
+   compara todo.
+
+## Dos formas de estar hecha {#sec-aditiva-multiplicativa}
+
+La descomposición supone una manera en que las componentes se combinan. Hay dos:
+
+$$
+y_t = T_t + S_t + R_t
+\qquad\text{o}\qquad
+y_t = T_t \times S_t \times R_t
+$$
+
+La **aditiva** supone que la estacionalidad suma siempre lo mismo: si diciembre
+agrega 200 unidades, agrega 200 tanto cuando la serie vale 1.000 como cuando vale
+5.000. La **multiplicativa** supone que agrega un porcentaje: diciembre es un 20 %
+más alto que el promedio, valga lo que valga la serie.
+
+La forma de decidir es mirar si la amplitud del ciclo crece con el nivel:
+
+```{python}
+#| label: fig-amplitud
+#| fig-cap: "Q15481: cada ciclo es más alto y también más amplio que el anterior. La estacionalidad no suma una cantidad fija: multiplica."
+serie = cargar("Q15481")
+y = serie.entrenamiento
+m = serie.periodo_estacional
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=y.index, y=y.values, mode="lines+markers",
+    line=dict(color=COLORES["observado"], width=1.8), marker=dict(size=4),
+    hovertemplate="%{x|%b %Y}<br>%{y:,.0f}<extra></extra>",
+))
+fig.update_layout(height=400, showlegend=False)
+mostrar(fig, titulo_y="unidades")
+```
+
+A ojo se ve, pero conviene medirlo. Si la amplitud crece con el nivel, el nivel
+promedio de cada ciclo y su desviación estándar tienen que correlacionar:
+
+```{python}
+por_ciclo = (
+    pd.DataFrame({"y": y.to_numpy(), "ciclo": np.arange(len(y)) // m})
+    .groupby("ciclo")["y"]
+    .agg(nivel="mean", amplitud="std")
+)
+
+correlacion = por_ciclo["nivel"].corr(por_ciclo["amplitud"])
+print(f"correlación entre nivel y amplitud: {correlacion:+.3f}")
+por_ciclo.head(4).round(1)
+```
+
+Correlación de `{python} f"{correlacion:.2f}"`: la amplitud acompaña al nivel. Esta
+serie es multiplicativa.
+
+Y ahora la parte práctica. Casi nadie usa la descomposición multiplicativa
+directamente: se toma logaritmo y se hace aditiva. El logaritmo convierte productos
+en sumas, así que
+
+$$
+\log y_t = \log T_t + \log S_t + \log R_t
+$$
+
+y todo el aparato aditivo vuelve a servir. Que ayuda se puede verificar:
+
+```{python}
+from statsmodels.tsa.seasonal import STL
+
+varianza = lambda x: np.var(x, ddof=1)
+
+en_nivel = STL(y, period=m, robust=True).fit()
+en_logaritmo = STL(np.log(y), period=m, robust=True).fit()
+
+print(f"aditiva sobre la serie     : residuo = "
+      f"{100 * varianza(en_nivel.resid) / varianza(y):.1f} % de la varianza")
+print(f"aditiva sobre el logaritmo : residuo = "
+      f"{100 * varianza(en_logaritmo.resid) / varianza(np.log(y)):.1f} % de la varianza")
+```
+
+El residuo pasa de explicar el 5 % de la varianza a explicar el 2 %. La misma
+serie y el mismo método; lo único que cambió es la escala en la que se lo aplicó.
+
+::: {.callout-tip}
+## Cuándo tomar logaritmo
+
+Si la amplitud del ciclo crece con el nivel, y si todos los valores son positivos.
+La segunda condición no es un detalle: el logaritmo de un valor negativo o cero no
+existe, y muchas series económicas tienen ceros. Para esos casos hay
+transformaciones más generales, como la de Box-Cox, que aparece en el
+@sec-regresion.
 :::
+
+## La descomposición clásica {#sec-clasica}
+
+El método más viejo y el más fácil de entender. Son tres pasos.
+
+**Paso 1: la tendencia, con una media móvil centrada.** Promediar cada punto con
+sus vecinos borra el ciclo y deja el movimiento lento. La ventana tiene que medir
+exactamente un período estacional, para que cada promedio contenga una vez cada
+estación.
+
+Con período par hay una complicación: una ventana de 12 no tiene centro. La
+solución es promediar dos veces, una ventana de 12 y después una de 2, lo que se
+anota como $2\times12$-MA:
+
+```{python}
+def tendencia_movil(y: pd.Series, m: int) -> pd.Series:
+    """Media móvil centrada de orden m. Con m par se usa 2×m-MA."""
+    if m % 2 == 0:
+        return (
+            y.rolling(m, center=True).mean()
+            .rolling(2, center=True).mean()
+            .shift(-1)
+        )
+    return y.rolling(m, center=True).mean()
+```
+
+Acá la ventana **tiene** que ser centrada, y vale la pena subrayarlo después de la
+advertencia del @sec-rezagos. En el capítulo 2 vimos que una media móvil centrada
+usa valores futuros y que eso arruina un modelo de pronóstico. Pero descomponer no
+es pronosticar: acá la serie ya está completa y el objetivo es describirla lo mejor
+posible, así que usar el futuro es correcto porque el futuro ya ocurrió. **La misma
+operación es un error en un contexto y la única opción correcta en el otro.**
+
+**Paso 2: la estacionalidad, promediando por posición en el ciclo.** Se le resta la
+tendencia a la serie y se promedian todos los eneros, todos los febreros, y así.
+
+**Paso 3: el residuo es lo que sobra.**
+
+```{python}
+def descomposicion_clasica(y: pd.Series, m: int):
+    """Tendencia, estacionalidad y residuo por el método clásico."""
+    tendencia = tendencia_movil(y, m)
+    sin_tendencia = y - tendencia
+
+    posicion = np.arange(len(y)) % m
+    estacional = (
+        pd.Series(sin_tendencia.to_numpy())
+        .groupby(posicion)
+        .transform("mean")
+    )
+    estacional = estacional - estacional.mean()      # que sume cero
+    estacional = pd.Series(estacional.to_numpy(), index=y.index)
+
+    return tendencia, estacional, y - tendencia - estacional
+```
+
+Veinte líneas en total. Y coincide con la implementación de `statsmodels`:
+
+```{python}
+from statsmodels.tsa.seasonal import seasonal_decompose
+
+marcada = cargar("M35927")
+serie_m = marcada.entrenamiento
+m_m = marcada.periodo_estacional
+
+t_propia, s_propia, r_propia = descomposicion_clasica(serie_m, m_m)
+referencia = seasonal_decompose(serie_m, model="additive", period=m_m)
+
+print(f"diferencia máxima en la tendencia    : "
+      f"{np.nanmax(np.abs(t_propia - referencia.trend)):.2e}")
+print(f"diferencia máxima en la estacional   : "
+      f"{np.nanmax(np.abs(s_propia - referencia.seasonal)):.4f}")
+print(f"observaciones sin tendencia calculada: "
+      f"{int(t_propia.isna().sum())} de {len(serie_m)}")
+```
+
+La tendencia coincide hasta el error de redondeo. La estacionalidad difiere en
+centésimas, y la razón es instructiva: los ciclos de los extremos están incompletos
+—no tienen tendencia calculada— y cada implementación decide de forma distinta cómo
+promediarlos. Cuando dos implementaciones del mismo método difieren poco, casi
+siempre es por el manejo de los bordes.
+
+Esa última línea señala la primera limitación: la descomposición clásica **pierde
+$m/2$ observaciones en cada extremo**. Doce meses de una serie mensual, que es
+justamente donde uno querría mirar.
+
+Y tiene otras dos:
+
+- **La estacionalidad es fija.** El mismo perfil para todo el período, aunque el
+  patrón de diciembre haya cambiado en veinte años.
+- **Un valor atípico contamina.** Entra en el promedio de su ventana y en el
+  promedio de su estación, así que se reparte por toda la descomposición.
+
+## STL {#sec-stl}
+
+STL —*Seasonal and Trend decomposition using Loess*— resuelve las tres. Estima la
+tendencia y la estacionalidad con regresiones locales, en vez de promedios, y las
+recalcula de manera iterativa.
+
+Lo que hay que saber para usarlo:
+
+- **No pierde los extremos.** Estima hasta el borde.
+- **La estacionalidad puede cambiar** a lo largo de la serie, y cuánto puede
+  cambiar es un parámetro.
+- **Es robusto a valores atípicos** con `robust=True`: los puntos que no encajan
+  reciben menos peso, en vez de contaminar todo.
+
+```{python}
+#| label: fig-stl
+#| fig-cap: "Descomposición STL de M35927. La serie observada es la suma exacta de las tres componentes de abajo."
+d = STL(serie_m, period=m_m, robust=True).fit()
+
+componentes = [
+    ("observado", serie_m.to_numpy(), COLORES["observado"]),
+    ("tendencia", d.trend, COLORES["pronostico"]),
+    ("estacional", d.seasonal, COLORES["prueba"]),
+    ("residuo", d.resid, COLORES["auxiliar"]),
+]
+
+fig = make_subplots(rows=4, cols=1, shared_xaxes=True,
+                    subplot_titles=[n for n, _, _ in componentes],
+                    vertical_spacing=0.06)
+
+for i, (nombre, valores, color) in enumerate(componentes, start=1):
+    fig.add_trace(go.Scatter(
+        x=serie_m.index, y=valores, mode="lines", name=nombre,
+        line=dict(color=color, width=1.5),
+        hovertemplate="%{x|%b %Y}<br>%{y:,.1f}<extra>" + nombre + "</extra>",
+    ), row=i, col=1)
+
+fig.update_layout(height=720, showlegend=False)
+mostrar(fig)
+```
+
+Que la suma sea exacta se puede verificar, y conviene hacerlo:
+
+```{python}
+reconstruida = d.trend + d.seasonal + d.resid
+print(f"diferencia máxima con la serie original: "
+      f"{np.max(np.abs(reconstruida - serie_m.to_numpy())):.2e}")
+```
+
+### El parámetro que importa {#sec-ventana-estacional}
+
+STL tiene varios parámetros, y uno decide casi todo: `seasonal`, el ancho de la
+ventana con la que se estima el patrón estacional. Dice **cuántos ciclos mira** para
+decidir cómo es la estacionalidad en un momento dado.
+
+- Ventana **chica**: la estacionalidad puede cambiar rápido y sigue de cerca cada
+  ciclo. Riesgo: absorbe ruido y lo presenta como si fuera estacionalidad.
+- Ventana **grande**: la estacionalidad es casi fija. Riesgo: si el patrón cambió de
+  verdad, no lo ve, y ese cambio termina en el residuo.
+
+Como toda la varianza de la serie tiene que repartirse entre las tres componentes,
+mover la ventana es mover el reparto:
+
+```{python}
+#| label: tbl-ventana
+#| tbl-cap: "Efecto del ancho de la ventana estacional sobre el reparto de la varianza, en tres series distintas."
+def reparto(y: pd.Series, m: int, ventana: int) -> dict:
+    d = STL(y, period=m, seasonal=ventana, robust=True).fit()
+    fuerza = lambda comp: max(
+        0.0, 1 - varianza(d.resid) / varianza(comp + d.resid)
+    )
+    return {
+        "F_T": fuerza(d.trend),
+        "F_S": fuerza(d.seasonal),
+        "residuo %": 100 * varianza(d.resid) / varianza(y),
+    }
+
+
+filas = []
+for serie_id in ["M35927", "M3007", "Q15481"]:
+    s = cargar(serie_id)
+    for ventana in [7, 13, 25, 51]:
+        filas.append({
+            "serie": s.id,
+            "ventana": ventana,
+            **reparto(s.entrenamiento, s.periodo_estacional, ventana),
+        })
+
+pd.DataFrame(filas).set_index(["serie", "ventana"]).round(3)
+```
+
+Las tres series reaccionan distinto, y ahí está lo interesante.
+
+En `M35927`, que tiene estacionalidad fortísima, ensanchar la ventana **baja** la
+fuerza estacional: el patrón de esa serie cambia con el tiempo, y una ventana ancha
+no lo puede seguir, así que parte de la estacionalidad se va al residuo.
+
+En `M3007`, que casi no tiene estacionalidad, pasa lo contrario: ensanchar la
+ventana **sube** un poco $F_S$ y baja el residuo. Con una ventana chica el
+procedimiento estaba persiguiendo ruido, ciclo por ciclo.
+
+Ninguno de esos números es "el correcto". Son distintas respuestas a distintas
+preguntas sobre la misma serie, y eso es lo incómodo de la descomposición: **el
+reparto entre componentes depende de una decisión del analista, no solo de los
+datos**.
+
+## Movelo vos {#sec-widget-04}
+
+El widget que sigue tiene el deslizador de la ventana estacional. Elegí una serie,
+movelo, y mirá cómo se redistribuye la varianza entre las tres componentes.
+
+Tres cosas que vale la pena buscar:
+
+- Con **amplitud creciente** (`Q15481`), activá el logaritmo y mirá el residuo.
+- Con **quiebre de nivel** (`M32692`), fijate que la fuerza de tendencia queda baja
+  con cualquier ventana: es la razón de lo que discutimos en el
+  @sec-ft-no-es-tendencia.
+- Con **estacionalidad débil** (`M3007`), llevá la ventana al mínimo y mirá cómo la
+  componente estacional se pone irregular. Eso no es estacionalidad: es ruido
+  reasignado.
+
+```{shinylive-python}
+#| standalone: true
+#| viewerHeight: 820
+#| components: [viewer]
+
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from shiny import App, reactive, render, ui
+from statsmodels.tsa.seasonal import STL
+
+AQUI = Path(__file__).parent
+datos = pd.read_csv(AQUI / "cap04_estacionales.csv", parse_dates=["ds"])
+datos = datos[datos["split"] == "entrenamiento"]
+
+ETIQUETAS = list(dict.fromkeys(datos["etiqueta"]))
+
+app_ui = ui.page_fluid(
+    ui.layout_columns(
+        ui.input_select("serie", "Serie", ETIQUETAS, selected=ETIQUETAS[0]),
+        ui.input_slider("ventana", "Ventana estacional", 7, 61, 13, step=2),
+        ui.input_switch("logaritmo", "trabajar en logaritmo", False),
+        col_widths=[4, 5, 3],
+    ),
+    ui.output_ui("reparto"),
+    ui.output_plot("grafico", height="580px"),
+)
+
+
+def servidor(input, output, session):
+
+    @reactive.calc
+    def descomposicion():
+        g = datos[datos["etiqueta"] == input.serie()]
+        y = g.set_index("ds")["y"]
+        m = int(g["m"].iloc[0])
+        if input.logaritmo() and (y > 0).all():
+            y = np.log(y)
+        ajuste = STL(y, period=m, seasonal=int(input.ventana()),
+                     robust=True).fit()
+        return y, m, ajuste
+
+    @render.ui
+    def reparto():
+        y, m, d = descomposicion()
+        var = lambda x: np.var(x, ddof=1)
+        fuerza = lambda comp: max(0.0, 1 - var(d.resid) / var(comp + d.resid))
+        return ui.markdown(
+            f"**m = {m}**  ·  fuerza de tendencia **{fuerza(d.trend):.3f}**  ·  "
+            f"fuerza de estacionalidad **{fuerza(d.seasonal):.3f}**  ·  "
+            f"residuo **{100 * var(d.resid) / var(y):.1f} %** de la varianza"
+        )
+
+    @render.plot
+    def grafico():
+        y, m, d = descomposicion()
+        paneles = [
+            ("observado", y.to_numpy(), "#1f4e79"),
+            ("tendencia", d.trend, "#2e8b57"),
+            ("estacional", d.seasonal, "#c0504d"),
+            ("residuo", d.resid, "#7f7f7f"),
+        ]
+        fig, ejes = plt.subplots(4, 1, figsize=(9, 6.4), sharex=True)
+        for eje, (nombre, valores, color) in zip(ejes, paneles):
+            eje.plot(y.index, valores, lw=1.2, color=color)
+            eje.set_ylabel(nombre, fontsize=8)
+            eje.tick_params(labelsize=7)
+        ejes[3].axhline(0, color="black", lw=0.6, ls=":")
+        fig.autofmt_xdate()
+        fig.tight_layout()
+        return fig
+
+
+app = App(app_ui, servidor)
+
+## file: cap04_estacionales.csv
+{{< include datos/cap04_estacionales.csv >}}
+```
+
+## El residuo tiene que parecer ruido {#sec-residuo}
+
+Si la descomposición hizo bien su trabajo, el residuo no debería tener estructura:
+ni tendencia, ni ciclo, ni autocorrelación. Cuando la tiene, quedó señal sin
+explicar.
+
+Hay una prueba para eso, la de Ljung-Box, que responde "¿este residuo se distingue
+de ruido?":
+
+```{python}
+from statsmodels.stats.diagnostic import acorr_ljungbox
+
+prueba = acorr_ljungbox(d.resid.dropna(), lags=[2 * m_m], return_df=True)
+prueba.round(4)
+```
+
+El p-valor es prácticamente cero, así que el residuo **no** es ruido: todavía tiene
+autocorrelación. La descomposición separó la tendencia y el ciclo anual, y dejó
+estructura de corto plazo sin capturar.
+
+No es una falla del método: es el límite de lo que se propone. Separa componentes
+interpretables, no agota la información de la serie. Modelar lo que queda en el
+residuo es exactamente el problema del @sec-arima, y la prueba de Ljung-Box vuelve
+a aparecer ahí como herramienta de diagnóstico.
+
+## Lo que la descomposición no hace {#sec-limites}
+
+**No pronostica.** Una descomposición describe la serie observada. Para pronosticar
+hay que extrapolar cada componente, y ahí aparece el problema: la estacionalidad se
+puede repetir, pero la tendencia hay que proyectarla, y eso ya es un modelo con sus
+propios supuestos.
+
+Igualmente hay una receta útil que M4 usa como referencia: desestacionalizar la
+serie, pronosticar con un método simple, y volver a estacionalizar. Es el `Naive2`
+contra el que se mide toda la competencia, y aparece en el
+@sec-caja-de-herramientas.
+
+**No distingue un quiebre de una tendencia.** Ya lo vimos: en `M32692` la
+descomposición reparte el salto de nivel entre tendencia y residuo, y ninguna
+componente lo muestra como lo que es.
+
+**Necesita que le digan el período.** STL no descubre `m`, lo recibe. Si se le da un
+período que la serie no tiene, devuelve una componente estacional igual, hecha de
+ruido, como se ve moviendo el widget sobre la serie de estacionalidad débil.
+
+## Ejercicios
+
+Las soluciones están en el @sec-soluciones-04.
+
+**1.** Descomponé `Q22252` con STL y verificá que la suma de las tres componentes
+reproduce la serie original. ¿Con qué precisión?
+
+**2.** Aplicá la `descomposicion_clasica` de este capítulo a `M16834` y contá
+cuántas observaciones quedan sin tendencia. Compará con cuántas le faltan a la
+tendencia de STL sobre la misma serie. ¿Por qué difieren?
+
+**3.** Tomá `Q15481` y calculá la fuerza de estacionalidad con y sin logaritmo.
+¿Cuál da más alta? ¿Significa eso que la serie es "más estacional" en logaritmo?
+
+**4.** Descomponé `M47356` —la serie de valores atípicos del catálogo— dos veces, con
+`robust=True` y con `robust=False`, y graficá los dos residuos. ¿Dónde se ve la
+diferencia? Antes de empezar, fijate qué devuelve `cargar(fenomeno="atipicos")` y por
+qué esa serie no sirve para este ejercicio.
+
+**5.** Descomponé `M35927` con `seasonal=7` y con `seasonal=51`, y graficá las dos
+componentes estacionales superpuestas. ¿En qué parte de la serie difieren más? ¿Qué
+dice eso sobre si el patrón estacional cambió?
+
+**6.** Aplicá la prueba de Ljung-Box al residuo de la descomposición de `M35927`,
+`Q22252` y `H242`. ¿En cuáles el residuo pasa por ruido? Para las que pasan, mirá
+cuántas observaciones tienen antes de sacar conclusiones.
