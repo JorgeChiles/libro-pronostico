@@ -3809,3 +3809,383 @@ Es exactamente el razonamiento que el @sec-seleccion-escala formaliza y que la a
 pronóstico necesita: cuando la serie es demasiado corta para justificar una elección,
 **condicionar el método a la estructura de la serie es mejor que fingir que se lo eligió con
 datos.**
+
+## Capítulo 16 · Validación cruzada {#sec-soluciones-16}
+
+```{python}
+#| echo: false
+from sklearn.model_selection import KFold
+
+
+def evaluar_pliegue(y, origen, h, m, desde=0):
+    """sMAPE de los diez métodos ajustados en y[desde:origen], evaluados en h pasos."""
+    salida = {}
+    for nombre, metodo in LOS_DIEZ.items():
+        try:
+            salida[nombre] = smape(y[origen:origen + h], metodo(y[desde:origen], h, m))
+        except Exception:
+            salida[nombre] = np.inf
+    return salida
+
+
+def error_de_prueba(identificador):
+    s = cargar(identificador)
+    y_tr, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    salida = {}
+    for nombre, metodo in LOS_DIEZ.items():
+        try:
+            salida[nombre] = smape(y_te, metodo(y_tr, s.horizonte, s.periodo_estacional))
+        except Exception:
+            salida[nombre] = np.inf
+    return salida
+```
+
+### Ejercicio 1 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-16-1
+#| tbl-cap: "La @tbl-estimadores con 1, 3, 5 y 10 pliegues. El conjunto de series es el mismo en las cuatro filas: solo las que aguantan diez pliegues."
+LARGAS = []
+for identificador in catalogo()["serie"]:
+    s = cargar(identificador)
+    if len(s.entrenamiento) >= 10 * s.horizonte + 12:
+        LARGAS.append(identificador)
+
+filas = []
+for k in (1, 3, 5, 10):
+    diferencias = []
+    for identificador in LARGAS:
+        s = cargar(identificador)
+        y_tr = s.entrenamiento.to_numpy()
+        h, m = s.horizonte, s.periodo_estacional
+        prueba = error_de_prueba(identificador)
+        pliegues = [evaluar_pliegue(y_tr, len(y_tr) - h - j * h, h, m)
+                    for j in range(k)]
+        for nombre in DIEZ:
+            estimacion = np.mean([p[nombre] for p in pliegues])
+            if np.isfinite(estimacion) and np.isfinite(prueba[nombre]):
+                diferencias.append(estimacion - prueba[nombre])
+    diferencias = np.array(diferencias)
+    filas.append({
+        "pliegues": k,
+        "sesgo medio": diferencias.mean(),
+        "|error| medio": np.abs(diferencias).mean(),
+        "|error| mediano": np.median(np.abs(diferencias)),
+    })
+
+pd.DataFrame(filas).set_index("pliegues").round(2)
+```
+
+Sobre `{python} len(LARGAS)` series largas, la respuesta a las dos preguntas del enunciado es
+**no** y **no**.
+
+**El sesgo no baja al agregar pliegues; oscila.** Va de $-0{,}79$ con un solo corte a $+3{,}06$
+con tres pliegues, $+1{,}37$ con cinco y $-1{,}51$ con diez. No hay ninguna tendencia, y el
+mejor valor de los cuatro es el del corte único.
+
+Esto contradice el $-1{,}94 \to -0{,}65$ de la @tbl-estimadores, y la contradicción es
+informativa: aquel número se calculó sobre las 26 series que aguantan cinco pliegues, incluidas
+las cortas, donde el corte único tiene episodios de optimismo enorme. Al quedarse solo con las
+series largas, esos episodios desaparecen y con ellos la ventaja. **La corrección de sesgo que
+se le atribuye a la validación cruzada era, en estos datos, un efecto de las series cortas.**
+
+**El error absoluto medio empeora de manera monótona**: 5,52, 7,23, 7,20 y 7,50. Cada pliegue
+que se agrega mete en el promedio un origen más viejo, y en estas series los orígenes viejos
+estiman peor el futuro que el reciente.
+
+**Y el error absoluto mediano mejora**, con mínimo en cinco pliegues: 2,11, 1,71, **1,35**,
+1,51. Es la única de las tres columnas que se comporta como la teoría promete, y es exactamente
+la conclusión que el @sec-que-compra dio como la robusta: la validación cruzada mejora el caso
+típico. Que el mínimo esté en cinco y no en diez respalda además la recomendación de la
+@tbl-receta de quedarse en tres a cinco pliegues.
+
+### Ejercicio 2 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-16-2
+#| tbl-cap: "sMAPE pliegue por pliegue sobre M32692, la serie de quiebre de nivel. El pliegue 1 es el más reciente."
+s = cargar("M32692")
+y_tr = s.entrenamiento.to_numpy()
+h, m = s.horizonte, s.periodo_estacional
+prueba = error_de_prueba("M32692")
+
+filas = []
+for nombre in ("naive", "snaive", "Holt-Winters"):
+    errores = []
+    for j in range(5):
+        origen = len(y_tr) - h - j * h
+        errores.append(
+            smape(y_tr[origen:origen + h], LOS_DIEZ[nombre](y_tr[:origen], h, m))
+        )
+    fila = {"método": nombre}
+    fila.update({f"pl. {j + 1}": errores[j] for j in range(5)})
+    fila["media"] = np.mean(errores)
+    fila["desv."] = np.std(errores)
+    fila["prueba"] = prueba[nombre]
+    filas.append(fila)
+
+pd.DataFrame(filas).set_index("método").round(2)
+```
+
+Los pliegues varían mucho, y de manera distinta según el método. `Holt-Winters` va de 9,0 a
+41,1: una desviación de 11,4 sobre una media de 18,9, es decir un **60 % de variabilidad
+relativa**. `snaive` es más estable, con desviación 3,1 sobre media 13,5.
+
+La conexión con la @tbl-por-fenomeno está en el pliegue 2, el de 41,1. Si el corte único hubiera
+caído ahí —y no hay ningún motivo de principio para preferir un origen sobre otro; el corte
+único usa el más reciente por convención— el error estimado de `Holt-Winters` habría sido 41,1
+contra un error real de prueba de 16,9: **un factor de 2,4**. Promediar los cinco da 18,9, mucho
+más cerca de 16,9.
+
+Eso es lo que la validación cruzada compra en una serie con quiebre. El mayor salto de nivel de
+M32692 está en el período 302 de 318, muy cerca del final, así que los cinco pliegues cubren
+tramos con distinta cercanía al quiebre y el promedio los mezcla. **Cuando el error de un
+pliegue depende tanto de dónde cayó el origen, un solo origen no es una medición: es un sorteo.**
+
+Vale notar el contraste con `naive`, que da 69,8 de media y 59,6 en prueba. Ahí la validación
+cruzada también estabiliza, pero el método es tan malo que la precisión de la estimación es lo de
+menos.
+
+### Ejercicio 3 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-16-3
+#| tbl-cap: "Pesos geométricos $w_j \\propto \\gamma^{\\,j-1}$ sobre cinco pliegues. La última fila es el corte único, que es el límite $\\gamma \\to 0$."
+CINCO = []
+for identificador in catalogo()["serie"]:
+    s = cargar(identificador)
+    if len(s.entrenamiento) >= 5 * s.horizonte + 12:
+        CINCO.append(identificador)
+
+acumulado = []
+for identificador in CINCO:
+    s = cargar(identificador)
+    y_tr = s.entrenamiento.to_numpy()
+    h, m = s.horizonte, s.periodo_estacional
+    prueba = error_de_prueba(identificador)
+    pliegues = [evaluar_pliegue(y_tr, len(y_tr) - h - j * h, h, m) for j in range(5)]
+    for nombre in DIEZ:
+        valores = [p[nombre] for p in pliegues]
+        if np.isfinite(prueba[nombre]) and all(np.isfinite(v) for v in valores):
+            acumulado.append({"prueba": prueba[nombre], "valores": valores})
+
+filas = []
+for gamma in (0.3, 0.5, 0.7, 0.9, 1.0):
+    pesos = np.array([gamma ** j for j in range(5)])
+    pesos = pesos / pesos.sum()
+    d = np.array([float(np.dot(pesos, a["valores"])) - a["prueba"]
+                  for a in acumulado])
+    filas.append({"γ": gamma, "peso del pliegue 1": pesos[0],
+                  "sesgo medio": d.mean(),
+                  "|error| medio": np.abs(d).mean(),
+                  "|error| mediano": np.median(np.abs(d))})
+
+d0 = np.array([a["valores"][0] - a["prueba"] for a in acumulado])
+filas.append({"γ": 0.0, "peso del pliegue 1": 1.0,
+              "sesgo medio": d0.mean(),
+              "|error| medio": np.abs(d0).mean(),
+              "|error| mediano": np.median(np.abs(d0))})
+
+pd.DataFrame(filas).set_index("γ").sort_index().round(2)
+```
+
+**Sí: el óptimo está en un extremo, y en cuál depende de qué se mida.**
+
+El error absoluto **medio** baja de manera monótona al bajar $\gamma$: 8,65 con $\gamma = 1$ y
+7,45 con $\gamma = 0{,}3$, hasta 7,43 en el límite $\gamma = 0$, que es el corte único. El error
+absoluto **mediano** hace lo contrario: 2,14 con $\gamma = 1$ y 2,16 con $\gamma = 0{,}3$, hasta
+2,78 con el corte único.
+
+La conclusión práctica es que **la ponderación no resuelve la tensión de la @tbl-estimadores:
+la parametriza en un solo número**. Elegir $\gamma$ es elegir dónde pararse entre "quiero que el
+caso típico sea bueno" ($\gamma$ alto) y "quiero que el peor caso no sea catastrófico"
+($\gamma$ bajo). No hay un valor que gane en las dos columnas.
+
+Y hay una lección de método que vale más que el número: **cuando el óptimo de una búsqueda cae
+en el borde del rango que se probó, casi siempre significa que el rango estaba mal elegido o que
+la métrica no es la que importa.** Acá es lo segundo, y la respuesta correcta no es extender la
+búsqueda sino declarar qué se está optimizando.
+
+### Ejercicio 4 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-16-4
+#| tbl-cap: "Validación cruzada aleatoria contra origen móvil, con Ridge sobre 12 rezagos y error a un paso. La última columna es el error real sobre el período de prueba."
+filas = []
+for identificador in CINCO:
+    s = cargar(identificador)
+    y_tr, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    h, m = s.horizonte, s.periodo_estacional
+    p = min(max(m, 4), 12)
+    X, objetivo = _rez(y_tr, p)
+    if len(X) < 5 * h:
+        continue
+
+    # (a) aleatoria: KFold con shuffle
+    errores = []
+    for i_ajuste, i_eval in KFold(5, shuffle=True, random_state=0).split(X):
+        modelo = Ridge(alpha=1.0).fit(X[i_ajuste], objetivo[i_ajuste])
+        errores.append(smape(objetivo[i_eval], modelo.predict(X[i_eval])))
+    aleatoria = float(np.mean(errores))
+
+    # (b) origen móvil: los cinco últimos casos, uno por uno
+    errores = []
+    for j in range(5):
+        corte = len(X) - 1 - j
+        modelo = Ridge(alpha=1.0).fit(X[:corte], objetivo[:corte])
+        errores.append(smape([objetivo[corte]], modelo.predict([X[corte]])))
+    movil = float(np.mean(errores))
+
+    # (c) el error real a un paso sobre el período de prueba
+    X_todo, o_todo = _rez(np.concatenate([y_tr, y_te]), p)
+    modelo = Ridge(alpha=1.0).fit(X, objetivo)
+    real = smape(o_todo[len(X):], modelo.predict(X_todo[len(X):]))
+
+    filas.append({"serie": identificador, "CV aleatoria": aleatoria,
+                  "origen móvil": movil, "real en prueba": real})
+
+comparacion = pd.DataFrame(filas)
+pd.DataFrame([
+    {"estimador": "CV aleatoria (KFold shuffle)",
+     "estimación media": comparacion["CV aleatoria"].mean(),
+     "sesgo": (comparacion["CV aleatoria"] - comparacion["real en prueba"]).mean()},
+    {"estimador": "origen móvil",
+     "estimación media": comparacion["origen móvil"].mean(),
+     "sesgo": (comparacion["origen móvil"] - comparacion["real en prueba"]).mean()},
+    {"estimador": "real (período de prueba)",
+     "estimación media": comparacion["real en prueba"].mean(), "sesgo": 0.0},
+]).set_index("estimador").round(2)
+```
+
+**No subestima.** El sesgo de la validación cruzada aleatoria es $+0{,}08$ —prácticamente cero, y
+del lado conservador— y el del origen móvil es $-0{,}25$. Con este modelo y esta tarea, sortear
+las filas no rompió nada.
+
+Y esto contradice frontalmente el ejercicio 4 del @sec-particiones, donde la validación sorteada
+bajaba el error de validación un 21 % respecto de la temporal. Las dos mediciones son correctas y
+la diferencia está en **qué modelos participaban**.
+
+En el @sec-particiones los candidatos eran ocho, entre ellos un árbol de profundidad 10, un
+bosque y un kNN de 3 vecinos: modelos con capacidad para **memorizar** una fila y reconocerla
+por su vecina. Acá el único modelo es Ridge sobre 12 rezagos, que no puede memorizar nada: es una
+combinación lineal de doce números.
+
+Eso es exactamente el resultado de @bergmeir2018 reproducido en pequeño. La fuga entre vecinos no
+es una propiedad del sorteo: es una propiedad de **qué puede hacer el modelo con lo que el vecino
+sabe**. Si los rezagos incluidos capturan la dependencia y el modelo no tiene capacidad de sobra,
+el vecino no aporta nada que los predictores no tuvieran ya.
+
+La regla operativa que sale de juntar los dos ejercicios:
+
+**No sortees si el modelo puede memorizar.** Árboles profundos, bosques, kNN y redes: partición
+temporal, sin excepciones. Con modelos lineales de rezagos y residuos sin autocorrelación el
+sorteo es defendible, y a veces conviene porque da muchos más casos de evaluación.
+
+**Y verifica el supuesto en vez de suponerlo.** La condición de @bergmeir2018 es sobre los
+residuos, y se prueba con el Ljung-Box del @sec-arima. Si los residuos quedaron
+autocorrelacionados, el modelo no capturó la dependencia y el sorteo vuelve a estar prohibido.
+
+### Ejercicio 5 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-16-5
+#| tbl-cap: "La @tbl-paso sobre las seis series horarias del catálogo, con 960 observaciones y $h = 48$. El paso 1 se submuestrea uno de cada cuatro para que el cálculo termine."
+HORARIAS = [i for i in catalogo()["serie"] if i.startswith("H")]
+
+filas = []
+for etiqueta, divisor in (("h", 1), ("h/2", 2), ("1", None)):
+    total, estimaciones, errores_prueba = 0, [], []
+    for identificador in HORARIAS:
+        s = cargar(identificador)
+        y_tr = s.entrenamiento.to_numpy()
+        h, m = s.horizonte, s.periodo_estacional
+        prueba = error_de_prueba(identificador)
+
+        paso = 1 if divisor is None else max(1, h // divisor)
+        origenes = [len(y_tr) - h - j * paso for j in range(1 + (5 * h) // paso)]
+        origenes = [o for o in origenes if o >= 12]
+        if divisor is None:
+            origenes = origenes[::4]
+        total += len(origenes)
+
+        acumulado = {n: [] for n in DIEZ}
+        for origen in origenes:
+            evaluado = evaluar_pliegue(y_tr, origen, h, m)
+            for n in DIEZ:
+                if np.isfinite(evaluado[n]):
+                    acumulado[n].append(evaluado[n])
+        cv = {n: (np.mean(v) if v else np.inf) for n, v in acumulado.items()}
+        elegido = min(cv, key=cv.get)
+        estimaciones.append(cv[elegido])
+        errores_prueba.append(prueba[elegido])
+
+    filas.append({"paso": etiqueta, "pliegues en total": total,
+                  "estimación media": np.mean(estimaciones),
+                  "sMAPE de prueba del elegido": np.mean(errores_prueba)})
+
+pd.DataFrame(filas).set_index("paso").round(2)
+```
+
+**La conclusión no cambia, y por un motivo distinto del de la @tbl-paso.**
+
+Allá el paso 1 era peor: 5,84 de sMAPE de prueba contra 4,52 del paso $h$. Acá los tres pasos
+eligen exactamente el mismo método en las seis series y dan **1,75 idéntico**, con estimaciones
+que difieren en centésimas.
+
+O sea que con 960 observaciones y horizonte 48 el paso es **irrelevante para la precisión** y
+sigue costando: 366 pliegues contra 36 para llegar al mismo lugar. La recomendación de la
+@tbl-receta se sostiene, pero el argumento se vuelve puramente económico en vez de estadístico.
+
+Y aparece algo que vale más que el ejercicio: **el sMAPE de las horarias es 1,75**, contra los
+4,52 de las seis series de la @tbl-paso y los 13,16 del promedio del @sec-particiones. Las
+horarias son las series fáciles de M4 —960 observaciones y estacionalidad diaria limpia— y
+cualquier procedimiento razonable funciona bien en ellas. Es una advertencia sobre generalizar
+desde un subconjunto: si este libro solo hubiera usado series horarias, la mitad de las
+dificultades de la Parte II no habrían aparecido nunca.
+
+### Ejercicio 6 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-16-6
+#| tbl-cap: "Costo de cómputo de la @eq-cv-temporal a escala, con un minuto por ajuste."
+MINUTOS_POR_AJUSTE = 1
+CANDIDATOS = 10
+MENSUALES = 48_000
+
+filas = []
+for descripcion, pliegues, candidatos in (
+    ("1 serie, 5 pliegues, 10 candidatos", 5, 10),
+    ("1 serie, 3 pliegues, 10 candidatos", 3, 10),
+    ("1 serie, 5 pliegues, 3 candidatos", 5, 3),
+    ("1 serie, paso 1 (≈106 pliegues), 10 candidatos", 106, 10),
+):
+    ajustes = pliegues * candidatos
+    filas.append({
+        "escenario": descripcion,
+        "ajustes": ajustes,
+        "minutos por serie": ajustes * MINUTOS_POR_AJUSTE,
+        "años-núcleo para 48.000 series":
+            ajustes * MINUTOS_POR_AJUSTE * MENSUALES / (60 * 24 * 365),
+    })
+
+pd.DataFrame(filas).set_index("escenario").round(1)
+```
+
+Cincuenta minutos por serie, y **4,6 años-núcleo** para las 48.000 series mensuales de M4. Con
+paso 1 son 96,8 años-núcleo.
+
+La pregunta del enunciado es qué decisión de la @tbl-receta importa más a escala, y la tabla la
+contesta: **la cantidad de candidatos y el paso, porque las dos multiplican.** Bajar de 5
+pliegues a 3 ahorra un 40 %; bajar de 10 candidatos a 3 ahorra un 70 %; y usar paso $h$ en vez de
+paso 1 ahorra un 95 %.
+
+Lo que hace interesante la cuenta es cruzarla con lo que el capítulo midió. Las tres economías
+son casi gratis en precisión: el @sec-paso mostró que el paso 1 no mejora nada, la @tbl-sol-16-1
+que cinco pliegues no son peores que diez, y el @sec-particiones que **de siete a diez candidatos
+el error de prueba no se movió**. Es decir que se puede pasar de 96,8 años-núcleo a menos de un
+año sin perder precisión medible.
+
+Ese es el argumento del @sec-seleccion-escala y de la aplicación de pronóstico: a escala, el
+diseño de la evaluación no es un detalle metodológico sino la diferencia entre un experimento
+posible y uno imposible. Y la manera de bajar el costo no es apurar el cómputo: es **usar la
+estructura de la serie para no probar diez candidatos cuando tres alcanzan.**
