@@ -5029,3 +5029,409 @@ Si las tres apuntan a la directa, vale probar las dos y elegir con el @sec-valid
 alguna apunta a la recursiva, el margen que la directa podría ganar —los 1,5 puntos de la
 @tbl-por-largo— no justifica el riesgo ni el costo.
 :::
+
+## Capítulo 18 · Ingeniería de características {#sec-soluciones-18}
+
+```{python}
+#| echo: false
+from statsmodels.tsa.stattools import acf
+
+
+def rasgos(historia, p, m, *, ventana=False, K=0, rezagos=None,
+           desde_max=False, cotas=None, congelado=None):
+    """Como la del capítulo 18, más las variantes que piden los ejercicios."""
+    historia = np.asarray(historia, float)
+    if rezagos is None:
+        rezagos = range(1, p + 1)
+    f = [historia[-r] for r in rezagos]
+
+    if ventana:
+        if congelado is not None:
+            f += list(congelado)
+        else:
+            for w in (3, m if m > 1 else 6, 12):
+                trozo = historia[-w:] if len(historia) >= w else historia
+                f += [trozo.mean(), trozo.std(), trozo.min(), trozo.max()]
+
+    t = len(historia)
+    if K and m > 1:
+        for k in range(1, K + 1):
+            f += [np.sin(2 * np.pi * k * t / m), np.cos(2 * np.pi * k * t / m)]
+    if desde_max:
+        f += [float(len(historia) - 1 - int(np.argmax(historia)))]
+
+    v = np.array(f, float)
+    return np.clip(v, cotas[0], cotas[1]) if cotas is not None else v
+
+
+def matriz(y, p, m, **kw):
+    y = np.asarray(y, float)
+    inicio = max(p, 12 if kw.get("ventana") else p)
+    X, objetivo = [], []
+    for i in range(inicio, len(y)):
+        X.append(rasgos(y[:i], p, m, **kw))
+        objetivo.append(y[i])
+    return np.array(X), np.array(objetivo)
+
+
+def recursivo18(y, p, m, h, construir, *, acotar=False, congelar=False, **kw):
+    X, objetivo = matriz(y, p, m, **kw)
+    if len(X) < X.shape[1] + 3:
+        return None
+    modelo = construir().fit(X, objetivo)
+
+    cotas = (X.min(axis=0), X.max(axis=0)) if acotar else None
+    fijos = None
+    if congelar:
+        yy = np.asarray(y, float)
+        fijos = []
+        for w in (3, m if m > 1 else 6, 12):
+            trozo = yy[-w:]
+            fijos += [trozo.mean(), trozo.std(), trozo.min(), trozo.max()]
+
+    historia, salida = list(y), []
+    for _ in range(h):
+        v = rasgos(historia, p, m, cotas=cotas, congelado=fijos, **kw)
+        salida.append(float(modelo.predict([v])[0]))
+        historia.append(salida[-1])
+    return np.array(salida)
+
+
+def directo18(y, p, m, h, construir, **kw):
+    """Estrategia directa: las características se calculan siempre sobre datos reales."""
+    y = np.asarray(y, float)
+    inicio = max(p, 12 if kw.get("ventana") else p)
+    salida = []
+    for k in range(1, h + 1):
+        X, objetivo = [], []
+        for i in range(inicio, len(y) - k + 1):
+            X.append(rasgos(y[:i], p, m, **kw))
+            objetivo.append(y[i + k - 1])
+        X, objetivo = np.array(X), np.array(objetivo)
+        if len(X) < X.shape[1] + 3:
+            salida.append(salida[-1] if salida else y[-1])
+            continue
+        salida.append(
+            float(construir().fit(X, objetivo).predict([rasgos(y, p, m, **kw)])[0])
+        )
+    return np.array(salida)
+
+
+R18 = lambda: make_pipeline(StandardScaler(), Ridge(alpha=1.0))
+APTAS18 = [i for i in catalogo()["serie"] if len(cargar(i).entrenamiento) >= 60]
+
+
+def rezagos_acf(y, maximo=24, cuantos=6, todos=False):
+    n = len(y)
+    a = acf(y, nlags=min(maximo, n - 2), fft=True)[1:]
+    limite = 1.96 / np.sqrt(n)
+    significativos = [k + 1 for k, r in enumerate(a) if abs(r) > limite]
+    if not significativos:
+        return [1]
+    if todos:
+        return sorted(significativos)
+    return sorted(sorted(significativos, key=lambda k: -abs(a[k - 1]))[:cuantos])
+```
+
+### Ejercicio 1 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-18-1
+#| tbl-cap: "La U de la @fig-curva-rezagos separada por cuántos horizontes de historia tiene la serie."
+CANTIDADES18 = (1, 2, 3, 6, 12, 18, 24, 36)
+
+filas = []
+for etiqueta, corto in (("n / h < 10", True), ("n / h ≥ 10", False)):
+    grupo = [i for i in APTAS18
+             if (len(cargar(i).entrenamiento) / cargar(i).horizonte < 10) == corto]
+    fila = {"series": f"{etiqueta} ({len(grupo)})"}
+    for P in CANTIDADES18:
+        errores = []
+        for identificador in grupo:
+            s = cargar(identificador)
+            pron = recursivo18(s.entrenamiento.to_numpy(), P,
+                               s.periodo_estacional, s.horizonte, R18)
+            if pron is not None:
+                errores.append(smape(s.prueba.to_numpy(), pron))
+        fila[f"p = {P}"] = np.mean(errores)
+    filas.append(fila)
+
+por_largo = pd.DataFrame(filas).set_index("series")
+por_largo["mínimo en"] = [
+    f"p = {CANTIDADES18[int(np.argmin(f))]}"
+    for f in por_largo[[f'p = {P}' for P in CANTIDADES18]].to_numpy()
+]
+por_largo.round(2)
+```
+
+**No: el mínimo está en $p = 12$ en los dos grupos.**
+
+El resultado contradice lo que la pregunta insinuaba, y la insinuación era razonable. Si la U del
+@sec-sobreajuste viniera de la escasez de filas, las series largas deberían aguantar más columnas y
+el mínimo debería correrse a la derecha. No se corre.
+
+Lo que sí cambia es la **altura** de la curva: el grupo corto se mueve entre 26 y 46 y el largo
+entre 9 y 27. Y también la penalidad por pasarse: en el grupo largo, ir de $p = 12$ a $p = 36$
+multiplica el error por 2,9; en el grupo corto, por 1,7.
+
+La explicación de por qué el mínimo no se mueve es que **$p = 12$ no es una cantidad de columnas,
+es un período estacional**. La mayoría de las series aptas del catálogo son mensuales con
+$m = 12$, así que doce rezagos son exactamente un ciclo completo: incluyen el rezago estacional y
+nada redundante después. Pasar a 18 o 24 agrega columnas que repiten información que el rezago 12
+ya trae.
+
+Eso reordena la lectura del capítulo. La @fig-curva-rezagos parecía una curva de sesgo-varianza y
+es en buena medida una curva de **estructura**: el óptimo está donde la ventana cubre un ciclo. El
+ejercicio 3 lo confirma por otro camino.
+
+### Ejercicio 2 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-18-2
+#| tbl-cap: "Barrido de $K$ en los términos de Fourier de la @eq-fourier, sobre las series estacionales del catálogo, con doce rezagos siempre presentes."
+EST18 = [i for i in APTAS18
+         if cargar(i).periodo_estacional > 1
+         and len(cargar(i).entrenamiento) >= 80]
+
+filas = []
+for etiqueta, K in (("sin Fourier", 0), ("K = 1", 1), ("K = 2", 2), ("K = 3", 3),
+                    ("K = 4", 4), ("K = 6", 6), ("K = m/2", -1)):
+    errores, columnas = [], []
+    for identificador in EST18:
+        s = cargar(identificador)
+        m = s.periodo_estacional
+        k = m // 2 if K == -1 else K
+        pron = recursivo18(s.entrenamiento.to_numpy(), 12, m, s.horizonte, R18,
+                           K=k)
+        if pron is not None:
+            errores.append(smape(s.prueba.to_numpy(), pron))
+            columnas.append(12 + 2 * k)
+    filas.append({"Fourier": etiqueta, "columnas (mediana)": np.median(columnas),
+                  "sMAPE medio": np.mean(errores),
+                  "sMAPE mediano": np.median(errores)})
+
+pd.DataFrame(filas).set_index("Fourier").round(2)
+```
+
+**El óptimo está mucho antes de $m/2$, y en cuál depende de la métrica.**
+
+En la media el mejor es $K = 1$, con 9,30, y de ahí sube: 9,86 con $K = 2$, 10,31 con $K = 6$. En
+la mediana el mejor es $K = 2$, con 4,29, empatado con $K = 3$ y con $K = m/2$.
+
+Lo que sí es rotundo es que **cualquier Fourier mejora la mediana muchísimo**: de 6,67 sin nada a
+4,29, un 36 %. La posición estacional aporta información real que los rezagos no traen, y con dos
+columnas ya está aprovechada.
+
+La explicación en términos de columnas es la del ejercicio 1. Cada $K$ agrega dos columnas, y en
+series estacionales del catálogo con mediana de 12 rezagos, pasar de $K = 1$ a $K = 6$ lleva la
+tabla de 14 a 24 columnas: casi el doble. Por la @fig-curva-rezagos eso ya está en la rama de
+subida de la U.
+
+Y hay una lectura estructural que refuerza la del ejercicio 1: **$K = 1$ es un solo ciclo por
+período, o sea la forma estacional más suave posible**. Que gane en la media significa que la
+mayoría de la señal estacional de estas series es un armónico fundamental, y que los armónicos
+altos —los picos angostos— son más ruido que forma.
+
+### Ejercicio 3 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-18-3
+#| tbl-cap: "Cuatro criterios para elegir rezagos con el correlograma."
+filas = []
+for etiqueta, kw in (("los 3 de mayor |r|", dict(cuantos=3)),
+                     ("los 6 de mayor |r|", dict(cuantos=6)),
+                     ("los 12 de mayor |r|", dict(cuantos=12)),
+                     ("todos los significativos", dict(todos=True))):
+    errores, columnas = [], []
+    for identificador in APTAS18:
+        s = cargar(identificador)
+        y_tr = s.entrenamiento.to_numpy()
+        elegidos = rezagos_acf(y_tr, **kw)
+        columnas.append(len(elegidos))
+        pron = recursivo18(y_tr, max(elegidos), s.periodo_estacional,
+                           s.horizonte, R18, rezagos=elegidos)
+        if pron is not None:
+            errores.append(smape(s.prueba.to_numpy(), pron))
+    filas.append({"criterio": etiqueta, "columnas (mediana)": np.median(columnas),
+                  "sMAPE medio": np.mean(errores),
+                  "sMAPE mediano": np.median(errores)})
+
+pd.DataFrame(filas).set_index("criterio").round(2)
+```
+
+**Gana quedarse con seis en la media —12,85— y con doce en la mediana —6,67—, y el peor de los
+cuatro es el criterio que suena más principista.**
+
+"Todos los significativos" da 14,94 de media y 7,74 de mediana, con una mediana de 24 columnas: en
+la mitad de las series el correlograma marca *todos* los rezagos hasta el 24 como significativos.
+Eso pasa porque el límite $1{,}96/\sqrt{n}$ está pensado para una serie de ruido blanco, y una
+serie con tendencia tiene correlaciones altas en todos los rezagos cortos por el solo hecho de
+moverse despacio. El @sec-caja-de-herramientas ya avisaba de esto.
+
+Juntando los tres ejercicios, la conclusión es la misma desde tres ángulos: **el criterio para
+elegir rezagos importa mucho menos que cuántos se elijan.** Tres, seis y doce dan 12,98, 12,85 y
+13,18 —indistinguibles— y veinticuatro da 14,94. Lo que hace el correlograma no es encontrar los
+rezagos correctos: es dar una excusa razonable para tener pocas columnas.
+
+### Ejercicio 4 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-18-4
+#| tbl-cap: "Las tres soluciones del @sec-trampa-ventana sobre las cinco series que más daño sufrían."
+DANADAS = ["H272", "Q11086", "M47356", "D2039", "Q15481"]
+
+filas = []
+for identificador in DANADAS:
+    s = cargar(identificador)
+    y_tr, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    h, m = s.horizonte, s.periodo_estacional
+    filas.append({
+        "serie": identificador,
+        "sin ventana": smape(y_te, recursivo18(y_tr, 12, m, h, R18)),
+        "recursiva": smape(y_te, recursivo18(y_tr, 12, m, h, R18, ventana=True)),
+        "directa": smape(y_te, directo18(y_tr, 12, m, h, R18, ventana=True)),
+        "congelada": smape(y_te, recursivo18(y_tr, 12, m, h, R18, ventana=True,
+                                             congelar=True)),
+        "acotada": smape(y_te, recursivo18(y_tr, 12, m, h, R18, ventana=True,
+                                           acotar=True)),
+    })
+
+remedios = pd.DataFrame(filas).set_index("serie")
+pd.concat([remedios, remedios.agg(["mean"])]).round(2)
+```
+
+Las tres soluciones no son equivalentes, y el orden sorprende.
+
+**La estrategia directa es la que mejor recupera, y en `H272` hace más que recuperar.** Baja de
+152,31 a **5,35**, que es mejor que los 8,60 de no usar ventana móvil en absoluto. O sea que los
+estadísticos de ventana **sí eran informativos**: lo que estaba roto era la realimentación, no la
+característica. Es el mejor argumento a favor de la estrategia directa que aparece en todo el
+libro, y el @sec-prediccion no lo había medido porque ahí las características eran solo rezagos.
+
+**Congelar es la solución más consistente.** No es la mejor en ninguna serie salvo `Q15481` —donde
+da 7,68, mejor que todo lo demás— pero nunca es catastrófica, y es la más barata: no cambia la
+estrategia ni el modelo, solo deja fijas cuatro columnas por ventana.
+
+**Acotar la entrada no funciona.** En `H272` da 90,77: mejor que los 152,31 y muy lejos de servir.
+Y el motivo es instructivo. Recortar la característica al rango de entrenamiento deja al modelo
+recibiendo el valor **extremo** de ese rango, que sigue siendo un valor raro, y el lazo de
+realimentación sigue cerrado: la desviación ya no crece sin límite pero se queda pegada al techo.
+Una cota impide que una cantidad explote y no impide que sea la equivocada.
+
+En `Q11086` ninguna de las tres arregla nada —de 14,07 sin ventana a 42,74 con la mejor de las
+tres— y eso también hay que decirlo: **la respuesta correcta a veces es no usar la familia de
+características.**
+
+### Ejercicio 5 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-18-5
+#| tbl-cap: "Agregar la característica «cuántos períodos desde el máximo de la historia» a los doce rezagos."
+filas = []
+for etiqueta, kw in (("12 rezagos", dict()),
+                     ("+ desde el máximo", dict(desde_max=True))):
+    errores = []
+    for identificador in APTAS18:
+        s = cargar(identificador)
+        pron = recursivo18(s.entrenamiento.to_numpy(), 12, s.periodo_estacional,
+                           s.horizonte, R18, **kw)
+        if pron is not None:
+            errores.append(smape(s.prueba.to_numpy(), pron))
+    filas.append({"características": etiqueta, "columnas": 12 + len(kw),
+                  "sMAPE medio": np.mean(errores),
+                  "sMAPE mediano": np.median(errores)})
+
+pd.DataFrame(filas).set_index("características").round(2)
+```
+
+**No ayuda: empeora la media de 13,54 a 17,43 y la mediana de 8,49 a 10,58**, y lo hace con una
+sola columna más. Trece columnas contra doce no puede explicar un 29 % de deterioro por la vía de
+la @fig-curva-rezagos, así que la característica está haciendo daño activo.
+
+La segunda pregunta explica por qué, y la respuesta es **no, no se puede calcular sobre
+predicciones sin caer en el problema del @sec-trampa-ventana.** Es peor que la desviación de la
+ventana, por dos razones:
+
+**No está acotada y crece sola.** Si el pronóstico se mantiene por debajo del máximo histórico, la
+característica aumenta en uno en cada paso, mecánicamente. En el paso 48 vale 48 unidades más que
+en el entrenamiento, donde nunca tomó ese valor en las últimas filas.
+
+**Y es discontinua.** Si en algún paso la predicción supera el máximo, la característica salta de
+un número grande a cero. El modelo tiene un coeficiente lineal para eso, así que un salto en la
+entrada produce un salto en la salida.
+
+La lección general es la del recuadro del @sec-trampa-ventana, formulada más fuerte: **una
+característica es segura en pronóstico recursivo si su valor sobre una trayectoria predicha vive en
+el mismo rango que sobre datos reales.** Los rezagos cumplen. La desviación de la ventana no
+cumple. Un contador de períodos desde un evento no cumple, y encima no puede volver a su rango
+nunca.
+
+### Ejercicio 6 {.unnumbered}
+
+```{python}
+#| label: fig-sol-18-6
+#| fig-cap: "En cuántas series del catálogo sobrevive cada rezago a la selección de Lasso, sobre una tabla de 24 rezagos."
+conteo = np.zeros(25, dtype=int)
+usadas = 0
+for identificador in APTAS18:
+    s = cargar(identificador)
+    y_tr = s.entrenamiento.to_numpy()
+    if len(y_tr) < 80:
+        continue
+    X, objetivo = matriz(y_tr, 24, s.periodo_estacional)
+    modelo = make_pipeline(
+        StandardScaler(), Lasso(alpha=1.0, max_iter=50_000)
+    ).fit(X, objetivo)
+    coeficientes = modelo[-1].coef_
+    usadas += 1
+    for j in range(24):
+        if abs(coeficientes[j]) > 1e-6:
+            conteo[j + 1] += 1
+
+fig = go.Figure(go.Bar(
+    x=np.arange(1, 25), y=conteo[1:],
+    marker_color=[COLORES["prueba"] if r in (1, 12, 24) else COLORES["observado"]
+                  for r in range(1, 25)],
+))
+fig.add_hline(y=usadas / 2, line_dash="dot", line_width=1,
+              line_color=COLORES["auxiliar"],
+              annotation_text="la mitad de las series")
+fig.update_xaxes(title="rezago", dtick=1)
+mostrar(fig, alto=400, titulo_y=f"sobrevive en cuántas de las {usadas} series")
+```
+
+```{python}
+#| label: tbl-sol-18-6
+#| tbl-cap: "Los seis rezagos que Lasso conserva con más frecuencia, más el rezago estacional."
+frecuencias = pd.DataFrame(
+    {"rezago": range(1, 25), "sobrevive en": conteo[1:]}
+).set_index("rezago")
+frecuencias["% de las series"] = (100 * frecuencias["sobrevive en"] / usadas)
+
+pd.concat([
+    frecuencias.nlargest(6, "sobrevive en").assign(
+        **{"por qué": "entre los 6 más frecuentes"}),
+    frecuencias.loc[[12]].assign(**{"por qué": "el rezago estacional mensual"}),
+]).round(1)
+```
+
+**El rezago 1 sí aparece más que el resto, con claridad: sobrevive en 20 de las 25 series.** Es
+coherente con todo el libro desde el @sec-caja-de-herramientas: el último valor es el predictor
+individual más informativo, y por eso el naive es difícil de superar.
+
+**El rezago 12 no.** Sobrevive en 11 de 25, menos que el rezago 24 —que sobrevive en 14— y menos
+que los rezagos 2 y 5, que sobreviven en 13 cada uno. En una tabla donde la mayoría de las series
+son mensuales con $m = 12$, eso es exactamente lo que no debería pasar si Lasso estuviera
+encontrando estructura.
+
+La explicación es el aviso del @sec-grupos-rezagos, ahora con un conteo detrás. Los rezagos 11, 12
+y 13 están fuertemente correlacionados entre sí, así que la penalización $\ell_1$ se queda con uno
+de los tres y anula los otros dos **sin ningún criterio estructural**: el que gana es el que casualmente
+tenga un poco más de correlación con el residuo en esa muestra. Sobre 25 series, esa lotería
+reparte los votos entre 11, 12 y 13 en vez de concentrarlos en el 12.
+
+Y el histograma completo lo confirma: fuera del rezago 1, las frecuencias van de 6 a 14 sin ninguna
+estructura reconocible. **Lasso sobre rezagos consecutivos no es un selector de estructura: es un
+reductor de columnas con un empate resuelto al azar.** Si lo que se busca es identificar cuáles
+rezagos importan de verdad, el correlograma del @sec-cuales-rezagos lo hace mejor y más barato; y si
+lo que se busca es tener menos columnas, la @fig-curva-rezagos dice que alcanza con pedir doce.
