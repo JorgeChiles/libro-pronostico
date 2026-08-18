@@ -1,0 +1,7 @@
+# ARIMA {#sec-arima}
+
+Estacionariedad, diferenciación, ACF y PACF, identificación, ARIMA estacional y selección automática.
+
+::: {.callout-note appearance="simple"}
+Capítulo en preparación.
+:::

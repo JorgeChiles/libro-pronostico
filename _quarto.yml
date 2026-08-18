@@ -1,0 +1,90 @@
+project:
+  type: book
+  output-dir: _site
+
+book:
+  title: "Pronóstico de series de tiempo con Python"
+  subtitle: "Del método estadístico al aprendizaje automático"
+  author: "Jorge Andrés Peña Araya"
+  date: today
+  date-format: "MMMM YYYY"
+  search: true
+  repo-url: https://github.com/USUARIO/libro-pronostico
+  repo-actions: [issue, source]
+  page-footer:
+    left: "Pronóstico de series de tiempo con Python"
+    right: "Hecho con [Quarto](https://quarto.org)"
+  chapters:
+    - index.qmd
+    - part: "Fundamentos del pronóstico"
+      chapters:
+        - capitulos/01-que-es-pronosticar.qmd
+        - capitulos/02-datos-temporales.qmd
+        - capitulos/03-visualizacion.qmd
+        - capitulos/04-descomposicion.qmd
+        - capitulos/05-caracteristicas.qmd
+        - capitulos/06-caja-de-herramientas.qmd
+        - capitulos/07-evaluacion.qmd
+        - capitulos/08-regresion.qmd
+        - capitulos/09-suavizado.qmd
+        - capitulos/10-arima.qmd
+    - part: "Aprendizaje automático"
+      chapters:
+        - capitulos/11-intro-ml.qmd
+        - capitulos/12-los-datos.qmd
+        - capitulos/13-supervisado.qmd
+        - capitulos/14-sobreajuste.qmd
+        - capitulos/15-particiones.qmd
+        - capitulos/16-validacion-cruzada.qmd
+        - capitulos/17-prediccion.qmd
+        - capitulos/18-ingenieria.qmd
+        - capitulos/19-modelos-basicos.qmd
+        - capitulos/20-ensambles.qmd
+        - capitulos/21-bootstrapping.qmd
+        - capitulos/22-aprendizaje-profundo.qmd
+    - part: "Práctica"
+      chapters:
+        - capitulos/23-caso-m4.qmd
+        - capitulos/24-seleccion-escala.qmd
+        - capitulos/25-produccion.qmd
+  appendices:
+    - apendices/soluciones.qmd
+    - laboratorio/interactividad.qmd
+
+bibliography: referencias.bib
+
+format:
+  live-html:
+    theme:
+      light: [cosmo, estilos/claro.scss]
+      dark: [cosmo, estilos/oscuro.scss]
+    toc: true
+    toc-title: "En esta página"
+    number-sections: true
+    code-copy: true
+    code-overflow: wrap
+    fig-width: 8
+    fig-height: 4.5
+    lang: es
+
+live:
+  packages:
+    - numpy
+    - pandas
+    - matplotlib
+    - statsmodels
+  show-solutions: true
+
+filters:
+  - shinylive
+
+execute:
+  # freeze guarda la salida ejecutada de cada capítulo y solo reejecuta los que
+  # cambiaron. No se usa `cache: true` porque es incompatible con las
+  # expresiones en línea `{python} ...`, y esas son las que hacen que los
+  # números citados en la prosa se recalculen con los datos.
+  freeze: auto
+  warning: false
+
+jupyter: libro
+

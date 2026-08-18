@@ -1,0 +1,7 @@
+# Ensambles {#sec-ensambles}
+
+Bagging, random forest y boosting.
+
+::: {.callout-note appearance="simple"}
+Capítulo en preparación.
+:::

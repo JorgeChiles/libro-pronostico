@@ -1,0 +1,7 @@
+# Selección de modelos a escala {#sec-seleccion-escala}
+
+Cómo elegir un modelo cuando hay miles de series y el ranking depende del azar.
+
+::: {.callout-note appearance="simple"}
+Capítulo en preparación.
+:::

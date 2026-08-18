@@ -1,0 +1,7 @@
+# Datos temporales en Python {#sec-datos-temporales}
+
+pandas, índices de fecha, frecuencias, remuestreo, datos faltantes.
+
+::: {.callout-note appearance="simple"}
+Capítulo en preparación.
+:::

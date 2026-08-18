@@ -1,0 +1,225 @@
+---
+title: "Soluciones a los ejercicios"
+---
+
+```{python}
+#| echo: false
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+
+from libro.datos import cargar, metadatos
+from libro.graficos import COLORES, mostrar
+
+
+def smape(real, pronostico):
+    real, pronostico = np.asarray(real, float), np.asarray(pronostico, float)
+    return 200 * np.mean(
+        np.abs(real - pronostico) / (np.abs(real) + np.abs(pronostico))
+    )
+
+
+def naive(y, h):
+    return np.repeat(y[-1], h)
+
+
+def naive_estacional(y, h, m):
+    if m <= 1:
+        return naive(y, h)
+    return np.array([y[-m + (i % m)] for i in range(h)])
+
+
+def media(y, h):
+    return np.repeat(y.mean(), h)
+
+
+def deriva(y, h):
+    pendiente = (y[-1] - y[0]) / (len(y) - 1)
+    return y[-1] + pendiente * np.arange(1, h + 1)
+```
+
+Las soluciones traen el código que resuelve el ejercicio y, cuando el ejercicio
+pide interpretar, la interpretación. En los ejercicios abiertos —los que piden
+elegir un caso propio— se da un criterio para evaluar la respuesta en vez de una
+respuesta.
+
+## Capítulo 1 · Qué es pronosticar {#sec-soluciones-01}
+
+### Ejercicio 1
+
+```{python}
+serie = cargar("Y10884")
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=serie.entrenamiento.index, y=serie.entrenamiento.values,
+    mode="lines", name=serie.id,
+    line=dict(color=COLORES["observado"], width=2),
+))
+mostrar(fig, titulo_y="unidades")
+
+print(f"fenómeno del catálogo: {serie.fenomeno}")
+print(f"observaciones: {serie.n} · frecuencia: {serie.frecuencia}")
+```
+
+La serie crece de forma sostenida y en algún punto cambia de nivel de golpe, sin
+volver al anterior. El catálogo la etiqueta como `quiebre-de-nivel`.
+
+Lo que importa del ejercicio: un quiebre de nivel se reconoce a ojo con
+facilidad y arruina a cualquier método que suponga que el pasado lejano informa
+sobre el futuro. La media, por ejemplo, queda anclada a un nivel que ya no
+existe.
+
+### Ejercicio 2
+
+```{python}
+serie = cargar("Q1915")
+y = serie.entrenamiento.to_numpy()
+real = serie.prueba.to_numpy()
+h, m = serie.horizonte, serie.periodo_estacional
+
+resultados = pd.Series({
+    "naive": smape(real, naive(y, h)),
+    "naive estacional": smape(real, naive_estacional(y, h, m)),
+    "media": smape(real, media(y, h)),
+    "deriva": smape(real, deriva(y, h)),
+}).sort_values()
+
+resultados.round(2).to_frame("sMAPE")
+```
+
+`Q1915` es la serie de tendencia limpia del catálogo, así que la deriva —el único
+de los cuatro métodos que extrapola una pendiente— es la que mejor le va, y la
+media es la peor: promediar una serie que crece devuelve un valor que la serie
+dejó atrás hace tiempo.
+
+### Ejercicio 3
+
+```{python}
+serie = cargar(frecuencia="diaria", fenomeno="caminata-aleatoria")
+y = serie.entrenamiento.to_numpy()
+real = serie.prueba.to_numpy()
+h = serie.horizonte
+
+comparacion = pd.Series({
+    "naive simple": smape(real, naive(y, h)),
+    "naive estacional, m = 1 (M4)": smape(real, naive_estacional(y, h, 1)),
+    "naive estacional, m = 7 (calendario)": smape(real, naive_estacional(y, h, 7)),
+}).round(3)
+
+comparacion.to_frame("sMAPE")
+```
+
+Con `m = 1` el naive estacional **es** el naive simple: repetir el último ciclo
+de largo 1 es repetir la última observación. Los dos primeros valores coinciden
+por construcción, no por casualidad.
+
+Con `m = 7` el resultado suele ser algo peor, y la razón es la del
+@sec-a-escala: en una serie sin estructura semanal, usar los últimos siete
+valores en vez del último agrega ruido sin agregar señal.
+
+Sobre la última pregunta: no, no contradice la decisión de M4 — la respalda. M4
+declaró las series diarias no estacionales porque en su mayoría no tienen ciclo
+semanal explotable. Lo que sí hay que retener es que esto vale **en promedio
+sobre el conjunto de M4**, no en toda serie diaria del mundo: la demanda
+minorista diaria tiene un ciclo semanal fortísimo. La convención es una
+propiedad de este conjunto de datos, no una ley.
+
+### Ejercicio 4
+
+```{python}
+muestra = cargar(frecuencia="mensual", n=30, solo_catalogo=False)
+
+filas = []
+for s in muestra:
+    y = s.entrenamiento.to_numpy()
+    filas.append({
+        "serie": s.id,
+        "complejidad": s.complejidad,
+        "smape_naive": smape(s.prueba.to_numpy(), naive(y, s.horizonte)),
+    })
+
+muestra_df = pd.DataFrame(filas)
+correlacion = muestra_df["complejidad"].corr(muestra_df["smape_naive"])
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=muestra_df["complejidad"], y=muestra_df["smape_naive"],
+    mode="markers", marker=dict(size=9, color=COLORES["observado"]),
+    text=muestra_df["serie"],
+    hovertemplate="%{text}<br>complejidad %{x:.2f}<br>sMAPE %{y:.1f}<extra></extra>",
+))
+fig.update_layout(height=420, showlegend=False)
+fig.update_xaxes(title="índice de complejidad")
+mostrar(fig, titulo_y="sMAPE del naive")
+
+print(f"correlación con 30 series: {correlacion:+.3f}")
+
+poblacion = metadatos()
+poblacion = poblacion[
+    (poblacion["frecuencia"] == "mensual") & poblacion["error_naive_smape"].notna()
+]
+correlacion_total = poblacion["complexity_index"].corr(poblacion["error_naive_smape"])
+print(f"correlación con las {len(poblacion):,} series mensuales: {correlacion_total:+.3f}")
+```
+
+Con 30 series la nube de puntos es difusa y la correlación puede quedar bastante
+lejos del valor poblacional; con 48.000 la relación es nítida.
+
+La moraleja es sobre potencia estadística, y aplica a todo el libro: una relación
+real pero moderada necesita muchas observaciones para verse. Con muestras chicas
+se puede concluir cualquier cosa, incluso el signo contrario, y la conclusión
+parecerá razonable. Es el mismo problema que hace que comparar dos modelos sobre
+diez series no permita decidir nada.
+
+### Ejercicio 5
+
+La conclusión "el ARIMA es un mal modelo" no se sigue de la tabla por tres
+razones distintas, y cada una alcanza para invalidarla.
+
+**Primera: no es un ARIMA cualquiera, es un ARIMA(1,1,1) con órdenes fijos.** No
+se seleccionaron los órdenes para cada serie ni se estimó la parte estacional.
+Un ARIMA con órdenes elegidos por serie —lo que hace la selección automática del
+@sec-arima— es un modelo distinto.
+
+**Segunda: el resultado es específico de dos frecuencias.** En las series
+anuales, trimestrales y mensuales el mismo ARIMA le gana al naive. Un modelo que
+gana en cuatro frecuencias de seis y pierde en dos no es un mal modelo: es un
+modelo cuyas condiciones de aplicabilidad quedaron a la vista.
+
+**Tercera, y la más importante: el promedio de un error no acotado esconde los
+casos extremos.** El sMAPE está acotado en 200, pero un solo pronóstico que
+diverge puede mover el promedio de un grupo entero. Antes de concluir algo sobre
+el modelo hay que mirar la mediana y contar los casos extremos.
+
+Qué habría que medir para sostener o descartar la afirmación:
+
+- La **mediana** del error además del promedio, para saber si el resultado
+  describe a la serie típica o a unos pocos desastres.
+- El mismo ARIMA con **órdenes seleccionados por serie**, para separar el
+  problema de especificación del problema del modelo.
+- Una métrica **relativa al naive serie por serie** —el MASE del
+  @sec-evaluacion— en vez de comparar promedios de sMAPE entre grupos.
+- Un **test estadístico** sobre las diferencias apareadas, no una comparación de
+  dos promedios a ojo.
+
+### Ejercicio 6
+
+Ejercicio abierto. Una respuesta buena tiene estas cuatro cosas:
+
+**La decisión es una acción con fecha**, no un deseo de saber. "Cuántas unidades
+pedir el lunes" sirve; "entender el mercado" no, porque no fija horizonte ni
+métrica.
+
+**El horizonte sale de la decisión y no de los datos disponibles.** Si el
+proveedor tarda seis semanas en entregar, el horizonte es seis semanas, aunque
+haya datos diarios y sea tentador pronosticar a un día.
+
+**La asimetría del costo está explícita.** Quedarse sin stock cuesta la venta
+perdida y algo de reputación; quedarse largo cuesta capital inmovilizado y
+quizá el producto vencido. Rara vez son iguales, y cuando no lo son el
+pronóstico puntual óptimo no es el valor central de la distribución.
+
+**Está dicho si hace falta el intervalo.** Si la decisión tiene una restricción
+que no se puede violar —capacidad de una red, un contrato con penalidad— el
+intervalo es el producto y el número central es secundario.

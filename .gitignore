@@ -1,0 +1,30 @@
+# Salida compilada
+_site/
+_book/
+.quarto/
+
+# Caché de ejecución de Quarto. `_freeze/` SÍ se versiona a propósito: es lo
+# que permite que la compilación en CI no reejecute todos los capítulos.
+.jupyter_cache/
+
+# Caché de datos. Vive fuera del repositorio (~/.cache/libro-pronostico), pero
+# por si alguien la apunta acá con LIBRO_CACHE.
+cache/
+datos_descargados/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Pruebas de laboratorio que no forman parte del libro
+pruebas/aislar/
+pruebas/*.txt
+
+# Sistema
+.DS_Store
+
+/.quarto/
+**/*.quarto_ipynb

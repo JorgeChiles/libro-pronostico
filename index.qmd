@@ -1,0 +1,35 @@
+---
+title: "Prefacio"
+---
+
+Este libro enseña a pronosticar series de tiempo con Python. Empieza donde
+empieza cualquiera —mirar una serie y preguntarse qué va a pasar después— y
+termina en modelos de aprendizaje profundo, pasando por todo lo que hay en el
+medio.
+
+Es gratuito, se lee en línea y todo su código corre. No hay fragmentos
+decorativos: cada bloque de código de este libro se ejecuta cuando el libro se
+compila, y si alguno falla el libro no se publica.
+
+## Por qué existe
+
+*Forecasting: Principles and Practice* de Hyndman y Athanasopoulos es el mejor
+texto disponible sobre el tema. Está en inglés, usa R y termina donde empiezan
+los modelos de aprendizaje automático. Este libro cubre el mismo recorrido en
+español y en Python, y le suma una segunda parte completa sobre aprendizaje
+automático aplicado a series de tiempo.
+
+## Qué hace falta saber
+
+Programar algo de Python y estadística básica: media, varianza, regresión
+lineal, la idea de intervalo de confianza. No hace falta álgebra lineal
+avanzada ni teoría de la probabilidad formal. Cada concepto entra por un
+problema concreto.
+
+## Los datos
+
+Todos los ejemplos usan series reales de la competencia M4: 100.000 series de
+demanda, finanzas, macroeconomía y demografía, con la partición de
+entrenamiento y prueba que fijó la competencia. Nada de datos inventados, salvo
+en los pocos lugares donde ilustrar un punto teórico con un dato artificial es
+más claro; ahí se dice.

@@ -1,0 +1,618 @@
+---
+resources:
+  - datos/cap01_series.csv
+---
+
+# Qué es pronosticar {#sec-que-es-pronosticar}
+
+```{python}
+#| echo: false
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+
+from libro.datos import cargar, metadatos
+from libro.graficos import COLORES, mostrar
+```
+
+Una empresa de distribución tiene que decidir hoy cuántas unidades comprar para
+el mes que viene. Un ministerio tiene que estimar cuántas personas van a
+jubilarse en 2031. Un operador eléctrico necesita saber cuánta energía va a
+consumirse mañana entre las 19 y las 20. Los tres problemas son el mismo
+problema: usar lo que ya pasó para decir algo defendible sobre lo que todavía
+no pasó.
+
+Este capítulo trata de qué se puede y qué no se puede decir. Antes de aprender
+métodos conviene saber qué se le puede pedir a un método, porque la mayor parte
+de las decepciones con el pronóstico vienen de pedirle lo que ningún método
+puede dar.
+
+## Una serie y una pregunta {#sec-una-serie}
+
+Empecemos con datos reales. La serie `M3007` de la competencia M4 tiene 102
+observaciones mensuales de una variable macroeconómica. Esto es lo que se
+observó:
+
+```{python}
+#| label: fig-m3007-train
+#| fig-cap: "Serie M3007: 102 meses observados. La pregunta es qué sigue después de la última observación."
+serie = cargar("M3007")
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=serie.entrenamiento.index, y=serie.entrenamiento.values,
+    name="observado", mode="lines",
+    line=dict(color=COLORES["observado"], width=2),
+    hovertemplate="%{x|%b %Y}<br>%{y:,.0f}<extra></extra>",
+))
+mostrar(fig, titulo_y="unidades")
+```
+
+Antes de seguir leyendo, mirá el gráfico y decidí qué valor esperás para el mes
+siguiente. Después decidí un rango: dos números tales que te sorprendería que el
+valor real quedara afuera.
+
+Esas dos respuestas son las dos mitades de un pronóstico. La primera es el
+**pronóstico puntual** (*point forecast*), un número. La segunda es el
+**intervalo de predicción** (*prediction interval*), que dice cuánta
+incertidumbre hay alrededor de ese número. Un pronóstico sin la segunda mitad
+está incompleto, y en la práctica es peor que incompleto: invita a tratar una
+conjetura como un dato.
+
+La competencia M4 reservó las 18 observaciones siguientes para evaluar. Son
+estas:
+
+```{python}
+#| label: fig-m3007-full
+#| fig-cap: "Las 18 observaciones que la competencia reservó. La zona sombreada es el período de evaluación."
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=serie.entrenamiento.index, y=serie.entrenamiento.values,
+    name="observado", mode="lines",
+    line=dict(color=COLORES["observado"], width=2),
+    hovertemplate="%{x|%b %Y}<br>%{y:,.0f}<extra></extra>",
+))
+fig.add_trace(go.Scatter(
+    x=serie.prueba.index, y=serie.prueba.values,
+    name="lo que pasó después", mode="lines",
+    line=dict(color=COLORES["prueba"], width=2, dash="dot"),
+    hovertemplate="%{x|%b %Y}<br>%{y:,.0f}<extra></extra>",
+))
+fig.add_vrect(
+    x0=serie.prueba.index.min(), x1=serie.prueba.index.max(),
+    fillcolor="gray", opacity=0.12, line_width=0,
+)
+mostrar(fig, titulo_y="unidades")
+```
+
+```{python}
+#| echo: false
+ultimo = float(serie.entrenamiento.iloc[-1])
+maximo_prueba = float(serie.prueba.max())
+salto = maximo_prueba / ultimo
+```
+
+Casi nadie acierta acá. La serie venía creciendo despacio y se multiplicó por
+`{python} f"{salto:.1f}"` en menos de un año. Si tu intervalo contenía el valor
+real, era un intervalo enorme; si era angosto, quedó afuera.
+
+Esto no es una serie elegida para hacerte quedar mal. Es una serie
+macroeconómica común, y el episodio que muestra —una aceleración repentina
+después de años de calma— es de los que más importan y de los que menos se
+pronostican. Vale la pena arrancar por acá en vez de por un ejemplo prolijo,
+porque marca el límite del oficio desde la primera página.
+
+## Lo que se puede pronosticar depende de la serie, no del método {#sec-que-se-puede}
+
+Hay una intuición muy difundida y muy equivocada: que un pronóstico malo es
+señal de un método malo, y que un método mejor lo arreglaría. A veces es cierto.
+Muchas veces la serie simplemente no contiene la información que se le está
+pidiendo.
+
+Comparemos tres series del catálogo del libro, cada una con un comportamiento
+distinto. Son las mismas que vas a poder manipular en el widget del
+@sec-widget, así que vale la pena mirarlas con atención ahora:
+
+```{python}
+#| label: fig-tres-series
+#| fig-cap: "Tres series con estructura distinta. La primera tiene tendencia; la segunda, un ciclo estacional; la tercera, ninguna de las dos."
+from plotly.subplots import make_subplots
+
+ejemplos = [
+    ("D1", "Tendencia clara"),
+    ("M35927", "Estacionalidad marcada"),
+    ("D2039", "Sin estructura visible"),
+]
+
+fig = make_subplots(rows=3, cols=1, subplot_titles=[t for _, t in ejemplos],
+                    vertical_spacing=0.10)
+
+for i, (serie_id, _) in enumerate(ejemplos, start=1):
+    s = cargar(serie_id)
+    y = s.entrenamiento.tail(120)
+    fig.add_trace(go.Scatter(
+        x=y.index, y=y.values, mode="lines", name=s.id,
+        line=dict(color=COLORES["observado"], width=1.6),
+        hovertemplate="%{y:,.1f}<extra>" + s.id + "</extra>",
+    ), row=i, col=1)
+
+fig.update_layout(height=620, showlegend=False)
+mostrar(fig)
+```
+
+En la primera, cualquiera puede extender la línea con la mano y no equivocarse
+demasiado. En la segunda, alcanza con repetir el último ciclo. En la tercera no
+hay nada que extender: la serie sube y baja sin patrón, y el mejor pronóstico
+disponible es "lo mismo que hoy".
+
+Esa última afirmación es más fuerte de lo que parece. Vamos a ponerle números.
+
+### Cuatro métodos que no aprenden nada {#sec-metodos-simples}
+
+Los cuatro métodos que siguen son deliberadamente tontos. No estiman
+parámetros, no optimizan nada, y se implementan en una línea. Van a acompañarnos
+todo el libro como punto de comparación.
+
+```{python}
+def naive(y, h):
+    """Repite la última observación."""
+    return np.repeat(y[-1], h)
+
+
+def naive_estacional(y, h, m):
+    """Repite el último ciclo estacional completo."""
+    return np.array([y[-m + (i % m)] for i in range(h)])
+
+
+def media(y, h):
+    """La media de toda la serie."""
+    return np.repeat(y.mean(), h)
+
+
+def deriva(y, h):
+    """Extiende la recta que une la primera y la última observación."""
+    pendiente = (y[-1] - y[0]) / (len(y) - 1)
+    return y[-1] + pendiente * np.arange(1, h + 1)
+```
+
+El **naive** merece un párrafo. Pronosticar "lo mismo que hoy" parece una
+renuncia, y en muchas series es lo mejor que se puede hacer. Es también el
+patrón de medida universal: si un modelo con veinte parámetros no le gana al
+naive, ese modelo no está aportando nada, por elegante que sea su formulación.
+
+Ahora medimos. La métrica que usamos acá es el **error absoluto porcentual
+simétrico** o **sMAPE** (*symmetric mean absolute percentage error*), que es la
+que usó M4. En el @sec-evaluacion la discutimos en serio, con sus defectos; por
+ahora basta con saber que es un porcentaje y que menos es mejor:
+
+```{python}
+def smape(real, pronostico):
+    """sMAPE en la definición oficial de M4. Va de 0 a 200."""
+    real, pronostico = np.asarray(real, float), np.asarray(pronostico, float)
+    return 200 * np.mean(
+        np.abs(real - pronostico) / (np.abs(real) + np.abs(pronostico))
+    )
+```
+
+```{python}
+#| label: tbl-tres-series
+#| tbl-cap: "sMAPE de cuatro métodos simples sobre tres series con estructura distinta. El mejor de cada fila está en negrita."
+filas = []
+for serie_id, etiqueta in ejemplos:
+    s = cargar(serie_id)
+    y = s.entrenamiento.to_numpy()
+    real = s.prueba.to_numpy()
+    h, m = s.horizonte, s.periodo_estacional
+
+    resultados = {
+        "naive": smape(real, naive(y, h)),
+        "naive estacional": smape(real, naive_estacional(y, h, max(m, 1))),
+        "media": smape(real, media(y, h)),
+        "deriva": smape(real, deriva(y, h)),
+    }
+    filas.append({"serie": s.id, "comportamiento": etiqueta, **resultados})
+
+tabla = pd.DataFrame(filas).set_index(["serie", "comportamiento"])
+tabla.style.format("{:.2f}").highlight_min(axis=1, props="font-weight: bold;")
+```
+
+```{python}
+#| echo: false
+sin_estructura = tabla.loc[("D2039", "Sin estructura visible")]
+ventaja = sin_estructura["naive"] - sin_estructura.min()
+```
+
+Cuatro lecturas de esa tabla, en orden de importancia:
+
+**El ganador cambia según la serie.** No hay un método que gane siempre. El
+naive estacional arrasa donde hay estacionalidad y es apenas mediocre donde no
+la hay. La media es un desastre cuando hay tendencia y razonable cuando la serie
+oscila alrededor de un nivel fijo.
+
+**En la serie sin estructura, el mejor método le gana al naive por
+`{python} f"{ventaja:.2f}"` puntos de sMAPE.** Es decir: por nada. Cuando la
+diferencia entre el mejor método y el más tonto es de centésimas, lo que la
+tabla está diciendo no es cuál método elegir, sino que en esa serie no hay nada
+que modelar.
+
+**Las magnitudes de error no son comparables entre series.** Un sMAPE de 1,5 en
+una serie y de 21 en otra no significa que el método funcionó catorce veces
+mejor en la primera: significa que la primera serie era mucho más fácil.
+Comparar errores entre series distintas es uno de los errores más frecuentes del
+oficio, y volvemos sobre él en el @sec-evaluacion.
+
+**En la serie de tendencia clara, el naive y el naive estacional dan
+exactamente lo mismo.** No es coincidencia: `D1` es una serie diaria, y M4
+declara las series diarias no estacionales, con `m = 1`. Repetir el último ciclo
+de largo 1 es repetir la última observación. Sobre esa convención volvemos en el
+@sec-horizonte.
+
+## La misma pregunta, sobre 99.935 series {#sec-a-escala}
+
+Tres series son una anécdota. El catálogo del libro trae los descriptores
+estructurales de las 99.935 series de M4, con un **índice de complejidad
+estructural** que resume 29 características de cada serie en un solo número:
+cuánta tendencia tiene, cuánta estacionalidad, qué tan predecible es su
+estructura de autocorrelación, cuántos quiebres, cuánta entropía. El índice
+está construido por componentes principales, y el @sec-caracteristicas explica
+cómo.
+
+Con eso podemos preguntar algo que las tres series no podían responder: ¿el
+error de pronóstico está determinado por la serie?
+
+```{python}
+#| label: tbl-complejidad
+#| tbl-cap: "sMAPE del naive según el cuartil de complejidad estructural de la serie. Sobre las 99.935 series de M4."
+meta = metadatos()
+
+orden = ["baja", "media_baja", "media_alta", "alta"]
+resumen = (
+    meta.groupby("dificultad", observed=True)["error_naive_smape"]
+    .agg(series="count", media="mean", mediana="median")
+    .reindex(orden)
+)
+resumen.index.name = "complejidad"
+(resumen.style
+    .format({"series": "{:,.0f}", "media": "{:.3f}", "mediana": "{:.3f}"}))
+```
+
+```{python}
+#| echo: false
+cociente = resumen.loc["alta", "media"] / resumen.loc["baja", "media"]
+```
+
+Las series del cuartil más complejo tienen un error
+`{python} f"{cociente:.1f}"` veces mayor que las del cuartil más simple, con el
+mismo método aplicado a todas. El método no cambió: cambió la serie.
+
+Se puede decir lo mismo mirando la correlación directa entre el índice y el
+error:
+
+```{python}
+#| label: fig-correlacion
+#| fig-cap: "Índice de complejidad estructural contra error del naive, por frecuencia. Cada punto es el promedio de un percentil del índice."
+sub = meta.dropna(subset=["error_naive_smape"]).copy()
+
+fig = go.Figure()
+for frecuencia in ["anual", "trimestral", "mensual", "diaria"]:
+    g = sub[sub["frecuencia"] == frecuencia].copy()
+    g["percentil"] = pd.qcut(g["complexity_index"], 20, labels=False, duplicates="drop")
+    puntos = g.groupby("percentil").agg(
+        complejidad=("complexity_index", "mean"),
+        error=("error_naive_smape", "mean"),
+    )
+    fig.add_trace(go.Scatter(
+        x=puntos["complejidad"], y=puntos["error"],
+        mode="lines+markers", name=frecuencia,
+        hovertemplate="complejidad %{x:.2f}<br>sMAPE %{y:.3f}<extra>"
+                      + frecuencia + "</extra>",
+    ))
+
+fig.update_layout(height=440, showlegend=True)
+mostrar(fig, titulo_y="sMAPE del naive")
+```
+
+La relación es clara y ordenada en las series anuales, trimestrales y mensuales.
+En las diarias es **plana**: la complejidad no dice nada sobre el error.
+
+Esa línea plana no es una falla de la medición. Las series diarias de M4 son
+prácticamente caminatas aleatorias, y en una caminata aleatoria no hay
+estructura que un índice pueda medir ni que un modelo pueda aprovechar. Se
+confirma por otro camino:
+
+```{python}
+#| label: tbl-arima-vs-naive
+#| tbl-cap: "Un ARIMA(1,1,1) contra el naive, por frecuencia. Los valores negativos en la última columna significan que el ARIMA es peor que repetir la última observación."
+comparacion = (
+    meta.groupby("frecuencia", observed=True)[
+        ["error_naive_smape", "error_arima_smape"]
+    ]
+    .mean()
+    .rename(columns={"error_naive_smape": "naive", "error_arima_smape": "ARIMA(1,1,1)"})
+)
+comparacion["mejora %"] = (
+    100 * (1 - comparacion["ARIMA(1,1,1)"] / comparacion["naive"])
+)
+comparacion.loc[["anual", "trimestral", "mensual", "semanal", "diaria", "horaria"]].style.format(
+    {"naive": "{:.4f}", "ARIMA(1,1,1)": "{:.4f}", "mejora %": "{:+.1f}"}
+)
+```
+
+En las series diarias y horarias, un ARIMA —un modelo con parámetros
+estimados, mucho más sofisticado que repetir el último valor— **pierde** contra
+el naive. No porque esté mal implementado, sino porque estima estructura que no
+está ahí, y esa estimación agrega varianza sin agregar señal.
+
+::: {.callout-note}
+## De dónde salen estos números
+
+Los descriptores estructurales, el índice de complejidad y los errores de esta
+sección salen de un trabajo sobre las 100.000 series de M4 que acompaña a este
+libro. Están calculados con las convenciones oficiales de la competencia y son
+reproducibles: `libro.datos.metadatos()` devuelve la tabla completa. Las
+99.935, y no 100.000, son las series con todos los descriptores calculables; 65
+series semanales quedan afuera por ser demasiado cortas.
+:::
+
+## El horizonte cambia el problema {#sec-horizonte}
+
+Pronosticar el mes que viene y pronosticar el mismo mes del año que viene son
+tareas distintas, no la misma tarea con más dificultad. Cuanto más lejos, menos
+importa el último valor observado y más importa la estructura de largo plazo.
+
+Con el naive se ve en estado puro, porque su pronóstico es constante:
+
+```{python}
+#| label: fig-horizonte
+#| fig-cap: "Error del naive según cuántos pasos hacia adelante se pronostica. Promedio sobre las series mensuales del catálogo."
+series_mensuales = cargar(frecuencia="mensual", n=10, solo_catalogo=True)
+
+errores = []
+for s in series_mensuales:
+    y = s.entrenamiento.to_numpy()
+    real = s.prueba.to_numpy()
+    pronostico = naive(y, s.horizonte)
+    for paso in range(s.horizonte):
+        errores.append({
+            "paso": paso + 1,
+            "smape": smape(real[paso:paso + 1], pronostico[paso:paso + 1]),
+        })
+
+por_paso = pd.DataFrame(errores).groupby("paso")["smape"].mean()
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=por_paso.index, y=por_paso.values, mode="lines+markers",
+    name="sMAPE promedio", line=dict(color=COLORES["prueba"], width=2),
+    hovertemplate="paso %{x}<br>sMAPE %{y:.1f}<extra></extra>",
+))
+fig.update_layout(height=400, showlegend=False)
+fig.update_xaxes(title="pasos hacia adelante", dtick=2)
+mostrar(fig, titulo_y="sMAPE")
+```
+
+El error crece con el horizonte. No es sorprendente, pero tiene una consecuencia
+práctica que se ignora seguido: **un pronóstico solo se puede evaluar contra el
+horizonte para el que fue hecho**. Un modelo que gana a un paso puede perder a
+doce, y elegir el modelo con el error a un paso cuando la decisión necesita doce
+es elegir mal.
+
+M4 fija el horizonte de cada frecuencia, y el libro respeta esa convención:
+
+```{python}
+#| label: tbl-horizontes
+#| tbl-cap: "Horizontes y períodos estacionales oficiales de la competencia M4."
+from libro.datos.rutas import FRECUENCIAS
+
+pd.DataFrame([
+    {
+        "frecuencia": info.nombre,
+        "nombre en M4": info.etiqueta_m4,
+        "horizonte": info.horizonte,
+        "m según M4": info.periodo_estacional,
+        "m natural": info.periodo_natural,
+    }
+    for info in FRECUENCIAS.values()
+]).set_index("frecuencia")
+```
+
+Las dos últimas columnas no coinciden en las series semanales y diarias. M4 las
+declara **no estacionales** —`m = 1`— aunque el calendario sugeriría 52 y 7.
+Es una decisión de la competencia, y cambiarla vuelve incomparables los
+resultados con todo lo publicado sobre M4. El libro expone las dos:
+`serie.periodo_estacional` da la de M4 y `serie.periodo_natural` la del
+calendario. Cuál usar depende de para qué; lo que no se puede es confundirlas.
+
+## Probalo {#sec-widget}
+
+El widget que sigue toma las cuatro series y los cuatro métodos de este
+capítulo. Elegí una serie, elegí un método, mové el horizonte y mirá el error.
+
+Vale la pena buscar tres cosas: un método que gane en una serie y pierda en
+otra; una serie donde ningún método le gane al naive; y qué le pasa a la deriva
+cuando el horizonte crece.
+
+```{shinylive-python}
+#| standalone: true
+#| viewerHeight: 700
+#| components: [viewer]
+
+from pathlib import Path
+
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from shiny import App, reactive, render, ui
+
+AQUI = Path(__file__).parent
+datos = pd.read_csv(AQUI / "cap01_series.csv", parse_dates=["ds"])
+
+ETIQUETAS = list(dict.fromkeys(datos["etiqueta"]))
+
+
+def naive(y, h):
+    return np.repeat(y[-1], h)
+
+
+def naive_estacional(y, h, m):
+    if m <= 1:
+        return naive(y, h)
+    return np.array([y[-m + (i % m)] for i in range(h)])
+
+
+def media(y, h):
+    return np.repeat(y.mean(), h)
+
+
+def deriva(y, h):
+    pendiente = (y[-1] - y[0]) / (len(y) - 1)
+    return y[-1] + pendiente * np.arange(1, h + 1)
+
+
+METODOS = {
+    "naive": lambda y, h, m: naive(y, h),
+    "naive estacional": lambda y, h, m: naive_estacional(y, h, m),
+    "media": lambda y, h, m: media(y, h),
+    "deriva": lambda y, h, m: deriva(y, h),
+}
+
+
+def smape(real, pron):
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    return 200 * np.mean(np.abs(real - pron) / (np.abs(real) + np.abs(pron)))
+
+
+app_ui = ui.page_fluid(
+    ui.layout_columns(
+        ui.input_select("serie", "Serie", ETIQUETAS, selected=ETIQUETAS[0]),
+        ui.input_checkbox_group(
+            "metodos", "Métodos", list(METODOS), selected=["naive"]
+        ),
+        ui.input_slider("h", "Horizonte", 1, 18, 12),
+        col_widths=[3, 4, 5],
+    ),
+    ui.output_plot("grafico", height="360px"),
+    ui.output_table("errores"),
+)
+
+
+def servidor(input, output, session):
+
+    @reactive.calc
+    def partes():
+        g = datos[datos["etiqueta"] == input.serie()]
+        entrenamiento = g[g["split"] == "entrenamiento"]
+        prueba = g[g["split"] == "prueba"]
+        h = min(int(input.h()), len(prueba))
+        m = int(g["m"].iloc[0])
+        return entrenamiento, prueba.iloc[:h], h, m
+
+    @render.plot
+    def grafico():
+        entrenamiento, prueba, h, m = partes()
+        y = entrenamiento["y"].to_numpy()
+        cola = min(len(y), 120)
+
+        fig, ax = plt.subplots(figsize=(9, 3.6))
+        ax.plot(entrenamiento["ds"].iloc[-cola:], y[-cola:],
+                lw=1.5, color="#1f4e79", label="observado")
+        ax.plot(prueba["ds"], prueba["y"], lw=1.8, ls="--",
+                color="#c0504d", label="lo que pasó")
+        for nombre in input.metodos():
+            ax.plot(prueba["ds"], METODOS[nombre](y, h, m), lw=2, label=nombre)
+        ax.legend(loc="upper left", fontsize=8, ncol=2)
+        # Sin esto las etiquetas de fecha se pisan entre sí.
+        ax.xaxis.set_major_locator(mdates.AutoDateLocator(maxticks=7))
+        ax.xaxis.set_major_formatter(mdates.ConciseDateFormatter(
+            ax.xaxis.get_major_locator()))
+        fig.tight_layout()
+        return fig
+
+    @render.table
+    def errores():
+        entrenamiento, prueba, h, m = partes()
+        y = entrenamiento["y"].to_numpy()
+        real = prueba["y"].to_numpy()
+        if not input.metodos():
+            return pd.DataFrame({"": ["Elegí al menos un método"]})
+        filas = [
+            {"método": n, "sMAPE": round(smape(real, METODOS[n](y, h, m)), 2)}
+            for n in input.metodos()
+        ]
+        return pd.DataFrame(filas).sort_values("sMAPE")
+
+
+app = App(app_ui, servidor)
+
+## file: cap01_series.csv
+{{< include datos/cap01_series.csv >}}
+```
+
+## Qué hace útil a un pronóstico {#sec-utilidad}
+
+Un pronóstico no se produce para ser correcto: se produce para tomar una
+decisión. Eso cambia qué significa "bueno".
+
+Si la decisión es cuánto stock comprar, quedarse corto y quedarse largo cuestan
+distinto, y el pronóstico útil no es el del error mínimo sino el que minimiza el
+costo esperado. Si la decisión es dimensionar una red eléctrica, importa el peor
+caso plausible y no el valor central: ahí el intervalo *es* el producto y el
+pronóstico puntual es un detalle. Si la decisión es cuándo revisar de nuevo,
+puede alcanzar con saber si la serie va a subir o bajar.
+
+De ahí salen tres preguntas que conviene hacer antes de elegir un método:
+
+1. **¿Qué decisión depende de esto?** Determina el horizonte y qué error duele.
+2. **¿Cuál es el costo de equivocarse para cada lado?** Casi nunca es simétrico.
+3. **¿Alcanza con un número o hace falta el rango?** Casi siempre hace falta el
+   rango.
+
+Un modelo que falla de manera catastrófica en pocos casos suele ser peor, en
+producción, que uno mediocre pero consistente: el promedio del error esconde
+esos casos, y quien usa el pronóstico no tiene con qué detectarlos. Sobre eso
+volvemos en el @sec-evaluacion y en el @sec-produccion.
+
+## Lo que sigue
+
+El resto de la Parte I construye herramientas para tres cosas: **ver** qué tiene
+una serie (@sec-visualizacion, @sec-descomposicion, @sec-caracteristicas),
+**medir** si un pronóstico es bueno (@sec-evaluacion), y **modelar** la
+estructura que se encontró (@sec-regresion, @sec-suavizado, @sec-arima). La
+Parte II cambia de enfoque: en vez de modelar la estructura explícitamente,
+convierte el problema en aprendizaje supervisado y deja que el algoritmo la
+encuentre.
+
+Los cuatro métodos de este capítulo no van a quedar obsoletos. Van a ser la vara
+contra la que se mide todo lo demás.
+
+## Ejercicios
+
+Las soluciones están en el @sec-soluciones-01.
+
+**1.** Cargá la serie `Y10884` y graficá su período de entrenamiento. Describí
+en una frase qué comportamiento tiene. Después mirá `serie.fenomeno` y comparalo
+con tu descripción.
+
+**2.** Aplicá los cuatro métodos del @sec-metodos-simples a la serie `Q1915` y
+calculá el sMAPE de cada uno. ¿Cuál gana? ¿Coincide con lo que esperabas mirando
+el gráfico?
+
+**3.** El naive estacional necesita un período `m`. Aplicalo a una serie diaria
+del catálogo con `m = 1` (la convención de M4) y con `m = 7` (la del
+calendario), y comparalo con el naive simple. ¿Qué convención da mejor
+resultado? ¿Contradice eso la decisión de M4?
+
+**4.** Tomá 30 series mensuales con `cargar(frecuencia="mensual", n=30)` y
+calculá para cada una el sMAPE del naive. Graficá esos errores contra
+`serie.complejidad`. ¿Se ve la relación de la @fig-correlacion con solo 30
+series? ¿Qué dice eso sobre sacar conclusiones de muestras chicas?
+
+**5.** La @tbl-arima-vs-naive muestra que el ARIMA pierde contra el naive en las
+series diarias y horarias. Se podría concluir que el ARIMA es un mal modelo.
+Escribí en un párrafo por qué esa conclusión no se sigue, y qué habría que medir
+para sostenerla o descartarla.
+
+**6.** Elegí una decisión concreta de tu trabajo o tu campo que dependa de un
+pronóstico. Respondé las tres preguntas del @sec-utilidad. ¿Qué horizonte
+necesita? ¿Es simétrico el costo del error? ¿Alcanza un número?

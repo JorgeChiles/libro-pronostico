@@ -1,0 +1,7 @@
+# Predicción {#sec-prediccion}
+
+Un paso contra múltiples pasos; recursiva contra directa.
+
+::: {.callout-note appearance="simple"}
+Capítulo en preparación.
+:::

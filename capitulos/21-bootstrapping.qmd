@@ -1,0 +1,7 @@
+# Bootstrapping {#sec-bootstrapping}
+
+Remuestreo, incertidumbre e intervalos empíricos.
+
+::: {.callout-note appearance="simple"}
+Capítulo en preparación.
+:::

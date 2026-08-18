@@ -1,0 +1,7 @@
+# Visualización {#sec-visualizacion}
+
+Gráficos de línea, estacionales, de rezagos y de autocorrelación.
+
+::: {.callout-note appearance="simple"}
+Capítulo en preparación.
+:::

@@ -1,0 +1,7 @@
+# Evaluación {#sec-evaluacion}
+
+Partición temporal, backtesting, MAE, RMSE, MAPE, sMAPE, MASE; intervalos de predicción.
+
+::: {.callout-note appearance="simple"}
+Capítulo en preparación.
+:::
