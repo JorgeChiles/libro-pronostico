@@ -1,0 +1,7 @@
+# De la evidencia a la producción {#sec-produccion}
+
+Cotas de cordura, ensambles de semillas y qué se necesita para que un pronóstico se use.
+
+::: {.callout-note appearance="simple"}
+Capítulo en preparación.
+:::

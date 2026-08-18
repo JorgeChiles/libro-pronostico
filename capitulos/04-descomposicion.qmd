@@ -1,0 +1,7 @@
+# Descomposición {#sec-descomposicion}
+
+Tendencia, estacionalidad y residuo; medias móviles y STL.
+
+::: {.callout-note appearance="simple"}
+Capítulo en preparación.
+:::

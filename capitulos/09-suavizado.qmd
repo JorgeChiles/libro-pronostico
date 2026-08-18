@@ -1,0 +1,7 @@
+# Suavizado exponencial {#sec-suavizado}
+
+Simple, Holt, Holt-Winters y la familia ETS.
+
+::: {.callout-note appearance="simple"}
+Capítulo en preparación.
+:::

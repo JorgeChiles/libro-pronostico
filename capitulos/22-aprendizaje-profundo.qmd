@@ -1,0 +1,7 @@
+# Aprendizaje profundo {#sec-aprendizaje-profundo}
+
+Perceptrón, ConvNet 1D, LSTM y Transformer; cuándo conviene y cuándo no. Acá entra la evidencia sobre varianza por semilla.
+
+::: {.callout-note appearance="simple"}
+Capítulo en preparación.
+:::

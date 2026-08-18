@@ -1,0 +1,39 @@
+# Dependencias del libro, con versión fija para que la compilación sea
+# reproducible. Se actualizan a propósito, no por sorpresa.
+#
+# Nota sobre pandas: statsforecast todavía requiere pandas < 3. Cuando eso
+# cambie, se puede subir.
+
+# Núcleo
+numpy==2.3.5
+pandas==2.3.3
+pyarrow==25.0.1
+scipy==1.18.0
+
+# Parte I — modelos estadísticos
+statsmodels==0.14.6
+statsforecast==2.1.1
+
+# Parte II — aprendizaje automático
+scikit-learn==1.9.0
+
+# Gráficos
+matplotlib==3.11.1
+plotly==6.9.0
+
+# Widgets: shinylive compila la app a WebAssembly al compilar el libro
+shiny==1.7.0
+shinylive==0.8.11
+
+# Motor de ejecución de Quarto
+ipykernel==7.3.0
+jupyter-cache==1.0.1
+nbclient==0.11.0
+nbformat==5.11.1
+
+# Tablas con formato (pandas Styler)
+jinja2==3.1.6
+
+# Herramientas
+pytest==9.1.1
+openpyxl==3.1.5

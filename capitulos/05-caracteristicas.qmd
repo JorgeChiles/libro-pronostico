@@ -1,0 +1,7 @@
+# Características de series {#sec-caracteristicas}
+
+Fuerza de tendencia y estacionalidad, entropía y autocorrelación como descriptores. Acá entra el índice de complejidad estructural.
+
+::: {.callout-note appearance="simple"}
+Capítulo en preparación.
+:::

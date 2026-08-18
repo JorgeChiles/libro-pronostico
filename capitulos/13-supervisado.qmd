@@ -1,0 +1,7 @@
+# Aprendizaje supervisado {#sec-supervisado}
+
+Cómo se convierte una serie en un problema supervisado.
+
+::: {.callout-note appearance="simple"}
+Capítulo en preparación.
+:::

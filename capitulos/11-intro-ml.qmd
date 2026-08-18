@@ -1,0 +1,7 @@
+# Introducción al aprendizaje automático {#sec-intro-ml}
+
+Qué cambia respecto de la Parte I y por qué.
+
+::: {.callout-note appearance="simple"}
+Capítulo en preparación.
+:::

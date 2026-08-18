@@ -1,0 +1,7 @@
+# Modelos básicos {#sec-modelos-basicos}
+
+Regresión lineal y regularizada, KNN, SVR y árboles de decisión.
+
+::: {.callout-note appearance="simple"}
+Capítulo en preparación.
+:::

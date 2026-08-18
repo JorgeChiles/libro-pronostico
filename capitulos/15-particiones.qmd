@@ -1,0 +1,7 @@
+# Entrenamiento, validación y prueba {#sec-particiones}
+
+Para qué sirve cada conjunto.
+
+::: {.callout-note appearance="simple"}
+Capítulo en preparación.
+:::

@@ -1,0 +1,7 @@
+# La caja de herramientas {#sec-caja-de-herramientas}
+
+Naive, naive estacional, media y deriva; diagnóstico de residuos.
+
+::: {.callout-note appearance="simple"}
+Capítulo en preparación.
+:::

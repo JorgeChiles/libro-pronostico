@@ -1,0 +1,7 @@
+# Ingeniería de características {#sec-ingenieria}
+
+Rezagos, ventanas móviles, calendario, Fourier y codificación de categóricas.
+
+::: {.callout-note appearance="simple"}
+Capítulo en preparación.
+:::

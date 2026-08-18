@@ -1,0 +1,7 @@
+# Regresión para series {#sec-regresion}
+
+Tendencia, variables calendario, términos de Fourier y rezagos.
+
+::: {.callout-note appearance="simple"}
+Capítulo en preparación.
+:::

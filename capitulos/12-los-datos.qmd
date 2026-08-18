@@ -1,0 +1,7 @@
+# Los datos {#sec-los-datos}
+
+Tipos, escalas, limpieza y fuga de información.
+
+::: {.callout-note appearance="simple"}
+Capítulo en preparación.
+:::

@@ -1,0 +1,7 @@
+# Validación cruzada {#sec-validacion-cruzada}
+
+k-fold, por qué no sirve tal cual en series temporales, y validación cruzada temporal.
+
+::: {.callout-note appearance="simple"}
+Capítulo en preparación.
+:::

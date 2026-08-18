@@ -1,0 +1,242 @@
+# Decisiones técnicas
+
+Cada decisión con su alternativa y el motivo. Al final, las que hay que revisar
+antes de escribir más capítulos.
+
+Todo lo que dice "probado" acá se probó compilando y abriendo el resultado en un
+navegador, no leyendo documentación.
+
+---
+
+## 1 · Quarto para el libro — **confirmado**
+
+Es lo que usa fpp3, ejecuta Python nativamente y produce HTML navegable y PDF
+desde la misma fuente. Las alternativas reales eran Jupyter Book y mdBook.
+Jupyter Book 2 ya está sobre el mismo motor conceptual pero no tiene el
+ecosistema de extensiones que necesitamos —shinylive y quarto-live son
+extensiones de Quarto—, y mdBook no ejecuta código.
+
+**Con una salvedad importante que encontré probando**: la capa interactiva
+depende del runtime de OJS que Quarto trae adentro. La versión de Quarto no es
+un detalle de instalación, es una dependencia del libro. Está fijada en
+`1.9.38` —la que tenés instalada y la misma con la que está compilado el sitio
+oficial de `quarto-live`— en el `Makefile` y en el flujo de CI. Actualizar
+Quarto es un cambio que hay que probar, no aplicar de una.
+
+## 2 · La biblioteca principal de la Parte I — **decidido: reparto statsmodels / statsforecast**
+
+La propuesta inicial era `statsforecast` como biblioteca principal de la Parte I.
+Encontré un impedimento duro:
+
+> **`statsforecast` no existe en Pyodide.** Depende de código compilado que no
+> está portado a WebAssembly. Tampoco está `PyTorch`.
+
+Lo verifiqué contra el índice de paquetes de las dos distribuciones de Pyodide
+que usa el libro. Lo que **sí** está, y por lo tanto puede correr en el
+navegador:
+
+| Paquete | shinylive (Pyodide 0.27.7) | quarto-live (Pyodide 0.28.1) |
+|---|---|---|
+| `numpy`, `pandas`, `scipy` | sí | sí |
+| `statsmodels` | 0.14.4 | 0.14.4 |
+| `scikit-learn` | 1.6.1 | 1.7.0 |
+| `xgboost`, `lightgbm` | sí | sí |
+| `matplotlib` | sí | sí |
+| `plotly` | 5.23 | **no** (se puede instalar por micropip) |
+| `altair` | sí | sí |
+| **`statsforecast`** | **no** | **no** |
+| **`torch`** | **no** | **no** |
+
+Consecuencia: si `statsforecast` es la biblioteca del cuerpo del texto, **todos
+los widgets y todas las celdas editables tienen que reescribirse con
+`statsmodels`**. El lector aprendería el concepto con una biblioteca y lo
+tocaría con otra, en la misma página. Es el peor de los dos mundos: dobla la
+carga cognitiva y dobla el código a mantener.
+
+**El reparto adoptado** (aprobado el 17/08/2026), que es una división de tareas y
+no una exclusión:
+
+- **`statsmodels` para enseñar un modelo sobre una serie** (capítulos 4, 6, 8,
+  9, 10). Es lo que puede correr en el navegador, así que el código del texto y
+  el del widget son el mismo código. Además su API se parece a la notación de
+  los libros —`ExponentialSmoothing(trend="add", seasonal="add")`— y permite
+  fijar α, β y γ a mano, que es exactamente lo que el widget del capítulo 9
+  necesita para enseñar qué hace cada parámetro.
+- **`statsforecast` cuando el tema es escala o automatismo**: la selección
+  automática de ARIMA en el capítulo 10, la evaluación sobre muchas series del
+  capítulo 7, el capítulo 23 de selección de modelos a escala, y toda la Parte
+  III. Ahí su ventaja —velocidad y `AutoARIMA` con el algoritmo de
+  Hyndman-Khandakar— es el tema del capítulo, no un detalle.
+
+Esto tiene un beneficio secundario que ningún otro texto ofrece: **una tabla de
+equivalencias `statsmodels` ↔ `statsforecast` para el mismo modelo**, presentada
+donde se introduce la segunda biblioteca. Es información que hoy hay que
+reconstruir leyendo dos documentaciones.
+
+Y no compromete la fase 2: la aplicación web usa `statsforecast` en el servidor,
+que es donde su velocidad importa. El libro llega ahí igual, solo que declarando
+por qué.
+
+## 3 · `scikit-learn` y PyTorch en la Parte II — **confirmado, con un límite**
+
+`scikit-learn` sin objeciones: está en Pyodide, así que los capítulos 14 a 20
+pueden tener widgets y celdas editables.
+
+PyTorch para el capítulo 22 sin objeciones **como biblioteca**, pero con una
+consecuencia que conviene aceptar de entrada: **el capítulo de aprendizaje
+profundo no puede tener celdas ejecutables ni widgets**. No hay PyTorch en
+WebAssembly. Ese capítulo va con resultados precomputados y figuras
+interactivas generadas al compilar.
+
+No es una pérdida grande. Es justamente el capítulo donde el argumento fuerte
+del libro es empírico y viene de tu tesis: en el 68 % de las series el mejor
+modelo neuronal cambia solo al cambiar la semilla. Eso se muestra con datos ya
+medidos, no ajustando una red en el navegador del lector.
+
+## 4 · Los gráficos: Plotly, con un envoltorio propio — **confirmado con arreglo**
+
+Plotly, y en la Parte II también Altair donde convenga.
+
+Pero hay un problema concreto que encontré y hubo que resolver: Quarto inserta
+las figuras de Plotly a través de `requirejs`, y pide el script con una URL sin
+extensión (`cdn.plot.ly/plotly-3.7.0.min`) que el CDN responde con **503**. En
+una página cualquiera no se nota. En una página que además tiene celdas
+editables, el `requirejs` colgado interfiere con el runtime que las monta.
+
+Por eso las figuras del libro se insertan con `libro.graficos.mostrar()`, que
+escribe el HTML de la figura, carga `plotly.js` una vez por página con una
+etiqueta `<script>` normal y aplica el aspecto común. Efecto lateral bueno:
+un solo lugar donde está definida la paleta y la configuración de la barra de
+herramientas de todo el libro.
+
+## 5 · GitHub Pages — **confirmado, con un dato de peso**
+
+Compilación automática en cada empujón a `main` y publicación en Pages. El flujo
+está en `.github/workflows/publicar.yml` y hace tres cosas antes de publicar:
+corre las pruebas del módulo de datos, compila el libro —si un capítulo no
+corre, no se publica— e informa el peso del sitio.
+
+El dato de peso, medido: **el sitio compilado pesa 103 MB, de los cuales 99 MB
+son los assets de shinylive** (el intérprete de Python compilado a WebAssembly y
+sus paquetes). Tres cosas que conviene saber:
+
+- Está muy por debajo del límite de 1 GB de GitHub Pages.
+- Es un **costo fijo, no por widget**: los assets se copian una vez para todo el
+  sitio. El segundo widget y el séptimo no agregan nada. Así que la regla "usar
+  widgets con cuidado" no es por peso del repositorio.
+- Lo que sí es por lector es la **descarga en el navegador**, y eso sí depende
+  de la página: solo las páginas con widget o con celda editable bajan el
+  intérprete. Ahí tu advertencia se sostiene, y la resolvemos poniendo widgets
+  solo en los siete capítulos de la lista.
+
+## 6 · El entorno de Python — **decidido**
+
+Entorno virtual propio en `~/.venvs/libro`, **fuera de OneDrive**. Dos razones:
+un entorno virtual son decenas de miles de archivos chicos y OneDrive los
+sincroniza uno por uno; y el entorno `Maestria2025` de la tesis tiene resultados
+validados que no hay que arriesgar instalando cosas nuevas encima.
+
+Python 3.13. Las versiones están fijas en `requisitos.txt`.
+
+**Una restricción heredada**: `statsforecast` todavía exige `pandas < 3`, así que
+el libro usa pandas 2.3.3. Conviene saberlo antes de escribir código que use
+API de pandas 3.
+
+Compilar pasa siempre por `make libro` y no por `quarto render` a mano, porque
+Quarto necesita tres cosas del entorno que `_quarto.yml` no puede fijar:
+`QUARTO_PYTHON`, el `PATH` —el filtro de shinylive invoca el ejecutable
+`shinylive` por nombre— y el kernel `libro`.
+
+## 7 · Los datos: catálogo en el repositorio, caché afuera — **decidido**
+
+Tres niveles, y el libro entero compila con el primero:
+
+1. **En el repositorio** (9 MB): `metadatos.parquet` con una fila por cada una de
+   las 99.935 series —descriptores, índice de complejidad, cuartil de
+   dificultad, clúster, entropías, error del naive— y el catálogo curado de 33
+   series con sus valores completos (126 KB). Sin conexión y sin descargas.
+2. **Caché local** en `~/.cache/libro-pronostico/`: las 100.000 series en
+   parquet, 107 MB. La construye `make datos` desde los CSV de la tesis en unos
+   minutos. Es opcional: sirve para que el lector se salga del catálogo.
+3. **Descarga**, una sola vez, desde el repositorio oficial de M4, si no hay
+   nada de lo anterior.
+
+Por qué parquet en formato largo y no los CSV originales: los CSV de M4 vienen
+transpuestos —una serie por fila, una columna por observación—, así que sacar una
+serie mensual obliga a leer 215 MB. En parquet largo, las seis frecuencias juntas
+pesan 107 MB contra 415 MB, y leer una serie cuesta milisegundos.
+
+**99.935 y no 100.000**: son las que tienen descriptores calculados. El pipeline
+de la tesis descarta 65 series semanales por ser demasiado cortas.
+
+## 8 · Cómo se eligen las series de ejemplo — **implementado**
+
+Con el índice de complejidad, como pediste, y con criterios escritos en código
+(`libro/_construir_catalogo.py`) en vez de a dedo. Para cada fenómeno hay un
+filtro sobre los descriptores y un puntaje que ordena qué tan inequívocamente
+la serie lo ilustra. Después se completa para que los cuatro cuartiles de
+dificultad tengan al menos cinco series.
+
+Resultado: 33 series, 10 fenómenos, las seis frecuencias, los cuatro cuartiles.
+
+    cargar(fenomeno="quiebre-de-nivel")   # M32692, mensual, 318 obs
+    cargar(dificultad="alta")             # y sale una difícil de verdad
+    cargar(fenomeno="serie-larga")        # D4099, 9.919 observaciones
+    cargar(fenomeno="serie-corta")        # Q23425, 16 observaciones
+
+## 9 · La estacionalidad es la de M4, no la natural — **decidido y probado**
+
+M4 declara `Yearly 1 · Quarterly 4 · Monthly 12 · Weekly 1 · Daily 1 ·
+Hourly 24`. Es decir, **trata las series semanales y diarias como no
+estacionales**, aunque lo natural sería 52 y 7.
+
+El módulo expone las dos: `periodo_estacional` (M4) y `periodo_natural`. Hay una
+prueba automática que falla si alguien las confunde, porque es la clase de error
+que invalida silenciosamente cualquier comparación con los resultados publicados
+de la competencia —está documentado en tu propio
+`OBSERVACIONES_PARA_EL_PAPER.md`, sección 5.1— y da además material de primera
+para el capítulo 7.
+
+---
+
+## 10 · Dónde vive el repositorio — **resuelto**
+
+En `~/Developer/libro-pronostico`, **fuera de OneDrive**. Un repositorio de Git
+sincronizado por OneDrive puede corromperse si dos máquinas escriben el
+directorio `.git` a la vez, y `_freeze/` genera muchos archivos chicos que
+OneDrive sincroniza de a uno.
+
+OneDrive sigue siendo la casa de los datos de la tesis: el módulo los busca ahí
+para construir la caché.
+
+## 11 · Publicación: GitHub Pages, no Squarespace — **decidido**
+
+El libro se publica en **GitHub Pages**, gratis, desde el mismo repositorio y en
+cada empujón a `main`. Squarespace no sirve para alojarlo, y conviene tener claro
+por qué antes de intentarlo:
+
+- No permite subir un sitio estático arbitrario de cientos de archivos. Está
+  pensado para páginas editadas en su propio editor.
+- Los widgets necesitan registrar un **service worker en la raíz del dominio**.
+  Squarespace no da control sobre eso, así que los widgets no funcionarían.
+- El sitio compilado pesa ~104 MB, sobre todo por el intérprete de Python
+  compilado a WebAssembly. No es lo que Squarespace espera alojar.
+
+Lo que **sí** se puede hacer, y es lo mejor de los dos mundos: si el dominio está
+comprado o administrado en Squarespace, se apunta un subdominio —del estilo
+`libro.tudominio.com`— a GitHub Pages con un registro `CNAME` en el panel de DNS.
+El libro se sirve desde GitHub con la URL propia. Eso es un cambio de DNS, no una
+migración del sitio.
+
+---
+
+## Lo que queda por decidir
+
+1. **La versión en PDF.** Está prevista pero no probada. Los widgets y las
+   celdas editables no existen en PDF: aparecen como código estático. Hay que
+   decidir si en el PDF se reemplazan por una figura equivalente —más trabajo,
+   mejor resultado— o si se deja el código a la vista.
+
+2. **El dominio propio.** Si el libro va a vivir en `libro.tudominio.com` en vez
+   de en `jorgechiles.github.io/...`, hay que agregar el archivo `CNAME` al
+   repositorio y el registro de DNS en Squarespace.

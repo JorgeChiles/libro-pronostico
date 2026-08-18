@@ -1,0 +1,7 @@
+# Caso de estudio: la competencia M4 {#sec-caso-m4}
+
+La competencia completa: métricas oficiales, benchmarks y los 26 modelos evaluados.
+
+::: {.callout-note appearance="simple"}
+Capítulo en preparación.
+:::

@@ -1,0 +1,80 @@
+name: Compilar y publicar el libro
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  compilar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Quarto se fija a la versión con la que se probó el libro: la capa
+      # interactiva depende de su runtime de OJS y no conviene que cambie sola.
+      - uses: quarto-dev/quarto-actions/setup@v2
+        with:
+          version: 1.9.38
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Instalar dependencias
+        run: |
+          python -m pip install --upgrade pip wheel
+          python -m pip install -r requisitos.txt
+          python -m ipykernel install --user --name libro --display-name "Python (libro)"
+
+      # Los assets de shinylive pesan ~400 MB y no cambian entre compilaciones.
+      - name: Caché de los assets de shinylive
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/shinylive
+          key: shinylive-${{ hashFiles('requisitos.txt') }}
+
+      - name: Bajar los assets de shinylive
+        run: shinylive assets download
+
+      # Si los datos del libro están mal, no se publica.
+      - name: Probar el módulo de datos
+        run: python -m pytest pruebas -q
+
+      - name: Compilar el libro
+        env:
+          QUARTO_PYTHON: python
+        run: quarto render --to live-html
+
+      # Aviso temprano: si el peso del sitio se descontrola, conviene saberlo.
+      - name: Informar el peso del sitio
+        run: |
+          du -sh _site
+          du -sh _site/site_libs/* | sort -rh | head -5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  publicar:
+    needs: compilar
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.despliegue.outputs.page_url }}
+    steps:
+      - id: despliegue
+        uses: actions/deploy-pages@v4
