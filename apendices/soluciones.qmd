@@ -1273,6 +1273,292 @@ el signo que devuelve la descomposición es arbitrario: depende de detalles
 numéricos de la implementación y puede cambiar entre versiones de la biblioteca sin
 que nada avise.
 
+## Capítulo 6 · La caja de herramientas {#sec-soluciones-06}
+
+```{python}
+#| echo: false
+from statsmodels.stats.diagnostic import acorr_ljungbox
+from statsmodels.tsa.seasonal import seasonal_decompose
+
+from libro.datos import catalogo
+
+
+def autocorrelacion(x, k):
+    x = np.asarray(x, float)
+    mu = x.mean()
+    den = np.sum((x - mu) ** 2)
+    return float(np.sum((x[k:] - mu) * (x[:-k] - mu)) / den) if den else 0.0
+
+
+def limite_estacionalidad(x, m, como_m4=True):
+    """Devuelve (r_m, límite) de la @eq-test-estacionalidad."""
+    suma = autocorrelacion(x, 1) if como_m4 else autocorrelacion(x, 1) ** 2
+    for i in range(2, m):
+        suma += autocorrelacion(x, i) ** 2
+    return abs(autocorrelacion(x, m)), 1.645 * np.sqrt((1 + 2 * suma) / len(x))
+
+
+def indices_estacionales(x, m):
+    r_m, limite = limite_estacionalidad(x, m) if m > 1 and len(x) >= 3 * m else (0, 1)
+    if m <= 1 or r_m <= limite or np.any(np.asarray(x) <= 0):
+        return np.ones(max(m, 1))
+    d = seasonal_decompose(x, model="multiplicative", period=m,
+                          extrapolate_trend="freq")
+    si = np.asarray(d.seasonal[:m], float)
+    if not np.all(np.isfinite(si)) or np.any(si <= 0):
+        return np.ones(m)
+    return si * m / si.sum()
+
+
+def naive2(y, h, m):
+    y = np.asarray(y, float)
+    si = indices_estacionales(y, m)
+    rep = np.tile(si, len(y) // len(si) + 1)[: len(y)]
+    des = y / rep
+    factores = np.array([si[(len(y) + i) % len(si)] for i in range(h)])
+    return np.repeat(des[-1], h) * factores
+```
+
+### Ejercicio 1
+
+```{python}
+s = cargar("Q1915")
+y = s.entrenamiento.to_numpy()
+residuos = y - y.mean()
+
+prueba = acorr_ljungbox(residuos, lags=[8], return_df=True)
+print(f"media de los residuos : {residuos.mean():.3e}")
+print(f"Ljung-Box, p-valor    : {prueba['lb_pvalue'].iloc[0]:.3e}")
+```
+
+La media de los residuos es cero hasta el error de redondeo, y la autocorrelación es
+abrumadora.
+
+Y acá está lo interesante: **que la media sea cero no dice nada en este caso**,
+porque es cierto *por construcción*. Los residuos del método de la media son
+$y_t - \bar{y}$, y la suma de las desviaciones respecto de la media es cero por
+definición. No es evidencia de que el método esté bien calibrado: es una identidad
+algebraica.
+
+La segunda condición sí informa, y dice que el método es malo para esta serie.
+`Q1915` tiene tendencia clara, así que los residuos respecto de la media son
+negativos al principio y positivos al final: una racha larga de cada signo, que es la
+forma más extrema de autocorrelación positiva. Toda la tendencia quedó sin modelar y
+está íntegra en el residuo.
+
+La lección para el @sec-diagnostico-residuos: **la primera condición hay que
+verificarla, pero no siempre es informativa**. En cualquier método que estime un
+nivel minimizando errores cuadrados, la media de los residuos es cero
+automáticamente. La condición que discrimina es la segunda.
+
+### Ejercicio 2
+
+```{python}
+#| label: tbl-sol-06-2
+#| tbl-cap: "Prueba de estacionalidad aplicada a mano sobre Q22252, con las dos versiones de la fórmula."
+s = cargar("Q22252")
+y, m = s.entrenamiento.to_numpy(), s.periodo_estacional
+
+filas = []
+for etiqueta, como_m4 in (("como el código de M4", True), ("fórmula de libro", False)):
+    r_m, limite = limite_estacionalidad(y, m, como_m4)
+    filas.append({
+        "versión": etiqueta,
+        "r_m": round(r_m, 4),
+        "límite": round(limite, 4),
+        "veredicto": "estacional" if r_m > limite else "no estacional",
+    })
+
+pd.DataFrame(filas).set_index("versión")
+```
+
+```{python}
+print(f"m = {m}, T = {len(y)}")
+for k in range(1, m + 1):
+    print(f"  r_{k} = {autocorrelacion(y, k):+.4f}")
+```
+
+La autocorrelación al rezago estacional es cercana a 0,87 y el límite queda alrededor
+de 0,33, así que la serie pasa la prueba con mucho margen. No es un caso de borde: es
+inequívocamente estacional, y las dos versiones de la fórmula coinciden.
+
+Los rezagos intermedios explican de dónde sale el límite. La @eq-test-estacionalidad
+infla la banda cuando los rezagos anteriores tienen autocorrelación alta, y en esta
+serie la tienen. Es una corrección sensata: si la serie es persistente, hace falta un
+$r_m$ más grande para atribuirlo a estacionalidad y no a la persistencia general.
+
+### Ejercicio 3
+
+```{python}
+#| label: tbl-sol-06-3
+#| tbl-cap: "Naive2 contra naive estacional en las series estacionales del catálogo."
+filas = []
+for s in cargar(n=len(catalogo())):
+    if s.periodo_estacional <= 1:
+        continue
+    y_s, te_s = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    h_s, m_s = s.horizonte, s.periodo_estacional
+    e_naive2 = smape(te_s, naive2(y_s, h_s, m_s))
+    e_snaive = smape(te_s, np.array([y_s[-m_s + (i % m_s)] for i in range(h_s)]))
+    filas.append({
+        "serie": s.id,
+        "Naive2": round(e_naive2, 2),
+        "naive estacional": round(e_snaive, 2),
+        "gana": "Naive2" if e_naive2 < e_snaive else "naive estacional",
+    })
+
+comparacion = pd.DataFrame(filas).set_index("serie")
+comparacion["gana"].value_counts().rename("series").to_frame()
+```
+
+```{python}
+print(comparacion[["Naive2", "naive estacional"]].agg(["mean", "median"]).round(2).to_string())
+```
+
+`Naive2` gana en la mayoría, y con mejor promedio y mejor mediana.
+
+Sobre por qué M4 lo eligió como referencia, hay dos razones y las dos importan.
+
+**La primera es que es más difícil de superar.** Una competencia con un benchmark
+flojo produce resultados poco informativos: si el 90 % de los métodos le gana, el
+ranking no distingue nada. `Naive2` deja a la mayoría de los métodos por encima de
+1,000 —en la evaluación de 26 modelos que acompaña al libro, solo seis lo
+superaron—, lo que hace que superarlo signifique algo.
+
+**La segunda es que trata a todas las series con el mismo criterio.** El naive
+estacional necesita que se le declare un $m$, y en las series no estacionales no
+tiene sentido. `Naive2` decide por sí mismo, con la @eq-test-estacionalidad, si
+corresponde desestacionalizar. Eso lo hace aplicable a las 100.000 series sin
+intervención, que es un requisito práctico cuando hay que evaluar 61 métodos.
+
+### Ejercicio 4
+
+```{python}
+#| label: tbl-sol-06-4
+#| tbl-cap: "Factor de ancho del intervalo de la deriva comparado con el del naive, para T = 100."
+T = 100
+
+filas = []
+for h in (1, 6, 12, 18, 36):
+    factor_naive = np.sqrt(h)
+    factor_deriva = np.sqrt(h * (1 + h / (T - 1)))
+    filas.append({
+        "h": h,
+        "factor naive": round(factor_naive, 3),
+        "factor deriva": round(factor_deriva, 3),
+        "% más ancho": round(100 * (factor_deriva / factor_naive - 1), 1),
+    })
+
+pd.DataFrame(filas).set_index("h")
+```
+
+A un paso el intervalo de la deriva es medio punto porcentual más ancho que el del
+naive: la diferencia es despreciable. A dieciocho pasos es casi un 9 % más ancho, y a
+treinta y seis, un 17 %.
+
+El término extra $h/(T-1)$ de la @eq-intervalo-deriva es la incertidumbre sobre la
+**pendiente**, y su efecto crece con dos cosas: con el horizonte, porque un error en
+la pendiente se multiplica por $h$; y a la inversa con el largo de la serie, porque
+con más datos la pendiente se estima mejor.
+
+Cuándo importa: **cuando el horizonte es grande respecto del largo de la serie**. Con
+$T = 100$ y $h = 18$ el efecto es moderado. Con una serie corta de 20 observaciones y
+un horizonte de 6 —el caso de las series anuales de M4— el término extra es mucho más
+relevante, y omitirlo produce intervalos claramente demasiado angostos.
+
+### Ejercicio 5
+
+```{python}
+#| label: tbl-sol-06-5
+#| tbl-cap: "Los cinco métodos sobre M32692, la serie con quiebre de nivel."
+s = cargar("M32692")
+y, te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+h, m = s.horizonte, s.periodo_estacional
+
+pronosticos = {
+    "naive": np.repeat(y[-1], h),
+    "naive estacional": np.array([y[-m + (i % m)] for i in range(h)]),
+    "media": np.repeat(y.mean(), h),
+    "deriva": y[-1] + (y[-1] - y[0]) / (len(y) - 1) * np.arange(1, h + 1),
+    "Naive2": naive2(y, h, m),
+}
+
+pd.DataFrame([
+    {"método": nombre, "sMAPE": round(smape(te, p), 2)}
+    for nombre, p in pronosticos.items()
+]).set_index("método").sort_values("sMAPE")
+```
+
+```{python}
+print(f"media de toda la serie : {y.mean():.0f}")
+print(f"último valor observado : {y[-1]:.0f}")
+print(f"promedio del período de prueba: {te.mean():.0f}")
+```
+
+Gana `Naive2`, y el naive estacional queda segundo. Los dos modelan la
+estacionalidad, que en esta serie es fuerte.
+
+La media es especialmente mala por una razón que los números muestran de inmediato:
+**está anclada a un nivel que la serie abandonó**. El promedio de toda la serie es
+casi tres veces el último valor observado, porque la serie pasó la mayor parte de su
+historia en un nivel alto y después cayó. La media pronostica el nivel viejo, que ya
+no existe.
+
+Es el peor caso posible para cualquier método que use todo el pasado con el mismo
+peso, y explica por qué un quiebre de nivel es tan destructivo: **invalida los datos
+anteriores al quiebre**. Después de un quiebre, la serie efectivamente empieza de
+nuevo, y usar la historia previa no es solo inútil, es contraproducente. La deriva
+falla por la razón simétrica: calcula su pendiente entre la primera y la última
+observación, que están a los dos lados del quiebre, así que extrapola una caída que
+en realidad fue un salto puntual.
+
+### Ejercicio 6
+
+El MASE del @sec-metricas divide el error por
+
+$$
+\frac{1}{T-m}\sum_{t=m+1}^{T} \left| y_t - y_{t-m} \right|
+$$
+
+Con $m = 1$ eso es $\frac{1}{T-1}\sum_{t=2}^{T} |y_t - y_{t-1}|$, es decir el
+promedio de los valores absolutos de las diferencias. Y como los residuos del naive
+**son** las diferencias, ese denominador es exactamente el **error absoluto medio del
+naive dentro de la muestra**.
+
+```{python}
+s = cargar("M35927")
+y = s.entrenamiento.to_numpy()
+residuos = np.diff(y)          # los residuos del naive
+
+escala_mase = np.mean(np.abs(y[1:] - y[:-1]))
+mae_naive = np.mean(np.abs(residuos))
+
+print(f"escala del MASE con m = 1        : {escala_mase:.4f}")
+print(f"MAE del naive dentro de la muestra: {mae_naive:.4f}")
+print(f"¿son el mismo número? {np.isclose(escala_mase, mae_naive)}")
+print()
+print(f"desviación estándar de los residuos: {residuos.std(ddof=1):.4f}")
+print(f"cociente desvío / MAE              : "
+      f"{residuos.std(ddof=1) / mae_naive:.4f}")
+print(f"valor que tendría con residuos normales (√(π/2)): "
+      f"{np.sqrt(np.pi / 2):.4f}")
+```
+
+Sobre la segunda parte: la desviación estándar **no** es el mismo número, y no tiene
+por qué serlo. Son dos medidas distintas de dispersión. La desviación estándar
+promedia los errores **al cuadrado** y después toma raíz, así que le da más peso a los
+residuos grandes; el error absoluto medio los promedia tal cual.
+
+Para residuos con distribución normal el cociente entre las dos es
+$\sqrt{\pi/2} \approx 1{,}253$. Acá el cociente es algo mayor, lo que indica que los
+residuos de esta serie tienen colas más gruesas que una normal: hay más residuos
+grandes de los que la normal predice.
+
+Ese detalle no es una curiosidad. Es la misma propiedad que explica la subcobertura
+de la @tbl-cobertura-metodos: las fórmulas de intervalo usan la desviación estándar
+suponiendo normalidad, y cuando las colas son más gruesas, el intervalo resulta
+demasiado angosto justo en los casos que importan.
+
 ## Capítulo 7 · Evaluación {#sec-soluciones-07}
 
 ```{python}
