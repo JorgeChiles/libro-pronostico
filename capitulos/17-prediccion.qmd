@@ -1,7 +1,419 @@
 # Predicción {#sec-prediccion}
 
-Un paso contra múltiples pasos; recursiva contra directa.
+```{python}
+#| echo: false
+import warnings
 
-::: {.callout-note appearance="simple"}
-Capítulo en preparación.
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import Ridge
+from sklearn.multioutput import MultiOutputRegressor
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+
+from libro.datos import cargar, catalogo
+from libro.graficos import COLORES, mostrar
+
+warnings.simplefilter("ignore")
+
+
+def smape(real, pron):
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    den = np.abs(real) + np.abs(pron)
+    den[den == 0] = 1e-9
+    return 200 * np.mean(np.abs(real - pron) / den)
+```
+
+Desde el @sec-supervisado, cada vez que este libro pronosticó con un modelo de aprendizaje
+automático usó la misma función:
+
+```python
+def pronosticar_recursivo(modelo, y, p, h):
+    historia = list(y)
+    salida = []
+    for _ in range(h):
+        valor = float(modelo.predict([historia[-p:]])[0])
+        salida.append(valor)
+        historia.append(valor)
+    return np.array(salida)
+```
+
+Ese `historia.append(valor)` es una decisión que nunca se justificó. El modelo predice un paso, y
+para predecir el segundo se le da de comer **su propia predicción** como si fuera un dato. Hay al
+menos dos alternativas, y este capítulo las mide.
+
+## El problema {#sec-problema-multipaso}
+
+Un modelo supervisado como el de la @eq-ventana aprende una función de $p$ rezagos a un número.
+Lo que se pide es un vector de $h$ números. Hay tres maneras de salvar esa distancia.
+
+**Recursiva.** Se ajusta un solo modelo a un paso y se lo itera, alimentándolo con sus propias
+predicciones:
+
+$$
+\hat{y}_{t+1} = \hat{f}\!\left( y_t, \dots, y_{t-p+1} \right),
+\qquad
+\hat{y}_{t+k} = \hat{f}\!\left( \hat{y}_{t+k-1}, \dots, \hat{y}_{t+k-p} \right)
+$$ {#eq-recursiva}
+
+con la convención de que $\hat{y}_s = y_s$ cuando $s \leq t$. Es un ajuste y $h$ evaluaciones.
+
+**Directa.** Se ajustan $h$ modelos distintos, uno por horizonte, cada uno entrenado para saltar
+exactamente $k$ pasos:
+
+$$
+\hat{y}_{t+k} = \hat{f}_k\!\left( y_t, \dots, y_{t-p+1} \right),
+\qquad k = 1, \dots, h
+$$ {#eq-directa}
+
+Ninguna predicción entra como entrada de otra. Son $h$ ajustes independientes.
+
+**Multisalida.** Se ajusta un modelo que devuelve el vector completo de golpe:
+
+$$
+\left( \hat{y}_{t+1}, \dots, \hat{y}_{t+h} \right)
+= \hat{F}\!\left( y_t, \dots, y_{t-p+1} \right)
+$$ {#eq-multisalida}
+
+Es un ajuste, y a diferencia de la @eq-directa el modelo *podría* aprovechar que los $h$ valores
+están correlacionados entre sí [@bontempi2013].
+
+La literatura les puso nombre y las comparó sistemáticamente. @bentaieb2012 revisan estas tres
+más dos híbridos —*DirRec*, que agrega a las entradas del modelo $k$ las predicciones de los
+anteriores, y las estrategias de rectificación— y @marcellino2006 hicieron la comparación clásica
+en econometría, sobre 170 series macroeconómicas.
+
+## Qué se supone que pasa {#sec-teoria-multipaso}
+
+El argumento a favor de cada una es distinto, y los dos son correctos.
+
+**Contra la recursiva: acumula el error.** Cada paso alimenta al siguiente con un valor que ya
+tiene error, y si el modelo está mal especificado el sesgo se propaga y se amplifica. Es el
+argumento que se cita más seguido, y en la @eq-recursiva se ve de dónde sale: para $k > p$ las
+$p$ entradas son **todas** predicciones, sin un solo dato real.
+
+**A favor de la recursiva: usa todos los datos para un solo modelo.** La @eq-directa entrena el
+modelo del paso $k$ con las filas que quedan al desplazar el objetivo $k$ lugares, así que **el
+modelo del último horizonte es el que tiene menos datos justo cuando la tarea es más difícil.** Y
+$h$ ajustes independientes son $h$ oportunidades independientes de sobreajustar, con todo lo que
+el @sec-sobreajuste midió al respecto.
+
+Es el compromiso de la @eq-sesgo-varianza otra vez, movido un nivel hacia arriba: **la recursiva
+apuesta a menos varianza aceptando sesgo, y la directa a menos sesgo aceptando varianza.** Y como
+en el @sec-sobreajuste, cuál gana no se decide con el argumento sino midiendo.
+
+## Medido {#sec-medido-multipaso}
+
+```{python}
+#| echo: false
+def ventana(y, p, k=1):
+    """X con p rezagos; el objetivo es el valor k pasos después del final de la ventana."""
+    y = np.asarray(y, float)
+    X, objetivo = [], []
+    for i in range(p, len(y) - k + 1):
+        X.append(y[i - p:i])
+        objetivo.append(y[i + k - 1])
+    return np.array(X), np.array(objetivo)
+
+
+def ventana_multisalida(y, p, h):
+    y = np.asarray(y, float)
+    X, objetivo = [], []
+    for i in range(p, len(y) - h + 1):
+        X.append(y[i - p:i])
+        objetivo.append(y[i:i + h])
+    return np.array(X), np.array(objetivo)
+
+
+def estrategia_recursiva(y, p, h, construir):
+    X, objetivo = ventana(y, p, 1)
+    modelo = construir().fit(X, objetivo)
+    historia, salida = list(y), []
+    for _ in range(h):
+        salida.append(float(modelo.predict([historia[-p:]])[0]))
+        historia.append(salida[-1])
+    return np.array(salida), 1, len(X)
+
+
+def estrategia_directa(y, p, h, construir):
+    salida, filas_minimas = [], 10 ** 9
+    for k in range(1, h + 1):
+        X, objetivo = ventana(y, p, k)
+        filas_minimas = min(filas_minimas, len(X))
+        if len(X) < 3:
+            salida.append(salida[-1] if salida else y[-1])
+            continue
+        salida.append(float(construir().fit(X, objetivo).predict([y[-p:]])[0]))
+    return np.array(salida), h, filas_minimas
+
+
+def estrategia_multisalida(y, p, h, construir):
+    X, objetivo = ventana_multisalida(y, p, h)
+    if len(X) < 3:
+        return np.repeat(y[-1], h), 1, len(X)
+    modelo = MultiOutputRegressor(construir()).fit(X, objetivo)
+    return np.asarray(modelo.predict([y[-p:]])[0]), h, len(X)
+
+
+ESTRATEGIAS = {
+    "recursiva": estrategia_recursiva,
+    "directa": estrategia_directa,
+    "multisalida": estrategia_multisalida,
+}
+MODELOS = {
+    "Ridge": lambda: make_pipeline(StandardScaler(), Ridge(alpha=1.0)),
+    "bosque aleatorio": lambda: RandomForestRegressor(
+        n_estimators=60, random_state=0, n_jobs=1
+    ),
+}
+
+_cat = catalogo().set_index("serie")
+_filas = []
+_pasos = {mo: {es: [] for es in ESTRATEGIAS} for mo in MODELOS}
+
+for _sid in _cat.index:
+    _s = cargar(_sid)
+    _ytr, _yte = _s.entrenamiento.to_numpy(), _s.prueba.to_numpy()
+    _h, _m = _s.horizonte, _s.periodo_estacional
+    _p = min(max(_m, 4), 12)
+    if len(_ytr) < _p + _h + 8:
+        continue
+    for _mo, _construir in MODELOS.items():
+        _fila = {"serie": _sid, "modelo": _mo, "n": len(_ytr), "h": _h, "p": _p,
+                 "n / h": len(_ytr) / _h, "fenomeno": _cat.loc[_sid, "fenomeno"]}
+        for _es, _fn in ESTRATEGIAS.items():
+            _pron, _ajustes, _fmin = _fn(_ytr, _p, _h, _construir)
+            _fila[_es] = smape(_yte, _pron)
+            _fila[_es + " ajustes"] = _ajustes
+            _fila[_es + " filas"] = _fmin
+            if len(_yte) >= 8:
+                _pasos[_mo][_es].append(
+                    200 * np.abs(_yte[:8] - _pron[:8])
+                    / (np.abs(_yte[:8]) + np.abs(_pron[:8]))
+                )
+        _filas.append(_fila)
+
+COMPARACION = pd.DataFrame(_filas)
+NOMBRES = list(ESTRATEGIAS)
+```
+
+```{python}
+#| label: tbl-estrategias
+#| tbl-cap: "Las tres estrategias sobre las series del catálogo que admiten las tres, con ventana de $p = \\min(\\max(m, 4), 12)$ rezagos y dos modelos de capacidad muy distinta."
+filas = []
+for modelo in MODELOS:
+    sub = COMPARACION[COMPARACION["modelo"] == modelo]
+    ganadora = sub[NOMBRES].idxmin(axis=1).value_counts()
+    for estrategia in NOMBRES:
+        filas.append({
+            "modelo": modelo, "estrategia": estrategia,
+            "sMAPE medio": sub[estrategia].mean(),
+            "sMAPE mediano": sub[estrategia].median(),
+            f"gana en (de {len(sub)})": int(ganadora.get(estrategia, 0)),
+        })
+
+pd.DataFrame(filas).set_index(["modelo", "estrategia"]).round(2)
+```
+
+Con el modelo lineal es prácticamente un empate: la recursiva gana en 14 series de 31 y la directa
+en 13, y las medianas se dan vuelta respecto de las medias —8,60 contra 8,39 a favor de la
+directa—. Con el bosque aleatorio no hay empate: **la recursiva gana en 25 de 31 series** y baja
+el sMAPE medio de 19,31 a 13,31.
+
+La diferencia entre los dos modelos es la primera conclusión del capítulo, y es la de siempre en
+la Parte II: **cuanta más capacidad tiene el modelo, más cara sale la estrategia directa.** Un
+bosque aleatorio ajustado $h$ veces sobre subconjuntos cada vez más chicos sobreajusta $h$ veces
+por separado. Ridge no puede hacer tanto daño.
+
+### El error no se acumula como dice el argumento {#sec-acumulacion}
+
+```{python}
+#| label: fig-por-paso
+#| fig-cap: "sMAPE promedio en cada uno de los ocho primeros pasos del horizonte. La recursiva es la que menos se degrada, con los dos modelos."
+fig = go.Figure()
+estilos = {"recursiva": None, "directa": "dash", "multisalida": "dot"}
+colores = {"Ridge": COLORES["observado"], "bosque aleatorio": COLORES["prueba"]}
+for modelo in MODELOS:
+    for estrategia in NOMBRES:
+        fig.add_trace(go.Scatter(
+            x=np.arange(1, 9),
+            y=np.mean(_pasos[modelo][estrategia], axis=0),
+            mode="lines+markers", name=f"{modelo} · {estrategia}",
+            line=dict(color=colores[modelo], dash=estilos[estrategia], width=2),
+            marker=dict(size=5),
+        ))
+fig.update_xaxes(title="paso del horizonte", dtick=1)
+mostrar(fig, alto=430, titulo_y="sMAPE promedio")
+```
+
+La @fig-por-paso contradice el argumento más citado contra la estrategia recursiva.
+
+**En el paso 1 la recursiva y la directa coinciden por construcción** —son literalmente el mismo
+modelo ahí— y a partir del paso 2 la que **menos** se degrada es la recursiva. Con Ridge va de
+9,06 a 14,22 en ocho pasos y la directa de 9,06 a 17,34. Con el bosque la recursiva va de 11,22 a
+11,26 —prácticamente plana— y la directa de 11,22 a 20,24.
+
+La acumulación de error de la @eq-recursiva es real, y **el otro efecto es más grande**. Al pasar
+del horizonte 1 al 8, el modelo directo del paso 8 pierde 7 filas de entrenamiento y además tiene
+que aprender un salto más largo con los mismos predictores. Lo primero es un problema de
+estimación y lo segundo de dificultad intrínseca; los dos crecen con $k$, y juntos pesan más que
+la propagación.
+
+La multisalida arranca peor desde el paso 1, y ahí no hay misterio: `MultiOutputRegressor` ajusta
+un estimador independiente por salida, así que en esta implementación **no aprovecha la
+correlación entre horizontes** que era su argumento a favor. Para aprovecharla hace falta un
+modelo genuinamente multivariado, y de eso trata el @sec-aprendizaje-profundo.
+
+### Cuándo conviene la directa {#sec-cuando-directa}
+
+El empate del caso lineal esconde dos regímenes, y separarlos por cuántos datos hay por horizonte
+los ordena.
+
+```{python}
+#| label: tbl-por-largo
+#| tbl-cap: "Las tres estrategias según el largo del entrenamiento medido en horizontes. El corte en $n/h = 10$ parte las series casi por mitades."
+filas = []
+for modelo in MODELOS:
+    sub = COMPARACION[COMPARACION["modelo"] == modelo]
+    for etiqueta, seleccion in (("n / h < 10", sub[sub["n / h"] < 10]),
+                                ("n / h ≥ 10", sub[sub["n / h"] >= 10])):
+        fila = {"modelo": modelo, "series": etiqueta, "cuántas": len(seleccion)}
+        fila.update(seleccion[NOMBRES].mean().to_dict())
+        filas.append(fila)
+
+pd.DataFrame(filas).set_index(["modelo", "series"]).round(2)
+```
+
+Con Ridge el orden **se invierte** entre los dos grupos. En las 11 series con menos de diez
+horizontes de historia la recursiva da 25,85 y la directa 32,68, una diferencia grande a favor de
+la recursiva. En las 20 series con diez horizontes o más, la directa da **8,18** contra 9,72 de la
+recursiva.
+
+Eso explica la divergencia entre la media y la mediana de la @tbl-estrategias: la media está
+dominada por las series cortas, donde la recursiva gana por mucho, y la mediana refleja el caso
+típico, que en este catálogo es una serie larga donde la directa gana por poco.
+
+Con el bosque aleatorio la inversión **no ocurre**: la recursiva gana en los dos grupos, 22,28
+contra 35,21 y 8,37 contra 10,56. La capacidad del modelo pesa más que la cantidad de datos.
+
+```{python}
+#| label: tbl-filas
+#| tbl-cap: "Filas de entrenamiento disponibles para cada estrategia, en la serie del catálogo donde menos quedan. La directa se mide por su modelo del último horizonte."
+sub = COMPARACION[COMPARACION["modelo"] == "Ridge"]
+peor = sub.loc[sub["directa filas"].idxmin()]
+
+pd.DataFrame([{
+    "serie": peor["serie"],
+    "n de entrenamiento": int(peor["n"]),
+    "h": int(peor["h"]),
+    "p (rezagos)": int(peor["p"]),
+    "filas para la recursiva": int(peor["recursiva filas"]),
+    "filas para el último modelo directo": int(peor["directa filas"]),
+    "filas para la multisalida": int(peor["multisalida filas"]),
+}]).set_index("serie").T
+```
+
+La @tbl-filas pone el mecanismo en números. En el peor caso del catálogo la recursiva dispone de
+20 filas y el modelo directo del último horizonte de 13: **un 35 % menos, para la más difícil de
+las $h$ tareas.** La multisalida sufre el mismo recorte que el peor modelo directo, porque su
+tabla necesita $h$ observaciones futuras en cada fila.
+
+La relación general sale de contar. Con $n$ observaciones, $p$ rezagos y horizonte $h$:
+
+$$
+\text{filas} =
+\begin{cases}
+n - p & \text{recursiva} \\[3pt]
+n - p - k + 1 & \text{modelo } k \text{ de la directa} \\[3pt]
+n - p - h + 1 & \text{multisalida}
+\end{cases}
+$$ {#eq-filas-estrategia}
+
+La @eq-filas-estrategia dice que el recorte no depende del largo de la serie sino de $h$, así que
+**duele en proporción a $h/n$**: es despreciable en una serie horaria con $n = 960$ y $h = 48$, y
+brutal en una anual con $n = 13$ y $h = 6$.
+
+## Cuánto cuesta cada una {#sec-costo-estrategias}
+
+```{python}
+#| label: tbl-costo-estrategias
+#| tbl-cap: "Ajustes de modelo que exige cada estrategia, por serie y para las 48.000 series mensuales de M4, donde $h = 18$."
+pd.DataFrame([
+    {"estrategia": "recursiva", "ajustes por serie": "1",
+     "con h = 18": 1, "para 48.000 series": 48_000},
+    {"estrategia": "directa", "ajustes por serie": "h",
+     "con h = 18": 18, "para 48.000 series": 48_000 * 18},
+    {"estrategia": "multisalida", "ajustes por serie": "1, con h internos",
+     "con h = 18": 18, "para 48.000 series": 48_000 * 18},
+]).set_index("estrategia")
+```
+
+La recursiva ajusta **un** modelo y evalúa $h$ veces; las otras dos ajustan $h$. Con el horizonte
+48 de las series horarias la diferencia es de 48 a 1, y el @sec-validacion-cruzada ya mostró qué
+significa un factor así cuando además hay pliegues y candidatos: los factores se multiplican.
+
+Y hay un costo que no aparece en la tabla. La estrategia directa produce $h$ modelos que hay que
+**versionar, guardar y servir**. Para una aplicación de pronóstico eso es la diferencia entre
+guardar un objeto por serie y guardar dieciocho, y el @sec-produccion vuelve sobre ese punto.
+
+## Lo que este libro usa, y por qué {#sec-que-usa-el-libro}
+
+La función del comienzo del capítulo queda justificada, con la condición que la justifica.
+
+::: {.callout-tip}
+## La recomendación
+
+**Recursiva por omisión.** Es la que menos se degrada con el horizonte en las dos mediciones de la
+@fig-por-paso, la que gana con modelos de capacidad alta, la única que no recorta filas y la más
+barata por un factor de $h$.
+
+**Directa cuando hay datos de sobra y el modelo es simple.** Con $n/h \geq 10$ y un modelo lineal
+regularizado gana, aunque por poco: 8,18 contra 9,72. En una cartera de series largas y con
+presupuesto de cómputo, vale probarla.
+
+**Multisalida solo con un modelo genuinamente multivariado.** Aplicarla con
+`MultiOutputRegressor` es pagar el recorte de filas de la @eq-filas-estrategia sin recibir nada en
+cambio, y eso es lo que muestra la @tbl-estrategias.
+:::
+
+Vale registrar el límite de esta recomendación con la misma claridad que en el
+@sec-validacion-cruzada. Son 31 series, elegidas para cubrir fenómenos y no para representar a M4.
+@bentaieb2012 llegan a conclusiones más matizadas con las 111 series de la competencia NN5 y con
+modelos no lineales más variados, y @marcellino2006 encuentran que la directa gana en promedio
+sobre 170 series macroeconómicas, que son largas: es exactamente el régimen $n/h \geq 10$ de la
+@tbl-por-largo. **Las tres mediciones son compatibles si se lee la condición y no solo el
+veredicto.**
+
+## Ejercicios
+
+Las soluciones están en el @sec-soluciones-17.
+
+**1.** Implementa la estrategia **DirRec** de @bentaieb2012: como la directa, pero el modelo del
+paso $k$ recibe además las predicciones de los pasos anteriores. Compárala con las tres del
+capítulo. ¿Queda en el medio?
+
+**2.** La @fig-por-paso promedia sobre todas las series. Repítela para una serie de
+estacionalidad marcada y para una caminata aleatoria por separado. ¿La forma de las curvas es la
+misma?
+
+**3.** Aumenta la ventana $p$ de 12 a 24 en la estrategia recursiva y mira qué le pasa al error
+por paso. ¿Ayuda a los horizontes largos o los perjudica?
+
+**4.** Con la @eq-filas-estrategia, calcula para cada frecuencia de M4 qué fracción de las filas
+pierde el último modelo de la estrategia directa, usando la mediana de $n$ de la @tbl-largos. ¿En
+qué frecuencias es despreciable?
+
+**5.** La recursiva realimenta predicciones. Mide cuánto se aleja su entrada de la realidad: en el
+paso $k$, compara los $p$ valores que usó contra los valores reales de esos períodos, y grafica esa
+distancia contra $k$.
+
+**6.** Toma una serie donde gane la directa y una donde gane la recursiva, y decide con la
+@tbl-por-largo y la @eq-filas-estrategia si el resultado era previsible. ¿Qué medirías antes de
+elegir la estrategia en una serie nueva?
+
+## Referencias {.unnumbered}
+
+::: {#refs}
 :::

@@ -230,6 +230,35 @@ migración del sitio.
 
 ---
 
+## El tiempo de compilación
+
+Con los capítulos 12 a 17 escritos, una compilación en frío pasó de 2,5 a **8
+minutos**. El crecimiento no es de Quarto ni del layout: es de los experimentos.
+El capítulo 17 ajusta tres estrategias multipaso por dos modelos por 31 series, y
+la estrategia directa ajusta `h` modelos cada vez, con `h = 48` en las horarias.
+El apéndice suma DirRec, que hace lo mismo otra vez.
+
+Esto **no afecta el trabajo diario**, porque `freeze: auto` sólo re-ejecuta los
+capítulos que cambiaron. Lo paga la compilación en frío de CI, y 8 minutos está
+lejos de cualquier límite.
+
+Vale tenerlo anotado porque los capítulos que faltan —20 ensambles, 21
+bootstrapping, 22 aprendizaje profundo, 23 caso M4— son los más caros de todo el
+libro. Si el número se vuelve un problema, hay tres palancas en orden de
+preferencia:
+
+1. **Bajar `n_estimators`** en los bosques de los experimentos agregados. De 60 a
+   30 no cambia ninguna conclusión y ahorra la mitad.
+2. **Precalcular** los experimentos más caros a un `parquet` versionado en el
+   repositorio, como ya se hace con `metadatos.parquet`, y que el capítulo sólo
+   lea y grafique. Cuesta reproducibilidad a la vista del lector.
+3. **Recortar el catálogo** en los experimentos agregados a las series que hacen
+   falta para la conclusión, diciéndolo en el pie de la tabla.
+
+Ninguna está aplicada todavía.
+
+---
+
 ## Un defecto conocido del catálogo curado
 
 El @sec-los-datos —capítulo 12— documenta que `M16834` tiene sus primeras 435 de

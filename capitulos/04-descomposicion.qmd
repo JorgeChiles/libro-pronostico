@@ -115,7 +115,7 @@ El residuo pasa de explicar el 5 % de la varianza a explicar el 2 %. La misma
 serie y el mismo método; lo único que cambió es la escala en la que se lo aplicó.
 
 ::: {.callout-tip}
-## Cuándo tomar logaritmo {#sec-logaritmo}
+## Cuándo tomar logaritmo
 
 Si la amplitud del ciclo crece con el nivel, y si todos los valores son positivos.
 La segunda condición no es un detalle: el logaritmo de un valor negativo o cero no

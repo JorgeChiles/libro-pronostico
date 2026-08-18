@@ -421,7 +421,7 @@ esa situación creyendo que las técnicas de la Parte II se aplican sin modifica
 |---|---|---|
 | huecos en el índice | los rezagos de la @eq-ventana dejan de ser rezagos: la fila mira $p$ *filas* atrás, no $p$ *períodos* | reindexar al calendario completo antes de construir características, y decidir explícitamente qué es un hueco |
 | ceros | el sMAPE se indefine y el MAPE explota | métricas con denominador de escala, como el MASE del @sec-metricas |
-| negativos | el logaritmo y Box-Cox del @sec-logaritmo no aplican | modelar sin transformar, o transformar con un corrimiento declarado |
+| negativos | el logaritmo y la transformación de @boxcox1964 del @sec-descomposicion no aplican | modelar sin transformar, o transformar con un corrimiento declarado |
 | series intermitentes, con mayoría de ceros | la estacionalidad y la tendencia dejan de ser el fenómeno dominante | métodos específicos, que este libro no cubre |
 | revisiones de datos publicados | el valor que hoy se ve para el mes pasado no es el que se veía el mes pasado | guardar la versión *tal como estaba* en cada fecha |
 

@@ -15,7 +15,7 @@ export PATH := $(VENV)/bin:$(PATH)
 # sys.path: Quarto ejecuta cada capítulo con el directorio del .qmd como cwd.
 export PYTHONPATH := $(CURDIR)
 
-.PHONY: ayuda entorno kernel libro html pdf ver limpiar limpiar-todo prueba prueba-sin-conexion datos catalogo datos-widgets
+.PHONY: ayuda entorno kernel libro html pdf ver limpiar limpiar-todo prueba prueba-sin-conexion referencias datos catalogo datos-widgets
 
 ayuda:
 	@echo "make entorno   crea el entorno virtual e instala las dependencias"
@@ -24,6 +24,7 @@ ayuda:
 	@echo "make pdf       compila la versión PDF"
 	@echo "make prueba    corre los tests del paquete libro/"
 	@echo "make prueba-sin-conexion  compila como en CI: sin caché ni descargas"
+	@echo "make referencias  falla si alguna referencia cruzada quedó sin resolver"
 	@echo "make datos     reconstruye la caché de M4 desde los CSV originales"
 	@echo "make catalogo  reconstruye metadatos y catálogo curado"
 	@echo "make datos-widgets  exporta los CSV que embeben los widgets"
@@ -38,8 +39,25 @@ entorno:
 kernel:
 	$(PY) -m ipykernel install --user --name libro --display-name "Python (libro)"
 
+# Quarto avisa de una referencia cruzada sin resolver con un WARN y sigue de
+# largo, así que la compilación termina en verde con un enlace roto en el texto.
+# Por eso `libro` corre siempre el chequeo al final.
 libro html:
-	quarto render --to live-html
+	quarto render --to live-html 2>&1 | tee .ultima-compilacion.log
+	@$(MAKE) --no-print-directory referencias
+
+# Falla si quedó una referencia cruzada sin resolver. Pasa el registro de la
+# última compilación, o vuelve a compilar si no hay ninguno.
+referencias:
+	@test -f .ultima-compilacion.log || quarto render --to live-html > .ultima-compilacion.log 2>&1
+	@if grep -q "Unable to resolve crossref" .ultima-compilacion.log; then \
+		echo ""; \
+		echo "Referencias cruzadas sin resolver:"; \
+		grep "Unable to resolve crossref" .ultima-compilacion.log | sed 's/^/  /'; \
+		exit 1; \
+	else \
+		echo "referencias cruzadas: todas resueltas"; \
+	fi
 
 pdf:
 	quarto render --to pdf
@@ -58,8 +76,9 @@ prueba-sin-conexion:
 	LIBRO_SIN_DESCARGA=1 \
 	LIBRO_CACHE=$(CURDIR)/.cache-vacia \
 	LIBRO_M4_ORIGEN=$(CURDIR)/.sin-csv \
-	quarto render --to live-html
+	quarto render --to live-html 2>&1 | tee .ultima-compilacion.log
 	rm -rf .cache-vacia
+	@$(MAKE) --no-print-directory referencias
 
 datos:
 	$(PY) -m libro._construir_cache
