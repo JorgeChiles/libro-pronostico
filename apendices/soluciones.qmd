@@ -2714,3 +2714,290 @@ ciclos completos— muchas veces no alcanza para justificarlos.
 La lección conjunta: **la selección automática es más conservadora que la intuición**.
 Uno tiende a especificar modelos más ricos de lo que los datos sostienen, y el
 criterio de información funciona como contrapeso.
+
+## Capítulo 13 · Aprendizaje supervisado {#sec-soluciones-13}
+
+```{python}
+#| echo: false
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split
+
+from libro.datos import catalogo
+
+
+def tabla_supervisada(y, p, h=1):
+    """La misma función del capítulo 13."""
+    y = np.asarray(y, dtype=float)
+    X, objetivo = [], []
+    for i in range(p, len(y) - h + 1):
+        X.append(y[i - p:i])
+        objetivo.append(y[i + h - 1])
+    return np.array(X), np.array(objetivo)
+
+
+def pronosticar_recursivo(modelo, y, p, h):
+    historia = list(y)
+    salida = []
+    for _ in range(h):
+        valor = float(modelo.predict([historia[-p:]])[0])
+        salida.append(valor)
+        historia.append(valor)
+    return np.array(salida)
+```
+
+### Ejercicio 1
+
+```{python}
+#| label: tbl-sol-13-1
+#| tbl-cap: "Filas disponibles en la tabla supervisada de Q22252 según el orden de la ventana."
+s = cargar("Q22252")
+y = s.entrenamiento.to_numpy()
+
+pd.DataFrame([
+    {
+        "p": p,
+        "observaciones": len(y),
+        "filas": len(tabla_supervisada(y, p)[0]),
+        "observaciones perdidas": p,
+        "% perdido": round(100 * p / len(y), 1),
+    }
+    for p in (4, 8)
+]).set_index("p")
+```
+
+Con $p = 4$ quedan 52 filas de 56 observaciones y se pierde el 7 %; con $p = 8$ quedan 48
+y se pierde el 14 %.
+
+Vale la pena notar cómo se pierden esas observaciones: **no desaparecen, se convierten en
+predictores**. Las primeras $p$ observaciones de la serie aparecen en la matriz $X$ de la
+@eq-ventana, pero nunca como respuesta, porque no tienen suficiente historia detrás. El
+costo real de subir $p$ no es perder datos, es **perder casos para aprender** mientras se
+agregan columnas: las dos cosas empujan en la dirección de sobreajustar.
+
+En una serie de 56 observaciones, $p = 8$ deja 48 filas y 8 columnas —seis filas por
+columna—, apenas por debajo del criterio de diez que sugiere el
+@sec-cuantas-filas.
+
+### Ejercicio 2
+
+```{python}
+s = cargar("M3007")
+y = s.entrenamiento.to_numpy()
+X, _ = tabla_supervisada(y, 4)
+
+print(f"fila 0: {X[0]}")
+print(f"fila 1: {X[1]}")
+
+compartidos = len(set(X[0]).intersection(set(X[1])))
+print(f"\nvalores compartidos entre las dos filas: {compartidos} de 4")
+```
+
+Comparten tres de los cuatro valores. En general, dos filas consecutivas de la
+@eq-ventana comparten $p-1$ valores, y dos filas separadas por $k < p$ posiciones
+comparten $p-k$.
+
+Por qué eso invalida una partición aleatoria, en una frase: si la fila $i$ queda en
+entrenamiento y la $i+1$ en prueba, el modelo ya vio $p-1$ de los $p$ predictores de la
+fila de prueba **y también su respuesta**, porque la respuesta de la fila $i$ es una de
+las columnas de la fila $i+1$.
+
+Ese último punto es el que hace el daño y suele pasarse por alto. No es solo que los
+predictores se parezcan: es que **el valor que hay que predecir en una fila aparece como
+predictor en las siguientes**. Con ventanas solapadas, entrenar con la fila $i$ es
+entrenar con la respuesta de la fila $i-1$.
+
+### Ejercicio 3
+
+```{python}
+#| label: tbl-sol-13-3
+#| tbl-cap: "El techo del bosque aleatorio sobre M39292, y el efecto de diferenciar."
+s = cargar("M39292")
+y_tr, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+h, P = s.horizonte, 4
+
+X, objetivo = tabla_supervisada(y_tr, P)
+lineal = LinearRegression().fit(X, objetivo)
+bosque = RandomForestRegressor(n_estimators=100, random_state=42).fit(X, objetivo)
+
+diferenciada = np.diff(y_tr)
+X_d, objetivo_d = tabla_supervisada(diferenciada, P)
+bosque_d = RandomForestRegressor(n_estimators=100, random_state=42).fit(X_d, objetivo_d)
+
+pron_lineal = pronosticar_recursivo(lineal, y_tr, P, h)
+pron_bosque = pronosticar_recursivo(bosque, y_tr, P, h)
+pron_dif = y_tr[-1] + np.cumsum(
+    pronosticar_recursivo(bosque_d, diferenciada, P, h)
+)
+
+pd.DataFrame([
+    {"variante": "regresión lineal", "sMAPE": smape(y_te, pron_lineal),
+     "máximo pronosticado": pron_lineal.max()},
+    {"variante": "bosque sobre niveles", "sMAPE": smape(y_te, pron_bosque),
+     "máximo pronosticado": pron_bosque.max()},
+    {"variante": "bosque sobre diferencias", "sMAPE": smape(y_te, pron_dif),
+     "máximo pronosticado": pron_dif.max()},
+    {"variante": "máximo del entrenamiento", "sMAPE": np.nan,
+     "máximo pronosticado": y_tr.max()},
+    {"variante": "máximo real en la prueba", "sMAPE": np.nan,
+     "máximo pronosticado": y_te.max()},
+]).set_index("variante").round(2)
+```
+
+El patrón se repite con precisión. El bosque sobre niveles no logra superar el máximo del
+entrenamiento, mientras el valor real de la prueba lo supera con holgura, y su sMAPE es
+diez veces el de la regresión lineal.
+
+Diferenciar lo arregla casi por completo: el bosque pasa de un sMAPE de casi 7 a menos de
+1, y su pronóstico máximo supera el techo del entrenamiento porque ya no está prediciendo
+niveles sino cambios que después se acumulan.
+
+Que el resultado se repita en dos series distintas es lo que lo vuelve una regla y no una
+anécdota: **cualquier modelo basado en árboles necesita que se le quite la tendencia antes
+de aplicarlo a una serie que la tiene.**
+
+### Ejercicio 4
+
+```{python}
+#| label: tbl-sol-13-4
+#| tbl-cap: "Predicción a seis pasos: un modelo entrenado directamente para h = 6 contra la cadena recursiva de un modelo a un paso."
+s = cargar("M35927")
+y_tr, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+P = 12
+
+un_paso = LinearRegression().fit(*tabla_supervisada(y_tr, P, h=1))
+recursivo = pronosticar_recursivo(un_paso, y_tr, P, 6)[-1]
+
+seis_pasos = LinearRegression().fit(*tabla_supervisada(y_tr, P, h=6))
+directo = float(seis_pasos.predict([y_tr[-P:]])[0])
+
+pd.DataFrame([
+    {"estrategia": "recursiva (6 realimentaciones)", "predicción": round(recursivo, 1),
+     "error absoluto": round(abs(recursivo - y_te[5]), 1)},
+    {"estrategia": "directa (un salto)", "predicción": round(directo, 1),
+     "error absoluto": round(abs(directo - y_te[5]), 1)},
+    {"estrategia": "valor real", "predicción": round(float(y_te[5]), 1),
+     "error absoluto": 0.0},
+]).set_index("estrategia")
+```
+
+Acá gana la **directa**, con casi la mitad del error.
+
+Y ese resultado es interesante porque es el contrario del que se obtuvo en el
+@sec-soluciones-08 con la misma serie. La diferencia está en los predictores: allá se
+usaban solo los rezagos 1 y 12, acá se usan los doce rezagos contiguos. Con doce columnas
+el modelo directo tiene con qué predecir seis pasos adelante sin pasar por la cadena; con
+dos columnas no.
+
+La lección es la que el @sec-prediccion va a desarrollar: **la comparación entre recursiva
+y directa no se resuelve en abstracto**, depende de cuánta información tiene cada modelo y
+de cuánto ruido acumula la cadena. Dos experimentos sobre la misma serie, con distintos
+predictores, dan resultados opuestos.
+
+### Ejercicio 5
+
+```{python}
+#| label: tbl-sol-13-5
+#| tbl-cap: "El mismo modelo evaluado con una partición aleatoria de filas y con el período de prueba real, sobre M3007."
+s = cargar("M3007")
+y_tr, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+h, P = s.horizonte, 12
+
+X, objetivo = tabla_supervisada(y_tr, P)
+
+X_a, X_b, o_a, o_b = train_test_split(
+    X, objetivo, test_size=0.2, shuffle=True, random_state=0
+)
+modelo_aleatorio = LinearRegression().fit(X_a, o_a)
+
+modelo_completo = LinearRegression().fit(X, objetivo)
+pronostico_real = pronosticar_recursivo(modelo_completo, y_tr, P, h)
+
+pd.DataFrame([
+    {"evaluación": "partición aleatoria de filas",
+     "sMAPE": round(smape(o_b, modelo_aleatorio.predict(X_b)), 2)},
+    {"evaluación": "período de prueba real (18 pasos)",
+     "sMAPE": round(smape(y_te, pronostico_real), 2)},
+]).set_index("evaluación")
+```
+
+La diferencia es de un factor de casi veinte. La partición aleatoria dice que el modelo
+comete un error del 2,6 % y el período de prueba real dice que comete más del 50 %.
+
+**La honesta es la segunda**, y hay dos razones acumuladas por las que la primera engaña.
+
+**La primera es la fuga por solapamiento** del ejercicio 2: al sortear filas, el modelo
+entrena con vecinos inmediatos de cada fila de prueba, y con sus respuestas.
+
+**La segunda es que evalúa una tarea distinta, y más fácil.** La partición aleatoria mide
+el error a **un paso** con predictores observados. El período de prueba mide el error a
+dieciocho pasos con predictores que el modelo inventó. Son dos problemas de dificultad muy
+distinta, como quedó claro en el @sec-horizonte.
+
+En `M3007` la brecha es especialmente brutal porque es la serie del @sec-una-serie, la que
+se acelera de golpe. La partición aleatoria reparte esa aceleración entre entrenamiento y
+prueba, así que el modelo la conoce; el período de prueba real la deja íntegramente del
+otro lado del corte.
+
+Es el ejercicio más importante de este capítulo: **la métrica que sale de una partición
+aleatoria de una tabla supervisada no mide capacidad de pronóstico, y puede ser veinte
+veces más optimista.**
+
+### Ejercicio 6
+
+```{python}
+#| label: tbl-sol-13-6
+#| tbl-cap: "Modelo global sobre las series trimestrales del catálogo, con y sin normalizar cada serie por su media."
+trimestrales = [s for s in cargar(n=len(catalogo())) if s.frecuencia == "trimestral"]
+P = 4
+
+filas = []
+for normalizar in (False, True):
+    bloques_X, bloques_o = [], []
+    for s in trimestrales:
+        y_s = s.entrenamiento.to_numpy()
+        escala = y_s.mean() if normalizar else 1.0
+        X_s, o_s = tabla_supervisada(y_s / escala, P)
+        bloques_X.append(X_s)
+        bloques_o.append(o_s)
+
+    modelo = LinearRegression().fit(np.vstack(bloques_X), np.concatenate(bloques_o))
+
+    errores = []
+    for s in trimestrales:
+        y_s = s.entrenamiento.to_numpy()
+        escala = y_s.mean() if normalizar else 1.0
+        pronostico = pronosticar_recursivo(modelo, y_s / escala, P, s.horizonte) * escala
+        errores.append(smape(s.prueba.to_numpy(), pronostico))
+
+    filas.append({
+        "normalizado": "sí" if normalizar else "no",
+        "series": len(trimestrales),
+        "filas apiladas": len(np.concatenate(bloques_o)),
+        "sMAPE medio": round(float(np.mean(errores)), 2),
+        "sMAPE mediano": round(float(np.median(errores)), 2),
+    })
+
+pd.DataFrame(filas).set_index("normalizado")
+```
+
+El resultado es contrario a la recomendación habitual: **normalizar empeora el
+desempeño**, y por bastante.
+
+Vale entender por qué, porque no invalida el consejo general sino que delimita cuándo
+aplica. Normalizar cada serie por su media sirve para que las series de valores grandes no
+dominen la pérdida de la @eq-perdida. Ese problema aparece cuando las escalas difieren en
+órdenes de magnitud. Acá son siete series trimestrales de magnitud comparable, así que el
+problema no existía, y dividir por la media tuvo un costo sin beneficio: borró información
+sobre el nivel que el modelo estaba usando, y al reconstruir multiplicando por la escala
+los errores relativos se amplifican.
+
+Dos conclusiones prácticas:
+
+**La normalización es una respuesta a un problema concreto, no un paso obligatorio.**
+Conviene verificar que el problema exista —mirando el rango de las escalas— antes de
+aplicar la solución.
+
+**Con pocas series el enfoque global no rinde.** Siete series y 589 filas no son
+suficientes para que un modelo global le gane a uno ajustado serie por serie. El enfoque
+global paga con miles de series, y eso se ve en el @sec-caso-m4.
