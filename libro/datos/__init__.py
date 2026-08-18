@@ -46,6 +46,7 @@ from libro.datos.rutas import (
     NIVELES_DIFICULTAD,
     URL_M4,
     Frecuencia,
+    descargas_permitidas,
     directorio_cache,
     directorio_curado,
     frecuencia_de_id,
@@ -197,6 +198,17 @@ def _preparar_frecuencia(nombre: str, destino: Path) -> None:
             break
 
     if origen is None:
+        if not descargas_permitidas():
+            raise RuntimeError(
+                f"Para tener la frecuencia {nombre!r} completa habría que bajar "
+                f"los CSV de M4 —cientos de megabytes— y las descargas están "
+                f"desactivadas por la variable LIBRO_SIN_DESCARGA.\n\n"
+                f"Si esto ocurrió al compilar el libro, es un error del "
+                f"capítulo: está pidiendo una serie que no viaja en el "
+                f"repositorio. Agregala a SERIES_DEL_LIBRO en "
+                f"libro/_construir_catalogo.py y corré `make catalogo`.\n\n"
+                f"Si la pediste a propósito, corré `make datos` una vez."
+            )
         origen = directorio_cache() / "m4_csv"
         origen.mkdir(parents=True, exist_ok=True)
         for parte in ("train", "test"):

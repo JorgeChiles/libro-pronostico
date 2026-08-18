@@ -119,6 +119,18 @@ def directorio_cache() -> Path:
     return destino
 
 
+def descargas_permitidas() -> bool:
+    """Si `LIBRO_SIN_DESCARGA` está puesta, nadie baja nada.
+
+    Sirve para la compilación automática: los CSV de M4 son cientos de
+    megabytes y, si un capítulo los pide por accidente, es mejor que la
+    compilación falle en el acto con un mensaje claro que se quede colgada
+    veinte minutos. También sirve para comprobar que el libro compila de verdad
+    sin conexión.
+    """
+    return not os.environ.get("LIBRO_SIN_DESCARGA")
+
+
 def origenes_posibles() -> list[Path]:
     """Dónde buscar los CSV originales de M4, en orden de preferencia."""
     candidatos: list[Path] = []

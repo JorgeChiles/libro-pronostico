@@ -126,6 +126,32 @@ def test_fenomeno_inexistente_lista_los_validos():
         cargar(fenomeno="tendencia-inventada")
 
 
+def test_las_series_que_el_texto_nombra_viajan_en_el_repositorio():
+    """El libro tiene que compilar sin conexión.
+
+    Si un capítulo pide una serie por identificador y esa serie no está en el
+    paquete curado, el módulo intenta bajar los CSV de M4 —cientos de
+    megabytes— al compilar. Pasó con M3007 en el capítulo 1.
+    """
+    from libro._construir_catalogo import SERIES_DEL_LIBRO
+
+    faltan = sorted(set(SERIES_DEL_LIBRO) - set(catalogo()["serie"]))
+    assert not faltan, (
+        f"Estas series las nombra el texto pero no están en el catálogo: "
+        f"{faltan}. Corré `make catalogo`."
+    )
+
+
+def test_sin_descarga_no_se_cuelga_sino_que_avisa(monkeypatch):
+    """Con LIBRO_SIN_DESCARGA puesta, nada intenta bajar cientos de megabytes."""
+    from libro.datos.rutas import descargas_permitidas
+
+    monkeypatch.setenv("LIBRO_SIN_DESCARGA", "1")
+    assert descargas_permitidas() is False
+    monkeypatch.delenv("LIBRO_SIN_DESCARGA")
+    assert descargas_permitidas() is True
+
+
 def test_metadatos_tiene_las_99935_series():
     meta = metadatos()
     assert len(meta) == 99_935

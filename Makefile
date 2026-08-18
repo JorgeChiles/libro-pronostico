@@ -15,7 +15,7 @@ export PATH := $(VENV)/bin:$(PATH)
 # sys.path: Quarto ejecuta cada capítulo con el directorio del .qmd como cwd.
 export PYTHONPATH := $(CURDIR)
 
-.PHONY: ayuda entorno kernel libro html pdf ver limpiar limpiar-todo prueba datos
+.PHONY: ayuda entorno kernel libro html pdf ver limpiar limpiar-todo prueba prueba-sin-conexion datos catalogo datos-widgets
 
 ayuda:
 	@echo "make entorno   crea el entorno virtual e instala las dependencias"
@@ -23,6 +23,7 @@ ayuda:
 	@echo "make ver       compila y abre el libro en el navegador con recarga"
 	@echo "make pdf       compila la versión PDF"
 	@echo "make prueba    corre los tests del paquete libro/"
+	@echo "make prueba-sin-conexion  compila como en CI: sin caché ni descargas"
 	@echo "make datos     reconstruye la caché de M4 desde los CSV originales"
 	@echo "make catalogo  reconstruye metadatos y catálogo curado"
 	@echo "make datos-widgets  exporta los CSV que embeben los widgets"
@@ -48,6 +49,17 @@ ver:
 
 prueba:
 	$(PY) -m pytest -q pruebas
+
+# Compila como lo hace la integración continua: sin caché de datos, sin los CSV
+# de la tesis a mano y sin permiso para descargar. Si un capítulo pide una serie
+# que no viaja en el repositorio, esto falla y ahí hay que verlo, no en CI.
+prueba-sin-conexion:
+	rm -rf _freeze
+	LIBRO_SIN_DESCARGA=1 \
+	LIBRO_CACHE=$(CURDIR)/.cache-vacia \
+	LIBRO_M4_ORIGEN=$(CURDIR)/.sin-csv \
+	quarto render --to live-html
+	rm -rf .cache-vacia
 
 datos:
 	$(PY) -m libro._construir_cache

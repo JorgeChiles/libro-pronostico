@@ -54,11 +54,19 @@ jobs:
 
       # Si los datos del libro están mal, no se publica.
       - name: Probar el módulo de datos
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          LIBRO_SIN_DESCARGA: "1"
         run: python -m pytest pruebas -q
 
+      # LIBRO_SIN_DESCARGA garantiza que el libro compile con lo que viaja en el
+      # repositorio. Si un capítulo pide una serie que no está, esto falla en el
+      # acto con un mensaje claro en vez de bajar cientos de megabytes.
       - name: Compilar el libro
         env:
           QUARTO_PYTHON: python
+          PYTHONPATH: ${{ github.workspace }}
+          LIBRO_SIN_DESCARGA: "1"
         run: quarto render --to live-html
 
       # Aviso temprano: si el peso del sitio se descontrola, conviene saberlo.
