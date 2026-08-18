@@ -67,7 +67,18 @@ jobs:
           QUARTO_PYTHON: python
           PYTHONPATH: ${{ github.workspace }}
           LIBRO_SIN_DESCARGA: "1"
-        run: quarto render --to live-html
+        run: quarto render --to live-html 2>&1 | tee .ultima-compilacion.log
+
+      # Quarto avisa de una referencia cruzada sin resolver con un WARN y sigue
+      # de largo, así que sin este paso el libro se publica con enlaces rotos.
+      - name: Comprobar las referencias cruzadas
+        run: |
+          if grep -q "Unable to resolve crossref" .ultima-compilacion.log; then
+            echo "Referencias cruzadas sin resolver:"
+            grep "Unable to resolve crossref" .ultima-compilacion.log | sed 's/^/  /'
+            exit 1
+          fi
+          echo "referencias cruzadas: todas resueltas"
 
       # Aviso temprano: si el peso del sitio se descontrola, conviene saberlo.
       - name: Informar el peso del sitio

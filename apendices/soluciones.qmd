@@ -4602,3 +4602,430 @@ error no mejora, el modelo está sesgado**, y eso es información que no requier
 estadística. Un modelo con sesgo sistemático se puede corregir sumándole una constante; uno con
 error simétrico grande, no. `M3007` no necesita otro modelo: necesita que alguien note el quiebre
 de nivel del @sec-soluciones-14.
+
+## Capítulo 17 · Predicción {#sec-soluciones-17}
+
+```{python}
+#| echo: false
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.multioutput import MultiOutputRegressor
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+
+
+def ventana_k(y, p, k=1):
+    """La misma del capítulo 17: p rezagos, objetivo k pasos adelante."""
+    y = np.asarray(y, float)
+    X, objetivo = [], []
+    for i in range(p, len(y) - k + 1):
+        X.append(y[i - p:i])
+        objetivo.append(y[i + k - 1])
+    return np.array(X), np.array(objetivo)
+
+
+def recursiva(y, p, h, construir):
+    X, objetivo = ventana_k(y, p, 1)
+    modelo = construir().fit(X, objetivo)
+    historia, salida = list(y), []
+    for _ in range(h):
+        salida.append(float(modelo.predict([historia[-p:]])[0]))
+        historia.append(salida[-1])
+    return np.array(salida)
+
+
+def directa(y, p, h, construir):
+    salida = []
+    for k in range(1, h + 1):
+        X, objetivo = ventana_k(y, p, k)
+        if len(X) < 3:
+            salida.append(salida[-1] if salida else y[-1])
+            continue
+        salida.append(float(construir().fit(X, objetivo).predict([y[-p:]])[0]))
+    return np.array(salida)
+
+
+def dirrec(y, p, h, construir):
+    """DirRec: el modelo del paso k recibe p rezagos más las k-1 predicciones previas."""
+    y = np.asarray(y, float)
+    salida = []
+    for k in range(1, h + 1):
+        X, objetivo = [], []
+        for i in range(p, len(y) - k + 1):
+            X.append(np.concatenate([y[i - p:i], y[i:i + k - 1]]))
+            objetivo.append(y[i + k - 1])
+        X, objetivo = np.array(X), np.array(objetivo)
+        if len(X) < 3:
+            salida.append(salida[-1] if salida else y[-1])
+            continue
+        entrada = np.concatenate([y[-p:], np.array(salida)])
+        salida.append(float(construir().fit(X, objetivo).predict([entrada])[0]))
+    return np.array(salida)
+
+
+def multisalida(y, p, h, construir):
+    y = np.asarray(y, float)
+    X, objetivo = [], []
+    for i in range(p, len(y) - h + 1):
+        X.append(y[i - p:i])
+        objetivo.append(y[i:i + h])
+    X, objetivo = np.array(X), np.array(objetivo)
+    if len(X) < 3:
+        return np.repeat(y[-1], h)
+    return np.asarray(
+        MultiOutputRegressor(construir()).fit(X, objetivo).predict([y[-p:]])[0]
+    )
+
+
+CONSTRUIR = {
+    "Ridge": lambda: make_pipeline(StandardScaler(), Ridge(alpha=1.0)),
+    "bosque aleatorio": lambda: RandomForestRegressor(
+        n_estimators=60, random_state=0, n_jobs=1
+    ),
+}
+CUATRO = {"recursiva": recursiva, "directa": directa, "DirRec": dirrec,
+          "multisalida": multisalida}
+
+
+def ventana_de(serie):
+    return min(max(serie.periodo_estacional, 4), 12)
+
+
+APTAS = []
+for _sid in catalogo()["serie"]:
+    _s = cargar(_sid)
+    if len(_s.entrenamiento) >= ventana_de(_s) + _s.horizonte + 8:
+        APTAS.append(_sid)
+```
+
+### Ejercicio 1 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-17-1
+#| tbl-cap: "DirRec junto a las tres estrategias del capítulo, sobre las mismas series y con los mismos dos modelos."
+filas = []
+for identificador in APTAS:
+    s = cargar(identificador)
+    y_tr, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    h, p = s.horizonte, ventana_de(s)
+    for nombre_modelo, construir in CONSTRUIR.items():
+        fila = {"serie": identificador, "modelo": nombre_modelo,
+                "n / h": len(y_tr) / h}
+        for nombre, funcion in CUATRO.items():
+            fila[nombre] = smape(y_te, funcion(y_tr, p, h, construir))
+        filas.append(fila)
+
+CON_DIRREC = pd.DataFrame(filas)
+NOMBRES4 = list(CUATRO)
+
+resumen = []
+for nombre_modelo in CONSTRUIR:
+    sub = CON_DIRREC[CON_DIRREC["modelo"] == nombre_modelo]
+    ganadora = sub[NOMBRES4].idxmin(axis=1).value_counts()
+    for nombre in NOMBRES4:
+        resumen.append({
+            "modelo": nombre_modelo, "estrategia": nombre,
+            "sMAPE medio": sub[nombre].mean(),
+            f"gana en (de {len(sub)})": int(ganadora.get(nombre, 0)),
+        })
+
+pd.DataFrame(resumen).set_index(["modelo", "estrategia"]).round(2)
+```
+
+**Sí, queda en el medio, y el lugar exacto depende del modelo.**
+
+Con Ridge, DirRec da 16,79 contra 16,87 de la directa y 15,44 de la recursiva: recupera apenas
+un 6 % de la brecha. En cantidad de series ganadas empata con la recursiva, 11 a 11.
+
+Con el bosque aleatorio la mejora es sustancial: 17,17 contra 19,31 de la directa, o sea que
+**recupera un tercio de lo que la directa pierde** frente a la recursiva.
+
+El mecanismo es coherente con el @sec-acumulacion. DirRec le da al modelo del paso $k$ las
+predicciones anteriores como entradas, así que le devuelve la información que la directa
+descarta: en la directa, el modelo del paso 8 no sabe nada de lo que se predijo para los pasos 1
+a 7. Eso ayuda más cuanto más capacidad tiene el modelo para usar esas entradas extra, y de ahí
+la diferencia entre los dos.
+
+Lo que **no** arregla es el recorte de filas de la @eq-filas-estrategia: sigue ajustando $h$
+modelos y el del último horizonte sigue teniendo las mismas filas que en la directa. Es un
+híbrido que ataca uno de los dos problemas y no el otro, y por eso no alcanza a la recursiva.
+
+### Ejercicio 2 {.unnumbered}
+
+```{python}
+#| label: fig-sol-17-2
+#| fig-cap: "sMAPE paso por paso en tres series de fenómenos distintos. La forma de la degradación no es universal."
+fig = go.Figure()
+guiones = {"recursiva": None, "directa": "dash"}
+paleta = {"M35927": COLORES["observado"], "M18514": COLORES["prueba"],
+          "H272": "#d18b2c"}
+
+for identificador in ("M35927", "M18514", "H272"):
+    s = cargar(identificador)
+    y_tr, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    h, p = s.horizonte, ventana_de(s)
+    for nombre in ("recursiva", "directa"):
+        pron = CUATRO[nombre](y_tr, p, h, CONSTRUIR["Ridge"])
+        error = 200 * np.abs(y_te - pron) / (np.abs(y_te) + np.abs(pron))
+        k = min(12, len(error))
+        fig.add_trace(go.Scatter(
+            x=np.arange(1, k + 1), y=error[:k], mode="lines+markers",
+            name=f"{identificador} · {nombre}",
+            line=dict(color=paleta[identificador], dash=guiones[nombre], width=2),
+            marker=dict(size=5),
+        ))
+
+fig.update_xaxes(title="paso del horizonte", dtick=1)
+mostrar(fig, alto=440, titulo_y="sMAPE del paso")
+```
+
+**No, la forma no es la misma, y aparecen tres regímenes distintos.**
+
+**`M35927`, estacionalidad marcada y $n/h = 18{,}6$.** Las dos curvas crecen suave y la directa
+está por debajo en todos los pasos: 0,80 contra 1,23 en total. Es el régimen $n/h \geq 10$ de la
+@tbl-por-largo, con una serie muy predecible, y ahí la directa hace lo que promete.
+
+**`M18514`, caminata aleatoria y $n/h = 4{,}3$.** Las dos curvas se disparan y **la directa se
+dispara más**: 116,13 contra 71,24. Coinciden en el paso 1 —43,8— y en el paso 7 la directa está
+en 118,5 contra 76,3. Es el régimen de series cortas, con la particularidad de que el fenómeno es
+el peor posible.
+
+**`H272`, caminata aleatoria horaria y $n/h = 20$.** La curva **no es monótona**: sube hasta el
+paso 4, con 14,2, y vuelve a bajar hasta 0,6 en el paso 8. Eso no es un artefacto: es la
+estacionalidad diaria de las series horarias, con $m = 24$. Los pasos cercanos a un múltiplo de 24
+caen en la misma fase del día que el último dato observado, y ahí el pronóstico vuelve a acertar.
+
+La lección de método es la que importa: **el promedio de la @fig-por-paso esconde formas
+cualitativamente distintas.** Una curva monótona creciente, una explosiva y una cíclica promedian
+a algo monótono suave que no describe a ninguna de las tres. Cualquier decisión sobre el horizonte
+—hasta dónde vale pronosticar, dónde poner el corte de confianza— hay que tomarla mirando la
+serie y no el promedio de la cartera.
+
+### Ejercicio 3 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-17-3
+#| tbl-cap: "Ventana de 12 contra 24 rezagos en la estrategia recursiva, sobre series mensuales largas. Se separan los seis primeros pasos de los seis últimos."
+filas = []
+for identificador in ("M35927", "M17144", "M32692", "M16834", "M6696"):
+    s = cargar(identificador)
+    y_tr, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    h = s.horizonte
+    fila = {"serie": identificador, "n": len(y_tr)}
+    for p in (12, 24):
+        pron = recursiva(y_tr, p, h, CONSTRUIR["Ridge"])
+        error = 200 * np.abs(y_te - pron) / (np.abs(y_te) + np.abs(pron))
+        fila[f"p={p} total"] = smape(y_te, pron)
+        fila[f"p={p} pasos 1-6"] = error[:6].mean()
+        fila[f"p={p} pasos 13-18"] = error[12:18].mean()
+    filas.append(fila)
+
+ventanas = pd.DataFrame(filas).set_index("serie")
+ventanas["degradación p=12"] = (
+    ventanas["p=12 pasos 13-18"] / ventanas["p=12 pasos 1-6"]
+)
+ventanas["degradación p=24"] = (
+    ventanas["p=24 pasos 13-18"] / ventanas["p=24 pasos 1-6"]
+)
+ventanas.round(2)
+```
+
+**Ayuda a los horizontes cortos y perjudica a los largos**, y eso pasa en las cinco series aunque
+el efecto total sea de un signo u otro.
+
+En `M17144` la ventana de 24 mejora los seis primeros pasos de 1,72 a 1,20 y empeora los seis
+últimos de 11,06 a 14,19. En `M35927`, de 1,39 a 0,50 en los primeros y de 0,88 a 1,10 en los
+últimos. Las dos últimas columnas resumen el patrón: **la degradación del horizonte corto al largo
+es peor con la ventana grande en las cinco series.**
+
+El resultado es contraintuitivo, porque el argumento obvio va al revés. Con $p = 24$, la ventana
+de la @eq-recursiva conserva valores reales hasta el paso 24, mientras que con $p = 12$ ya en el
+paso 13 son todas predicciones. Uno esperaría que la ventana grande protegiera al horizonte largo.
+
+Lo que pasa es que **la variancia del modelo se amplifica al iterar**. La ventana de 24 duplica
+los parámetros y cuesta 12 filas, así que el modelo es más ruidoso —es el @sec-sobreajuste
+otra vez—, y en la estrategia recursiva ese ruido no se queda quieto: entra como dato en el paso
+siguiente y se realimenta. Con $h = 18$ pasos de realimentación, una diferencia chica de varianza
+se convierte en una diferencia grande de error.
+
+De ahí una regla que vale para cualquier estrategia recursiva: **al elegir $p$, el criterio no es
+qué ventana ajusta mejor a un paso, sino qué ventana sobrevive $h$ iteraciones.** Un modelo que
+gana en el paso 1 puede perder en el paso 18 por ser el más ruidoso de los candidatos.
+
+### Ejercicio 4 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-17-4
+#| tbl-cap: "Filas que pierde el último modelo de la estrategia directa según la @eq-filas-estrategia, con la mediana de $n$ de cada frecuencia de M4."
+md = metadatos()
+tabla = md.groupby("frecuencia").agg(
+    n_mediano=("n_entrenamiento", "median"),
+    h=("horizonte", "first"),
+    m=("periodo_estacional", "first"),
+)
+tabla["p"] = tabla["m"].clip(4, 12)
+tabla["filas recursiva"] = tabla["n_mediano"] - tabla["p"]
+tabla["filas último directo"] = tabla["n_mediano"] - tabla["p"] - tabla["h"] + 1
+tabla["pierde %"] = (
+    100 * (1 - tabla["filas último directo"] / tabla["filas recursiva"])
+)
+tabla.sort_values("pierde %", ascending=False).round(1)
+```
+
+El orden es el que anticipa la @eq-filas-estrategia, porque el recorte es $h - 1$ filas fijas
+sobre un total que depende de $n$.
+
+**Es despreciable en diaria (0,4 %), semanal (1,2 %) y horaria (5,0 %).** Ahí la mediana de $n$ va
+de 960 a 2.940 observaciones y perder trece o cuarenta y siete filas no cambia nada. En esas
+frecuencias la estrategia directa se puede usar sin pensar en el costo estadístico, y la decisión
+pasa a ser solo de cómputo.
+
+**Aprieta en anual, con un 20 %.** Con 29 observaciones medianas, la recursiva tiene 25 filas y el
+modelo del sexto horizonte tiene 20. Y hay que recordar que la mediana no es el peor caso: el
+@sec-los-datos mostró que la serie anual más corta de M4 tiene 13 observaciones, y ahí el modelo
+del paso 6 se queda con 4 filas para estimar 4 coeficientes.
+
+Mensual y trimestral quedan en el medio, con 8,9 % y 8,3 %. Vale notar que **las dos frecuencias
+que son el 72 % de M4 están en esa zona intermedia**, así que ninguna de las dos conclusiones
+extremas describe al conjunto: el recorte no es inocuo ni fatal, y por eso el resultado de la
+@tbl-por-largo salió tan parejo.
+
+### Ejercicio 5 {.unnumbered}
+
+```{python}
+#| label: fig-sol-17-5
+#| fig-cap: "Distancia relativa entre la ventana de entrada que usa la estrategia recursiva y los valores reales de esos mismos períodos, paso por paso."
+fig = go.Figure()
+for identificador, color in (("M35927", COLORES["observado"]),
+                             ("M18514", COLORES["prueba"])):
+    s = cargar(identificador)
+    y_todo = s.completa.to_numpy()
+    y_tr = s.entrenamiento.to_numpy()
+    h, p, n = s.horizonte, ventana_de(s), len(y_tr)
+
+    X, objetivo = ventana_k(y_tr, p, 1)
+    modelo = CONSTRUIR["Ridge"]().fit(X, objetivo)
+
+    historia, distancias = list(y_tr), []
+    for k in range(1, h + 1):
+        entrada = np.array(historia[-p:])
+        reales = y_todo[n + k - 1 - p:n + k - 1]
+        distancias.append(
+            100 * np.mean(np.abs(entrada - reales) / np.abs(reales))
+        )
+        historia.append(float(modelo.predict([entrada])[0]))
+
+    fig.add_trace(go.Scatter(
+        x=np.arange(1, h + 1), y=distancias, mode="lines+markers",
+        name=identificador, line=dict(color=color, width=2), marker=dict(size=5),
+    ))
+
+fig.add_vline(x=13, line_dash="dot", line_width=1,
+              line_color=COLORES["auxiliar"],
+              annotation_text="desde acá, la ventana es toda predicción")
+fig.update_xaxes(title="paso del horizonte", dtick=2)
+mostrar(fig, alto=420, titulo_y="distancia relativa de la entrada (%)")
+```
+
+La medición confirma el argumento del @sec-teoria-multipaso, y con una nitidez que sorprende.
+
+En el paso 1 la distancia es **exactamente cero**: la ventana son doce datos reales. A partir de
+ahí crece de manera monótona, y desde el paso 13 —marcado en el gráfico— la ventana no contiene
+un solo valor observado.
+
+Y las dos series se separan por un factor de cien.
+
+**`M35927`, estacionalidad marcada: la entrada se aleja un 1,26 % en el paso 18.** La realimentación
+existe y es irrelevante, porque el modelo predice bien y sus predicciones son casi los valores
+reales.
+
+**`M18514`, caminata aleatoria: la entrada se aleja un 147,91 %.** En el paso 18 el modelo está
+razonando sobre una historia inventada que difiere de la realidad en más del doble.
+
+Y acá está el remate, que es lo que hace valer el ejercicio: **en esa misma serie la estrategia
+recursiva le gana a la directa por amplio margen**, 71,24 contra 116,13. La acumulación de error
+es real, medible y enorme, **y sigue sin ser la restricción que decide.** El @sec-acumulacion lo
+mostró en promedio; acá se ve en el caso más desfavorable posible.
+
+La lectura correcta del argumento clásico es entonces: la realimentación degrada el pronóstico
+recursivo exactamente cuando el modelo pronostica mal, o sea cuando *ninguna* estrategia va a
+funcionar. En las series donde el pronóstico tiene sentido, la ventana casi no se ensucia.
+
+### Ejercicio 6 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-17-6
+#| tbl-cap: "Diferencia entre la estrategia directa y la recursiva con Ridge, ordenada por cuántos horizontes de historia tiene la serie. Negativo significa que la directa gana."
+comparacion = CON_DIRREC[CON_DIRREC["modelo"] == "Ridge"].copy()
+comparacion["directa − recursiva"] = (
+    comparacion["directa"] - comparacion["recursiva"]
+)
+comparacion["gana"] = np.where(
+    comparacion["directa − recursiva"] < 0, "directa", "recursiva"
+)
+comparacion.set_index("serie").sort_values("n / h")[
+    ["n / h", "recursiva", "directa", "directa − recursiva", "gana"]
+].round(2)
+```
+
+```{python}
+#| label: tbl-sol-17-6b
+#| tbl-cap: "El mismo resultado contado por grupos, y su correlación con $n/h$."
+grupos = pd.DataFrame([
+    {"grupo": "n / h < 10",
+     "series": int((comparacion["n / h"] < 10).sum()),
+     "gana la directa": int((comparacion.loc[comparacion["n / h"] < 10,
+                                             "directa − recursiva"] < 0).sum())},
+    {"grupo": "n / h ≥ 10",
+     "series": int((comparacion["n / h"] >= 10).sum()),
+     "gana la directa": int((comparacion.loc[comparacion["n / h"] >= 10,
+                                             "directa − recursiva"] < 0).sum())},
+]).set_index("grupo")
+grupos["%"] = (100 * grupos["gana la directa"] / grupos["series"]).round(0)
+grupos
+```
+
+```{python}
+#| echo: false
+print("correlación de Pearson  n/h vs (directa − recursiva): "
+      f"{comparacion['n / h'].corr(comparacion['directa − recursiva']):+.3f}")
+print("correlación de Spearman n/h vs (directa − recursiva): "
+      f"{comparacion['n / h'].corr(comparacion['directa − recursiva'], method='spearman'):+.3f}")
+```
+
+**Sí, era previsible, y la regla funciona mejor contando que promediando.**
+
+La directa gana en **3 de las 11 series con $n/h < 10$ y en 14 de las 20 con $n/h \geq 10$**: pasa
+del 27 % al 70 %. Eso es la regla de la @tbl-por-largo confirmada en el conteo, y es la manera
+correcta de enunciarla.
+
+En magnitudes la señal es mucho más débil: la correlación de Spearman es $-0{,}41$ y la de Pearson
+apenas $-0{,}07$. La diferencia entre las dos correlaciones tiene nombre y apellido en la tabla:
+`M18514`, con $n/h = 4{,}3$ y una diferencia de **+44,90** a favor de la recursiva, que por sí
+sola arrastra la correlación lineal. **El orden de las series se predice razonablemente; el tamaño
+de la diferencia, no.**
+
+Los dos casos que pide el enunciado se leen directo de la tabla:
+
+`M18514` tiene $n/h = 4{,}3$ y gana la recursiva por 44,9 puntos. Previsible: 77 observaciones y
+horizonte 18, así que por la @eq-filas-estrategia el último modelo directo se queda con 48 filas
+contra las 65 de la recursiva, un 26 % menos, sobre una caminata aleatoria.
+
+`H282` tiene $n/h = 20$ y gana la directa por 3,5 puntos. También previsible: 960 observaciones y
+$h = 48$, o sea que el recorte es del 5 % y no duele, mientras que la ventaja de tener un modelo
+dedicado por horizonte sí se aprovecha en una serie con estacionalidad diaria limpia.
+
+::: {.callout-tip}
+## Qué medir antes de elegir la estrategia en una serie nueva
+
+Tres cosas, en este orden, y ninguna requiere ajustar un modelo:
+
+1. **$n/h$**, cuántos horizontes de historia hay. Por debajo de 10, recursiva.
+2. **La capacidad del modelo que vas a usar.** Con bosques, redes o cualquier cosa flexible, la
+   @tbl-estrategias dice recursiva incluso con $n/h$ alto.
+3. **El presupuesto de cómputo y de despliegue.** La directa cuesta $h$ ajustes y $h$ modelos que
+   hay que guardar y servir.
+
+Si las tres apuntan a la directa, vale probar las dos y elegir con el @sec-validacion-cruzada. Si
+alguna apunta a la recursiva, el margen que la directa podría ganar —los 1,5 puntos de la
+@tbl-por-largo— no justifica el riesgo ni el costo.
+:::
