@@ -1831,6 +1831,334 @@ naive simple es una vara baja en cualquier serie con estacionalidad, y superarlo
 dice mucho. La referencia honesta es el mejor método simple disponible, no el más
 fácil de vencer.
 
+## Capítulo 8 · Regresión para series {#sec-soluciones-08}
+
+```{python}
+#| echo: false
+from sklearn.linear_model import LinearRegression
+
+from libro.datos import catalogo
+
+
+def matriz_diseno(n_obs, inicio, m, K=None, con_tendencia=True):
+    """La misma función del capítulo 8."""
+    t = np.arange(inicio, inicio + n_obs)
+    columnas = [np.ones(n_obs)]
+    if con_tendencia:
+        columnas.append(t.astype(float))
+    if K is None and m > 1:
+        posicion = t % m
+        columnas.extend((posicion == j).astype(float) for j in range(1, m))
+    elif K:
+        for k in range(1, K + 1):
+            columnas.append(np.sin(2 * np.pi * k * t / m))
+            columnas.append(np.cos(2 * np.pi * k * t / m))
+    return np.column_stack(columnas)
+
+
+def tabla_supervisada(y, rezagos, adelanto=1):
+    maximo = max(rezagos)
+    X, objetivo = [], []
+    for i in range(maximo, len(y) - adelanto + 1):
+        X.append([y[i - r] for r in rezagos])
+        objetivo.append(y[i + adelanto - 1])
+    return np.array(X), np.array(objetivo)
+```
+
+### Ejercicio 1
+
+```{python}
+#| label: fig-sol-08-1
+#| fig-cap: "Residuos de la tendencia lineal ajustada a Q1915, la serie de tendencia limpia."
+s = cargar("Q1915")
+y = s.entrenamiento.to_numpy()
+t = np.arange(len(y))
+
+residuos = y - LinearRegression().fit(t.reshape(-1, 1), y).predict(t.reshape(-1, 1))
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=s.entrenamiento.index, y=residuos, mode="lines",
+    line=dict(color=COLORES["auxiliar"], width=1.4),
+))
+fig.add_hline(y=0, line_width=1, line_color=COLORES["prueba"])
+fig.update_layout(height=380, showlegend=False)
+mostrar(fig, titulo_y="residuo")
+
+tercio = len(residuos) // 3
+for i, tramo in enumerate(
+    [residuos[:tercio], residuos[tercio:2 * tercio], residuos[2 * tercio:]], start=1
+):
+    print(f"residuo medio del tercio {i}: {tramo.mean():+7.1f}")
+```
+
+Tienen forma sistemática, aunque menos marcada que en la @fig-tendencia-quiebre: los
+residuos son positivos en los extremos y negativos en el medio, un patrón en forma de
+U.
+
+Eso dice algo concreto: **la tendencia de `Q1915` no es exactamente lineal, es
+levemente convexa**. La serie crece un poco más rápido de lo que una recta puede
+describir, así que la recta queda por encima en el medio y por debajo en los extremos.
+
+Vale la pena notarlo porque `Q1915` es la serie que el catálogo etiqueta como
+tendencia limpia, y aun así el supuesto lineal no le calza perfectamente. El
+diagnóstico de residuos detecta desvíos que el gráfico de la serie no muestra, y esa
+es exactamente su utilidad. Las soluciones posibles: agregar un término cuadrático,
+tomar logaritmo, o usar un método que actualice la pendiente como los del
+@sec-suavizado.
+
+### Ejercicio 2
+
+```{python}
+#| label: tbl-sol-08-2
+#| tbl-cap: "Regresión con m ficticias y con m−1, sobre M35927."
+s = cargar("M35927")
+y, m = s.entrenamiento.to_numpy(), s.periodo_estacional
+t = np.arange(len(y))
+posicion = t % m
+
+X_todas = np.column_stack(
+    [np.ones(len(y)), t.astype(float)]
+    + [(posicion == j).astype(float) for j in range(m)]
+)
+X_menos_una = matriz_diseno(len(y), 0, m, K=None)
+
+modelo_todas = LinearRegression().fit(X_todas, y)
+modelo_menos = LinearRegression().fit(X_menos_una, y)
+
+pd.DataFrame([
+    {
+        "versión": "m ficticias",
+        "columnas": X_todas.shape[1],
+        "rango de la matriz": int(np.linalg.matrix_rank(X_todas)),
+        "R²": round(modelo_todas.score(X_todas, y), 6),
+    },
+    {
+        "versión": "m − 1 ficticias",
+        "columnas": X_menos_una.shape[1],
+        "rango de la matriz": int(np.linalg.matrix_rank(X_menos_una)),
+        "R²": round(modelo_menos.score(X_menos_una, y), 6),
+    },
+]).set_index("versión")
+```
+
+```{python}
+print(f"¿los valores ajustados coinciden? "
+      f"{np.allclose(modelo_todas.predict(X_todas), modelo_menos.predict(X_menos_una))}")
+print(f"\ncoeficientes con m ficticias (primeros 5): "
+      f"{np.round(modelo_todas.coef_[:5], 3)}")
+print(f"coeficientes con m − 1     (primeros 5): "
+      f"{np.round(modelo_menos.coef_[:5], 3)}")
+```
+
+`scikit-learn` **no da error**. La matriz con las $m$ ficticias tiene rango deficiente
+—13 columnas independientes de 14—, pero la implementación resuelve el sistema por
+mínimos cuadrados con descomposición en valores singulares, que ante infinitas
+soluciones devuelve la de norma mínima. El ajuste es idéntico al de la versión
+correcta, y el $R^2$ también.
+
+Lo que se rompe es la **interpretación de los coeficientes individuales**. Con rango
+deficiente hay infinitas combinaciones de coeficientes que producen el mismo ajuste, y
+la que devuelve la biblioteca es una entre muchas, elegida por un criterio numérico
+sin significado estadístico. Los coeficientes de las dos versiones son distintos y
+ninguno de los de la primera versión admite la lectura habitual de "cuánto sube la
+serie en la posición $j$ respecto de la referencia".
+
+La moraleja es incómoda y vale para todo el libro: **una implementación puede darte un
+resultado utilizable de un problema mal planteado, sin avisarte**. Si lo que interesa
+es el pronóstico, la diferencia no importa; si interesa interpretar los coeficientes,
+importa mucho.
+
+### Ejercicio 3
+
+```{python}
+#| label: fig-sol-08-3
+#| fig-cap: "sMAPE de la regresión con Fourier sobre H317 según la cantidad de armónicas. La línea punteada es el error con variables ficticias."
+s = cargar("H317")
+y, te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+h, m = s.horizonte, s.periodo_estacional
+
+errores = []
+for K in range(1, 13):
+    X = matriz_diseno(len(y), 0, m, K)
+    X_futuro = matriz_diseno(h, len(y), m, K)
+    errores.append(smape(te, LinearRegression().fit(X, y).predict(X_futuro)))
+
+X_fict = matriz_diseno(len(y), 0, m, K=None)
+X_fict_futuro = matriz_diseno(h, len(y), m, K=None)
+error_ficticias = smape(te, LinearRegression().fit(X_fict, y).predict(X_fict_futuro))
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=list(range(1, 13)), y=errores, mode="lines+markers",
+    line=dict(color=COLORES["observado"], width=2), name="Fourier",
+))
+fig.add_hline(y=error_ficticias, line_dash="dot", line_width=2,
+              line_color=COLORES["prueba"])
+fig.update_layout(height=400, showlegend=False)
+fig.update_xaxes(title="K (cantidad de armónicas)", dtick=1)
+mostrar(fig, titulo_y="sMAPE")
+
+print(f"sMAPE con ficticias  : {error_ficticias:.3f}")
+print(f"sMAPE con K = m/2 = {m // 2}: {errores[m // 2 - 1]:.3f}")
+print(f"sMAPE con K = 3      : {errores[2]:.3f}")
+```
+
+Sí, hay un punto claro de rendimiento decreciente. La mejora grande está entre $K=2$ y
+$K=3$ —el sMAPE cae de 2,64 a 1,59—, y de ahí en adelante las ganancias son de
+centésimas.
+
+Y la segunda parte se confirma con precisión: **con $K = m/2 = 12$ el error coincide
+exactamente con el de las ficticias**. No es aproximación, es identidad: doce
+armónicas —24 columnas de senos y cosenos— generan el mismo espacio de funciones que
+las 23 ficticias más la constante, así que las dos regresiones ajustan el mismo modelo
+escrito en bases distintas.
+
+Eso deja claro para qué sirve Fourier: no para representar mejor la estacionalidad,
+sino para representarla **con menos parámetros cuando el perfil es suave**. Con $K=3$
+se captura casi todo usando 8 columnas en vez de 25.
+
+### Ejercicio 4
+
+```{python}
+#| label: tbl-sol-08-4
+#| tbl-cap: "Efecto de agregar predictores de ruido puro a la regresión de M35927."
+s = cargar("M35927")
+y, te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+h, m = s.horizonte, s.periodo_estacional
+generador = np.random.default_rng(3)
+
+filas = []
+for n_ruido in (0, 1, 5, 20):
+    X = matriz_diseno(len(y), 0, m, 4)
+    X_futuro = matriz_diseno(h, len(y), m, 4)
+    if n_ruido:
+        X = np.column_stack([X, generador.normal(size=(len(y), n_ruido))])
+        X_futuro = np.column_stack([X_futuro, generador.normal(size=(h, n_ruido))])
+    modelo = LinearRegression().fit(X, y)
+    filas.append({
+        "predictores de ruido": n_ruido,
+        "columnas totales": X.shape[1],
+        "R²": round(modelo.score(X, y), 4),
+        "sMAPE fuera de muestra": round(smape(te, modelo.predict(X_futuro)), 2),
+    })
+
+pd.DataFrame(filas).set_index("predictores de ruido")
+```
+
+El $R^2$ **sube** al agregar ruido, y el sMAPE **empeora**. Las dos cosas a la vez, y
+las dos son inevitables.
+
+El $R^2$ sube porque cada columna nueva le da al modelo un grado de libertad más para
+acomodarse a los datos de entrenamiento, y el ruido —al ser distinto en cada
+observación— siempre correlaciona algo con los residuos por azar. Es aritmética, no
+hallazgo: la @eq-r2 no puede bajar al agregar columnas.
+
+El sMAPE empeora porque en el período de prueba el ruido es **otro** ruido. El modelo
+aprendió coeficientes para acomodarse a fluctuaciones que no se repiten, y al aplicarlo
+a datos nuevos esos términos solo agregan error.
+
+Este ejercicio es la definición operativa del **sobreajuste**, y es la mejor
+introducción posible al @sec-sobreajuste: un modelo puede mejorar indefinidamente su
+ajuste a lo que ya vio mientras empeora su predicción de lo que no vio.
+
+### Ejercicio 5
+
+```{python}
+#| label: tbl-sol-08-5
+#| tbl-cap: "Pronóstico recursivo contra pronóstico directo, con rezagos 1 y 12 sobre M35927."
+s = cargar("M35927")
+y, te, h = s.entrenamiento.to_numpy(), s.prueba.to_numpy(), s.horizonte
+rezagos = [1, 12]
+
+# Recursivo: un modelo a un paso, realimentado.
+X, objetivo = tabla_supervisada(y, rezagos)
+modelo = LinearRegression().fit(X, objetivo)
+historia, recursivo = list(y), []
+for _ in range(h):
+    valor = float(modelo.predict([[historia[-r] for r in rezagos]])[0])
+    recursivo.append(valor)
+    historia.append(valor)
+
+# Directo: un modelo por horizonte.
+directo = []
+for paso in range(1, h + 1):
+    X_d, objetivo_d = tabla_supervisada(y, rezagos, adelanto=paso)
+    modelo_d = LinearRegression().fit(X_d, objetivo_d)
+    directo.append(float(modelo_d.predict([[y[-r] for r in rezagos]])[0]))
+
+pd.DataFrame([
+    {"estrategia": "recursiva", "modelos ajustados": 1,
+     "sMAPE": round(smape(te, recursivo), 3)},
+    {"estrategia": "directa", "modelos ajustados": h,
+     "sMAPE": round(smape(te, directo), 3)},
+]).set_index("estrategia")
+```
+
+Gana la **recursiva**, y por bastante. Es el resultado contrario al que se enuncia
+como regla general —"la directa es mejor a horizontes largos"— y vale la pena entender
+por qué acá no se cumple.
+
+La estrategia directa entrena un modelo distinto para cada horizonte, y cada uno tiene
+que predecir $y_{t+h}$ a partir de $y_t$ y $y_{t-11}$. Para $h = 12$, eso significa
+predecir un valor a partir de observaciones de doce y veintitrés períodos antes: la
+relación es mucho más débil que la del paso inmediato. La recursiva, en cambio, usa
+la relación fuerte de un paso repetidamente, y en una serie con estacionalidad estable
+esa cadena se sostiene bien.
+
+Además cada modelo directo se entrena con menos filas útiles y todos parten de un
+único vector de entrada —el último observado—, así que no aprovechan la información
+que la cadena recursiva va generando.
+
+Cuándo se invierte el resultado: cuando la serie es más ruidosa, porque ahí los
+errores que la recursiva acumula pesan más que la debilidad de la relación directa. El
+@sec-prediccion desarrolla la comparación con más cuidado, y la lección de este
+ejercicio es que **no hay una respuesta universal**.
+
+### Ejercicio 6
+
+```{python}
+#| label: tbl-sol-08-6
+#| tbl-cap: "Coeficientes de un AR(2) estimado por máxima verosimilitud y de una regresión sobre los rezagos 1 y 2."
+from statsmodels.tsa.arima.model import ARIMA
+
+diferenciada = np.diff(cargar("M35927").entrenamiento.to_numpy())
+
+arima = ARIMA(diferenciada, order=(2, 0, 0)).fit()
+X, objetivo = tabla_supervisada(diferenciada, [1, 2])
+regresion = LinearRegression().fit(X, objetivo)
+
+pd.DataFrame([
+    {"método": "ARIMA(2,0,0)", "φ₁": round(float(arima.arparams[0]), 4),
+     "φ₂": round(float(arima.arparams[1]), 4), "observaciones usadas": len(diferenciada)},
+    {"método": "regresión sobre rezagos", "φ₁": round(float(regresion.coef_[0]), 4),
+     "φ₂": round(float(regresion.coef_[1]), 4), "observaciones usadas": len(objetivo)},
+]).set_index("método")
+```
+
+Se parecen mucho: coinciden hasta la tercera cifra decimal. Y no son idénticos, por
+dos razones que conviene distinguir.
+
+**La primera es el manejo de las primeras observaciones.** La regresión necesita dos
+rezagos para construir cada fila, así que descarta las dos primeras observaciones y
+estima con $T-2$ filas. El ARIMA de `statsmodels` usa una representación de espacio de
+estados que **sí incorpora** esas dos observaciones, tratando los valores iniciales como
+parte del modelo. Es la diferencia entre verosimilitud condicional y exacta.
+
+**La segunda es el criterio de estimación.** La regresión minimiza la suma de cuadrados
+de los residuos; el ARIMA maximiza la verosimilitud del modelo completo. Bajo errores
+normales los dos criterios coinciden asintóticamente, y por eso los coeficientes se
+parecen tanto, pero no son el mismo cálculo.
+
+Con series largas la diferencia es despreciable —dos observaciones de trescientas—. Con
+series cortas puede ser apreciable, y ahí la formulación de espacio de estados tiene
+ventaja porque no tira datos.
+
+Lo que este ejercicio deja establecido es más importante que la diferencia numérica:
+**un modelo autorregresivo y una regresión sobre rezagos son el mismo modelo**. Ese
+puente es lo que hace que todo lo aprendido en la Parte I siga siendo válido cuando la
+Parte II reemplace la regresión lineal por un bosque aleatorio o una red.
+
 ## Capítulo 9 · Suavizado exponencial {#sec-soluciones-09}
 
 ```{python}

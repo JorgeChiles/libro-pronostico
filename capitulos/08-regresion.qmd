@@ -1,7 +1,497 @@
+---
+resources:
+  - datos/cap04_estacionales.csv
+---
+
 # Regresión para series {#sec-regresion}
 
-Tendencia, variables calendario, términos de Fourier y rezagos.
+```{python}
+#| echo: false
+import warnings
 
-::: {.callout-note appearance="simple"}
-Capítulo en preparación.
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+from sklearn.linear_model import LinearRegression
+
+from libro.datos import cargar, catalogo
+from libro.graficos import COLORES, mostrar
+
+warnings.simplefilter("ignore")
+
+
+def smape(real, pron):
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    return 200 * np.mean(np.abs(real - pron) / (np.abs(real) + np.abs(pron)))
+```
+
+Los métodos del @sec-suavizado y del @sec-arima usan únicamente el pasado de la
+serie. La regresión abre otra puerta: **explicar la serie con variables**, algunas
+construidas a partir del tiempo y otras externas.
+
+El cambio es más profundo de lo que parece. Un ARIMA responde "¿qué sigue, dado cómo
+venía?"; una regresión responde "¿qué sigue, dado que estamos en diciembre, que la
+tendencia es esta y que el precio del insumo subió?". La segunda pregunta permite
+incorporar conocimiento del dominio, y es también el puente hacia la Parte II: en
+cuanto una serie se escribe como una tabla de predictores y una variable objetivo,
+todo el aparato del aprendizaje supervisado queda disponible.
+
+## El modelo {#sec-modelo-regresion}
+
+Con $k$ predictores observados en el momento $t$:
+
+$$
+y_t = \beta_0 + \beta_1 x_{1,t} + \beta_2 x_{2,t} + \cdots
+      + \beta_k x_{k,t} + \varepsilon_t
+$$ {#eq-regresion}
+
+Los coeficientes se estiman por mínimos cuadrados, igual que en cualquier regresión.
+Lo específico de las series de tiempo no está en la estimación sino en dos cosas: **de
+dónde salen los predictores** y **qué supuestos sobre $\varepsilon_t$ se violan**.
+
+Sobre lo segundo conviene ser explícito desde el principio. La regresión clásica
+supone errores independientes, y en una serie de tiempo casi nunca lo son. Eso no
+sesga los coeficientes, pero **sí invalida sus errores estándar y sus pruebas de
+significación**, que quedan demasiado optimistas: un coeficiente que parece
+significativo puede no serlo. El diagnóstico del @sec-diagnostico-residuos es
+obligatorio acá.
+
+## La tendencia como predictor {#sec-tendencia-predictor}
+
+El predictor más simple es el índice temporal:
+
+$$
+y_t = \beta_0 + \beta_1 t + \varepsilon_t
+$$ {#eq-tendencia}
+
+Ajustar esa recta es fácil y esconde un supuesto fuerte: que **una sola pendiente
+describe toda la historia**. El suavizado exponencial no supone eso —su $b_t$ se
+actualiza en cada período—, y la diferencia se nota cuando la serie cambia de
+régimen:
+
+```{python}
+#| label: fig-tendencia-quiebre
+#| fig-cap: "Tendencia lineal global ajustada a M32692, la serie con quiebre de nivel. La recta no describe ningún tramo de la serie."
+serie = cargar("M32692")
+y = serie.entrenamiento.to_numpy()
+t = np.arange(len(y))
+
+modelo = LinearRegression().fit(t.reshape(-1, 1), y)
+ajustado = modelo.predict(t.reshape(-1, 1))
+residuos = y - ajustado
+
+fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.09,
+                    subplot_titles=["serie y tendencia lineal ajustada", "residuos"])
+fig.add_trace(go.Scatter(
+    x=serie.entrenamiento.index, y=y, mode="lines", name="observado",
+    line=dict(color=COLORES["observado"], width=1.4),
+), row=1, col=1)
+fig.add_trace(go.Scatter(
+    x=serie.entrenamiento.index, y=ajustado, mode="lines", name="tendencia",
+    line=dict(color=COLORES["pronostico"], width=2.4),
+), row=1, col=1)
+fig.add_trace(go.Scatter(
+    x=serie.entrenamiento.index, y=residuos, mode="lines", name="residuos",
+    line=dict(color=COLORES["auxiliar"], width=1.1),
+), row=2, col=1)
+fig.add_hline(y=0, line_width=1, line_color=COLORES["prueba"], row=2, col=1)
+fig.update_layout(height=540, showlegend=False)
+mostrar(fig)
+
+tercio = len(residuos) // 3
+for i, tramo in enumerate(
+    [residuos[:tercio], residuos[tercio:2 * tercio], residuos[2 * tercio:]], start=1
+):
+    print(f"residuo medio del tercio {i}: {tramo.mean():+8.1f}")
+```
+
+Los residuos no oscilan alrededor de cero: son negativos al principio, positivos en
+el medio y negativos otra vez. Eso significa que **la recta no describe ningún tramo
+de la serie**; es un compromiso entre regímenes distintos y por lo tanto una mala
+descripción de todos.
+
+Y sin embargo la tendencia lineal no es siempre mala. Conviene medirlo sobre
+horizontes largos, contra la alternativa amortiguada del @sec-amortiguada:
+
+```{python}
+#| label: tbl-tendencia-larga
+#| tbl-cap: "Regresión con tendencia lineal contra Holt amortiguado, sobre horizontes largos construidos cortando cada serie al 60 %."
+from statsmodels.tsa.holtwinters import Holt
+
+filas = []
+for serie_id in ["Q1915", "M39292", "M32692"]:
+    s = cargar(serie_id)
+    completa = s.completa.to_numpy()
+    corte = int(len(completa) * 0.6)
+    entrenamiento, prueba = completa[:corte], completa[corte:]
+    h = len(prueba)
+    indice = np.arange(corte)
+
+    lineal = LinearRegression().fit(
+        indice.reshape(-1, 1), entrenamiento
+    ).predict(np.arange(corte, corte + h).reshape(-1, 1))
+
+    amortiguado = Holt(
+        entrenamiento, damped_trend=True, initialization_method="estimated"
+    ).fit().forecast(h)
+
+    filas.append({
+        "serie": s.id,
+        "fenómeno": s.fenomeno or "—",
+        "h": h,
+        "tendencia lineal": smape(prueba, lineal),
+        "Holt amortiguado": smape(prueba, amortiguado),
+    })
+
+pd.DataFrame(filas).set_index("serie").round(2)
+```
+
+El resultado no favorece a ninguno de los dos en general: en una serie la tendencia
+lineal pierde por mucho y en otra gana por mucho. La lectura correcta es que **la
+tendencia lineal es una apuesta a que la pendiente es global**. Cuando lo es, usar
+toda la historia da una pendiente más precisa que la de un método que solo pondera lo
+reciente; cuando no lo es, el error es grande.
+
+## Estacionalidad con variables ficticias {#sec-ficticias}
+
+Para modelar estacionalidad con regresión se agregan **variables ficticias** (*dummy
+variables*): una por cada posición del ciclo, menos una. Con período $m$:
+
+$$
+y_t = \beta_0 + \beta_1 t + \sum_{j=1}^{m-1} \gamma_j\, d_{j,t} + \varepsilon_t,
+\qquad
+d_{j,t} = \begin{cases}
+1 & \text{si } t \text{ cae en la posición } j \text{ del ciclo}, \\
+0 & \text{en otro caso.}
+\end{cases}
+$$ {#eq-ficticias}
+
+Van $m-1$ y no $m$ por una razón que conviene entender: con las $m$ ficticias más la
+constante, la suma de las ficticias es idénticamente 1, así que la matriz de diseño
+tiene columnas linealmente dependientes y el sistema no tiene solución única. Es la
+**trampa de las variables ficticias**, y la salida es omitir una posición, que queda
+absorbida por la constante y actúa como referencia.
+
+::: {.callout-warning}
+## En M4, la posición del ciclo no es el mes del calendario
+
+El @sec-fechas-m4 advierte que las fechas declaradas por M4 son irregulares. Por eso
+las ficticias de este capítulo se construyen sobre la **posición dentro del ciclo**
+—$t \bmod m$— y no sobre el mes del calendario.
+
+La distinción importa cuando el efecto que se quiere capturar es del calendario y no
+del ciclo: feriados, cantidad de días hábiles del mes, Pascua, que cambia de fecha
+todos los años. Esos efectos existen y son grandes en series de venta minorista, y
+requieren fechas confiables. Con M4 no se pueden estudiar, y decirlo es preferible a
+construir una variable de calendario sobre fechas que no significan nada.
+:::
+
+## Términos de Fourier {#sec-fourier}
+
+Las ficticias tienen un problema de tamaño: con $m = 24$ hacen falta 23 columnas, y
+con $m = 168$ —una semana de datos horarios— hacen falta 167. Los **términos de
+Fourier** describen el mismo ciclo con muchos menos parámetros, sumando senos y
+cosenos de frecuencias crecientes:
+
+$$
+y_t = \beta_0 + \beta_1 t
+    + \sum_{k=1}^{K} \left[
+      \alpha_k \sin\!\left(\frac{2\pi k t}{m}\right)
+    + \delta_k \cos\!\left(\frac{2\pi k t}{m}\right)
+    \right] + \varepsilon_t
+$$ {#eq-fourier}
+
+Cada $k$ agrega dos parámetros y una armónica más fina: $k=1$ es un ciclo completo por
+período, $k=2$ son dos ciclos, y así. Con $K = m/2$ la representación es equivalente a
+las ficticias; con $K$ menor es una aproximación suave que descarta los detalles más
+finos del perfil estacional.
+
+```{python}
+#| label: fig-fourier-terminos
+#| fig-cap: "Las primeras tres armónicas de Fourier para m = 24. La línea punteada marca un período completo."
+pasos = np.arange(0, 48)
+m_demo = 24
+
+fig = go.Figure()
+for k in (1, 2, 3):
+    fig.add_trace(go.Scatter(
+        x=pasos, y=np.sin(2 * np.pi * k * pasos / m_demo),
+        mode="lines", name=f"seno, k = {k}", line=dict(width=2),
+    ))
+fig.add_vline(x=m_demo, line_dash="dot", line_width=1,
+              line_color=COLORES["auxiliar"])
+fig.update_layout(height=360)
+fig.update_xaxes(title="paso")
+mostrar(fig, titulo_y="valor")
+```
+
+La pregunta práctica es cuántos términos hacen falta, y se puede medir:
+
+```{python}
+#| label: tbl-fourier-vs-ficticias
+#| tbl-cap: "Fourier con distinta cantidad de armónicas contra variables ficticias, en las series horarias del catálogo (m = 24)."
+def matriz_diseno(n_obs, inicio, m, K=None, con_tendencia=True):
+    """Constante, tendencia y estacionalidad.
+
+    Con `K=None` usa variables ficticias; con K entero usa términos de Fourier.
+    """
+    t = np.arange(inicio, inicio + n_obs)
+    columnas = [np.ones(n_obs)]
+    if con_tendencia:
+        columnas.append(t.astype(float))
+    if K is None and m > 1:
+        posicion = t % m
+        columnas.extend((posicion == j).astype(float) for j in range(1, m))
+    elif K:
+        for k in range(1, K + 1):
+            columnas.append(np.sin(2 * np.pi * k * t / m))
+            columnas.append(np.cos(2 * np.pi * k * t / m))
+    return np.column_stack(columnas)
+
+
+def error_regresion(y, prueba, m, h, K=None):
+    X = matriz_diseno(len(y), 0, m, K)
+    X_futuro = matriz_diseno(h, len(y), m, K)
+    modelo = LinearRegression().fit(X, y)
+    return smape(prueba, modelo.predict(X_futuro)), X.shape[1]
+
+
+filas = []
+for s in cargar(n=len(catalogo())):
+    if s.frecuencia != "horaria":
+        continue
+    y_s, te_s = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    h_s, m_s = s.horizonte, s.periodo_estacional
+
+    error_ficticias, n_ficticias = error_regresion(y_s, te_s, m_s, h_s, K=None)
+    fila = {"serie": s.id, "ficticias": error_ficticias}
+    for K in (2, 4, 6):
+        fila[f"K = {K}"] = error_regresion(y_s, te_s, m_s, h_s, K=K)[0]
+    fila["par. ficticias"] = n_ficticias
+    fila["par. K = 4"] = 2 + 2 * 4
+    filas.append(fila)
+
+pd.DataFrame(filas).set_index("serie").round(2)
+```
+
+El resultado es más matizado que la promesa habitual. Con $K = 6$ —catorce
+parámetros— Fourier iguala a las ficticias, que usan veinticinco. Con $K = 4$ —diez
+parámetros— queda muy cerca en la mayoría de las series y algo peor en dos. Y con
+$K = 2$ pierde de manera clara en las series de ciclo más marcado, porque cuatro
+armónicas no alcanzan para describir un perfil horario con picos definidos.
+
+La conclusión práctica: **Fourier ahorra parámetros, pero hay que elegir $K$, y el
+valor correcto depende de cuán detallado sea el perfil estacional**. El ahorro es
+moderado con $m = 24$ y decisivo con $m$ grande, que es el caso de la estacionalidad
+múltiple —ciclo diario y semanal a la vez— donde las ficticias son directamente
+impracticables.
+
+## El $R^2$ no sirve para elegir {#sec-r2}
+
+Al agregar predictores aparece la tentación de guiarse por el coeficiente de
+determinación:
+
+$$
+R^2 = 1 - \frac{\sum_t (y_t - \hat{y}_t)^2}{\sum_t (y_t - \bar{y})^2}
+$$ {#eq-r2}
+
+El problema es estructural: **el $R^2$ nunca baja al agregar un predictor**, aunque el
+predictor sea ruido. Se lo puede ver subiendo $K$:
+
+```{python}
+#| label: tbl-r2-vs-smape
+#| tbl-cap: "R² dentro de la muestra y sMAPE fuera de la muestra al aumentar la cantidad de armónicas, sobre M35927."
+s = cargar("M35927")
+y, te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+h, m = s.horizonte, s.periodo_estacional
+
+filas = []
+for K in range(1, 7):
+    X = matriz_diseno(len(y), 0, m, K)
+    X_futuro = matriz_diseno(h, len(y), m, K)
+    modelo = LinearRegression().fit(X, y)
+    filas.append({
+        "K": K,
+        "parámetros": X.shape[1],
+        "R²": modelo.score(X, y),
+        "sMAPE fuera de muestra": smape(te, modelo.predict(X_futuro)),
+    })
+
+pd.DataFrame(filas).set_index("K").round(4)
+```
+
+El $R^2$ sube de manera monótona y el sMAPE fuera de muestra **no mejora**. Quien
+eligiera $K$ por $R^2$ elegiría el modelo más grande y no ganaría nada.
+
+Para elegir hay dos alternativas legítimas, y las dos ya aparecieron en el libro: el
+**AICc** de la @eq-aicc, que penaliza la complejidad, y la **evaluación fuera de
+muestra** del @sec-evaluacion. El $R^2$ ajustado corrige parte del problema pero sigue
+siendo una medida de ajuste dentro de la muestra, no de capacidad predictiva. Sobre
+esto vuelve, con mucho más detalle, el @sec-sobreajuste.
+
+## Rezagos como predictores {#sec-rezagos-predictores}
+
+Hasta acá los predictores se construyeron a partir del tiempo. También se puede usar
+**el pasado de la serie misma**:
+
+$$
+y_t = \beta_0 + \sum_{j \in L} \phi_j\, y_{t-j} + \varepsilon_t
+$$ {#eq-rezagos-regresion}
+
+donde $L$ es el conjunto de rezagos elegidos. Comparando la @eq-rezagos-regresion con
+la @eq-ar del @sec-identificacion se ve que **es un modelo autorregresivo escrito
+como regresión**. La diferencia no es matemática sino de enfoque: acá los rezagos son
+columnas de una tabla, y se pueden elegir con criterios de selección de variables en
+vez de con el correlograma.
+
+```{python}
+#| label: tbl-rezagos
+#| tbl-cap: "Regresión sobre distintos conjuntos de rezagos, con pronóstico recursivo, sobre M35927."
+def tabla_supervisada(y, rezagos):
+    """Convierte la serie en una tabla de predictores y objetivo."""
+    maximo = max(rezagos)
+    X = np.array([[y[i - r] for r in rezagos] for i in range(maximo, len(y))])
+    objetivo = np.array([y[i] for i in range(maximo, len(y))])
+    return X, objetivo
+
+
+def pronostico_recursivo(modelo, y, rezagos, h):
+    """Pronostica h pasos realimentando las predicciones anteriores."""
+    historia = list(y)
+    salida = []
+    for _ in range(h):
+        valor = float(modelo.predict([[historia[-r] for r in rezagos]])[0])
+        salida.append(valor)
+        historia.append(valor)
+    return np.array(salida)
+
+
+filas = []
+for rezagos in ([1], [1, 2], [1, 12], [1, 2, 12], [1, 2, 3, 12, 24]):
+    X, objetivo = tabla_supervisada(y, rezagos)
+    modelo = LinearRegression().fit(X, objetivo)
+    filas.append({
+        "rezagos": str(rezagos),
+        "predictores": len(rezagos),
+        "R²": modelo.score(X, objetivo),
+        "sMAPE": smape(te, pronostico_recursivo(modelo, y, rezagos, h)),
+    })
+
+pd.DataFrame(filas).set_index("rezagos").round(4)
+```
+
+El salto está en agregar el rezago 12. Pasar de `[1]` a `[1, 12]` baja el sMAPE a
+menos de la mitad, mientras que pasar de `[1]` a `[1, 2]` casi no cambia nada. La
+razón es la del @sec-autocorrelacion: en esta serie el rezago informativo es el
+estacional, no el inmediato.
+
+Ese es el resultado más importante del capítulo para lo que viene: **cuáles rezagos se
+incluyen importa mucho más que cuántos**. Elegirlos es ingeniería de características,
+el tema del @sec-ingenieria.
+
+::: {.callout-note}
+## Dos advertencias sobre el pronóstico recursivo
+
+La función `pronostico_recursivo` hace algo que merece atención: para pronosticar el
+paso 2 usa su propia predicción del paso 1. Eso tiene dos consecuencias.
+
+**Los errores se acumulan.** Un error en el primer paso contamina todos los
+siguientes, y la incertidumbre real crece más rápido que lo que sugiere el error a un
+paso.
+
+**Cambia lo que el modelo está resolviendo.** El modelo se entrenó para predecir un
+paso adelante con valores observados, y se lo usa para predecir dieciocho con valores
+inventados por él mismo. Es una diferencia de fondo entre entrenamiento y uso.
+
+La alternativa es entrenar un modelo por horizonte —la estrategia **directa**— y la
+comparación entre las dos es el tema del @sec-prediccion.
+:::
+
+## Regresión contra los métodos anteriores {#sec-comparacion-regresion}
+
+```{python}
+#| label: tbl-comparacion-regresion
+#| tbl-cap: "Regresión con tendencia y Fourier contra el naive estacional y Holt-Winters, sobre las series estacionales del catálogo."
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+
+filas = []
+for s in cargar(n=len(catalogo())):
+    if s.periodo_estacional <= 1 or s.n < 3 * s.periodo_estacional:
+        continue
+    y_s, te_s = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    h_s, m_s = s.horizonte, s.periodo_estacional
+    K = min(4, max(1, m_s // 2))
+
+    snaive = np.array([y_s[-m_s + (i % m_s)] for i in range(h_s)])
+    try:
+        hw = ExponentialSmoothing(
+            y_s, trend="add", seasonal="add", seasonal_periods=m_s,
+            initialization_method="estimated",
+        ).fit().forecast(h_s)
+        error_hw = smape(te_s, hw)
+    except Exception:
+        error_hw = np.nan
+
+    filas.append({
+        "serie": s.id,
+        "regresión + Fourier": error_regresion(y_s, te_s, m_s, h_s, K=K)[0],
+        "naive estacional": smape(te_s, snaive),
+        "Holt-Winters": error_hw,
+    })
+
+resultados = pd.DataFrame(filas).set_index("serie")
+nombres = ["regresión + Fourier", "naive estacional", "Holt-Winters"]
+
+resumen = resultados[nombres].agg(["mean", "median", "count"]).T
+resumen.columns = ["sMAPE medio", "sMAPE mediano", "series"]
+resumen.round(2)
+```
+
+```{python}
+#| label: tbl-ganadores-regresion
+#| tbl-cap: "En cuántas series gana cada método."
+resultados[nombres].idxmin(axis=1).value_counts().rename("series donde gana").to_frame()
+```
+
+La regresión no domina, y era esperable: con tendencia global y estacionalidad fija es
+un modelo más rígido que Holt-Winters, que actualiza las tres componentes en cada
+período. Lo que ofrece a cambio es **extensibilidad**: se le pueden agregar
+predictores externos, y ninguno de los otros métodos puede hacerlo sin cambiar de
+familia.
+
+Ese es el argumento real de este capítulo. La regresión no está acá porque gane: está
+porque es el marco donde entran las variables explicativas, y donde empieza la Parte
+II.
+
+## Ejercicios
+
+Las soluciones están en el @sec-soluciones-08.
+
+**1.** Ajusta la @eq-tendencia a `Q1915` y grafica los residuos. ¿Oscilan alrededor de
+cero o tienen la forma sistemática de la @fig-tendencia-quiebre?
+
+**2.** Construye la matriz de diseño con las $m$ ficticias, sin omitir ninguna, y
+ajusta la regresión. ¿Qué hace `scikit-learn` con la dependencia lineal? Compara los
+coeficientes con los de la versión de $m-1$ ficticias.
+
+**3.** Para una serie horaria del catálogo, calcula el sMAPE con $K$ de 1 a 12 y
+grafícalo. ¿Hay un valor a partir del cual deja de mejorar? ¿Coincide con el
+$K = m/2$ que sería equivalente a las ficticias?
+
+**4.** Agrega a la regresión de `M35927` un predictor de ruido puro generado con
+`np.random.normal` y mira qué le pasa al $R^2$ y al sMAPE. Repite con cinco
+predictores de ruido.
+
+**5.** Usando la @eq-rezagos-regresion con rezagos `[1, 12]`, compara el pronóstico
+recursivo contra uno directo: un modelo distinto para cada horizonte
+$h = 1, \ldots, 18$, entrenado con el objetivo desplazado $h$ pasos. ¿Cuál anda mejor?
+
+**6.** La @eq-rezagos-regresion es un AR escrito como regresión. Ajusta un
+ARIMA(2,0,0) a la serie diferenciada de `M35927` y una regresión sobre sus rezagos 1 y
+2. ¿Cuánto se parecen los coeficientes? ¿Por qué no son idénticos?
+
+## Referencias {.unnumbered}
+
+::: {#refs}
 :::

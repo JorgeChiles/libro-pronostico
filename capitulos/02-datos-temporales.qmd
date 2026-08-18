@@ -210,8 +210,15 @@ print(f"de {len(horaria.entrenamiento)} horas a {len(diaria)} días")
 diaria.head()
 ```
 
-`resample("D")` agrupa por día y `.mean()` decide qué hacer con las 24
-observaciones de cada grupo. **Esa elección es parte del modelo, no una
+Formalmente, agregar de una frecuencia fina a otra más gruesa con factor $a$ —24 en
+este caso— es aplicar una función $g$ a bloques consecutivos de observaciones:
+
+$$
+y^{(a)}_\tau = g\left( y_{(\tau-1)a+1},\ y_{(\tau-1)a+2},\ \ldots,\ y_{\tau a} \right)
+$$ {#eq-agregacion}
+
+`resample("D")` construye los bloques de la @eq-agregacion y `.mean()` es la función
+$g$ que decide qué hacer con las 24 observaciones de cada uno. **Esa elección es parte del modelo, no una
 formalidad**: el promedio responde "cuánto en un día típico", la suma responde
 "cuánto en total", `.last()` responde "cómo terminó el día". Para consumo
 eléctrico, la suma; para un precio, el promedio o el cierre; para un stock, el
@@ -394,13 +401,40 @@ pd.DataFrame({
 }).round(1)
 ```
 
-`shift(1)` corre la serie un paso hacia adelante, así que en cada fila queda el
-valor anterior: es la forma de convertir una serie en un problema supervisado, y
-de eso se trata el @sec-supervisado. `diff()` es exactamente `y - y.shift(1)`. Y
-`rolling(3).mean()` promedia cada punto con los dos anteriores.
+Las tres tienen definición precisa. El **rezago** (*lag*) de orden $k$ desplaza la
+serie:
 
-Ese "los dos anteriores" es el punto. `rolling` tiene un argumento `center` que
-parece inocente:
+$$
+L_k(y)_t = y_{t-k}
+$$ {#eq-rezago}
+
+La **diferencia** es la resta entre el valor y su rezago inmediato:
+
+$$
+\Delta y_t = y_t - y_{t-1}
+$$ {#eq-diferencia-cap2}
+
+Y la **media móvil** de ventana $w$ hacia atrás promedia cada punto con los $w-1$
+anteriores:
+
+$$
+\text{MM}_w(y)_t = \frac{1}{w} \sum_{j=0}^{w-1} y_{t-j}
+$$ {#eq-media-movil}
+
+En código, `shift(1)` es la @eq-rezago con $k=1$: en cada fila deja el valor anterior,
+que es la forma de convertir una serie en un problema supervisado, y de eso se trata el
+@sec-supervisado. `diff()` es exactamente `y - y.shift(1)`, la @eq-diferencia-cap2. Y
+`rolling(3).mean()` es la @eq-media-movil con $w=3$.
+
+Ese "los $w-1$ anteriores" de la @eq-media-movil es el punto. `rolling` tiene un
+argumento `center` que cambia los índices de la suma:
+
+$$
+\text{MM}^{\text{centrada}}_w(y)_t
+= \frac{1}{w} \sum_{j=-(w-1)/2}^{(w-1)/2} y_{t+j}
+$$ {#eq-media-movil-centrada}
+
+y el cambio parece inocente:
 
 ```{python}
 #| label: tbl-rolling-centrada

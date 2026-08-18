@@ -52,12 +52,30 @@ Antes de seguir leyendo, mira el gráfico y decide qué valor esperás para el m
 siguiente. Después decide un rango: dos números tales que te sorprendería que el
 valor real quedara afuera.
 
-Esas dos respuestas son las dos mitades de un pronóstico. La primera es el
-**pronóstico puntual** (*point forecast*), un número. La segunda es el
-**intervalo de predicción** (*prediction interval*), que dice cuánta
-incertidumbre hay alrededor de ese número. Un pronóstico sin la segunda mitad
-está incompleto, y en la práctica es peor que incompleto: invita a tratar una
-conjetura como un dato.
+Esas dos respuestas son las dos mitades de un pronóstico, y conviene escribirlas con
+precisión porque el libro las usa todo el tiempo.
+
+Lo que se pronostica no es un número sino una **distribución**: la de los valores
+posibles de $y_{T+h}$ dado todo lo observado hasta $T$, que se anota
+$y_{T+h} \mid \mathcal{I}_T$. El **pronóstico puntual** (*point forecast*) es un
+resumen de esa distribución, habitualmente su media:
+
+$$
+\hat{y}_{T+h|T} = \mathbb{E}\left[\, y_{T+h} \mid \mathcal{I}_T \,\right]
+$$ {#eq-pronostico-puntual}
+
+Y el **intervalo de predicción** (*prediction interval*) de nivel $1-\alpha$ es un
+par de límites que contiene al valor real con esa probabilidad:
+
+$$
+\Pr\left(\, \ell_{T+h} \le y_{T+h} \le u_{T+h} \mid \mathcal{I}_T \,\right)
+= 1 - \alpha
+$$ {#eq-intervalo}
+
+La @eq-pronostico-puntual es lo que casi todos llaman "el pronóstico"; la
+@eq-intervalo es lo que dice cuánto confiar en él. Un pronóstico sin la @eq-intervalo está
+incompleto, y en la práctica es peor que incompleto: invita a tratar una conjetura
+como un dato.
 
 La competencia M4 [@makridakis2020] reservó las 18 observaciones siguientes para evaluar. Son
 estas:
