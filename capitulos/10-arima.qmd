@@ -710,16 +710,12 @@ print(f"media de los residuos    : {residuos.mean():.3f}")
 print(f"Ljung-Box, p-valor       : {prueba_lb['lb_pvalue'].iloc[0]:.4f}")
 ```
 
-1. **Media cercana a cero.** Si no, el pronóstico tiene sesgo sistemático y hay que
-   revisar la constante.
-2. **Sin autocorrelación.** La prueba de @ljungbox1978 lo resume en un número, y es
-   preferible a mirar rezago por rezago por el problema de comparaciones múltiples
-   del @sec-autocorrelacion.
-3. **Varianza constante.** Si el gráfico de residuos se abre como un embudo, falta
-   una transformación —logaritmo o Box-Cox [@boxcox1964]—.
-4. **Distribución aproximadamente normal.** Es la condición menos importante para el
-   pronóstico puntual, y la más importante para los intervalos: como vimos en el
-   @sec-intervalos, es de donde viene la subcobertura.
+Las cuatro condiciones son las del @sec-diagnostico-residuos —media cero, sin
+autocorrelación, varianza constante y distribución aproximadamente normal— y se leen
+igual acá. Lo que cambia con un ARIMA es la interpretación de la segunda: en un
+método simple, la autocorrelación remanente indica que **falta modelar algo**; en un
+ARIMA ya especificado, indica que **los órdenes elegidos son insuficientes**, y el
+correlograma de los residuos suele decir en qué rezago agregar un término.
 
 Que los residuos no pasen la prueba no invalida el modelo para pronosticar: los
 pronósticos pueden seguir siendo útiles. Lo que invalida es la **cuantificación de

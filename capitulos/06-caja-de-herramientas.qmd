@@ -1,7 +1,615 @@
+---
+resources:
+  - datos/cap04_estacionales.csv
+---
+
 # La caja de herramientas {#sec-caja-de-herramientas}
 
-Naive, naive estacional, media y deriva; diagnóstico de residuos.
+```{python}
+#| echo: false
+import warnings
 
-::: {.callout-note appearance="simple"}
-Capítulo en preparación.
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
+from libro.datos import cargar, catalogo
+from libro.graficos import COLORES, mostrar
+
+warnings.simplefilter("ignore")
+
+
+def smape(real, pron):
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    return 200 * np.mean(np.abs(real - pron) / (np.abs(real) + np.abs(pron)))
+```
+
+El @sec-que-es-pronosticar presentó cuatro métodos que no aprenden nada y los usó
+para mostrar que el mejor método depende de la serie. Este capítulo los toma en
+serio: los define con precisión, les agrega intervalos de predicción, suma el
+benchmark oficial de M4 y establece el procedimiento de diagnóstico que se usa en
+todo el resto del libro.
+
+Vale aclarar por qué merecen un capítulo. Un método simple no está acá para ganar,
+está para **fijar la vara**. Si un modelo con veinte parámetros no le gana al naive,
+ese modelo no aporta nada, y sin la vara no hay manera de saberlo. Cuando M4 evaluó
+61 métodos, la referencia contra la que se midieron todos fue uno de estos
+[@makridakis2020].
+
+## Los cuatro métodos {#sec-cuatro-metodos}
+
+Con $T$ observaciones y un horizonte $h$, y usando la notación
+$\hat{y}_{T+h|T}$ del @sec-suavizado:
+
+El **naive** repite la última observación:
+
+$$
+\hat{y}_{T+h|T} = y_T
+$$ {#eq-naive}
+
+El **naive estacional** repite la observación correspondiente del último ciclo
+completo, con $k = \lfloor (h-1)/m \rfloor$:
+
+$$
+\hat{y}_{T+h|T} = y_{T+h-m(k+1)}
+$$ {#eq-snaive}
+
+La **media** promedia toda la serie:
+
+$$
+\hat{y}_{T+h|T} = \bar{y} = \frac{1}{T}\sum_{t=1}^{T} y_t
+$$ {#eq-media}
+
+Y la **deriva** extiende la recta que une la primera y la última observación:
+
+$$
+\hat{y}_{T+h|T} = y_T + h \left( \frac{y_T - y_1}{T-1} \right)
+$$ {#eq-deriva}
+
+La @eq-deriva tiene una lectura que conviene notar: la pendiente que extrapola es
+**el promedio de todos los cambios observados**, porque la suma de las diferencias
+telescopa a $y_T - y_1$. No es una recta ajustada por mínimos cuadrados; es más
+simple y más frágil, porque depende solo de dos observaciones.
+
+```{python}
+def naive(y, h, m=1):
+    """Repite la última observación."""
+    return np.repeat(y[-1], h)
+
+
+def naive_estacional(y, h, m):
+    """Repite el último ciclo estacional completo."""
+    if m <= 1:
+        return naive(y, h)
+    return np.array([y[-m + (i % m)] for i in range(h)])
+
+
+def media(y, h, m=1):
+    """La media de toda la serie."""
+    return np.repeat(np.mean(y), h)
+
+
+def deriva(y, h, m=1):
+    """Extiende la recta entre la primera y la última observación."""
+    pendiente = (y[-1] - y[0]) / (len(y) - 1)
+    return y[-1] + pendiente * np.arange(1, h + 1)
+```
+
+Los cuatro tienen equivalente ARIMA, lo que los conecta con el @sec-modelo-arima:
+el naive es un ARIMA(0,1,0), la deriva es un ARIMA(0,1,0) con constante, y la media
+es un ARIMA(0,0,0) con constante. No son atajos heurísticos: son modelos con
+especificación mínima.
+
+```{python}
+#| label: fig-cuatro-metodos
+#| fig-cap: "Los cuatro métodos sobre la misma serie. Cada uno hace un supuesto distinto sobre qué se conserva del pasado."
+serie = cargar("M35927")
+y = serie.entrenamiento.to_numpy()
+h, m = serie.horizonte, serie.periodo_estacional
+
+metodos = {
+    "naive": naive, "naive estacional": naive_estacional,
+    "media": media, "deriva": deriva,
+}
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=serie.entrenamiento.index[-48:], y=y[-48:], mode="lines", name="observado",
+    line=dict(color=COLORES["observado"], width=1.8),
+))
+fig.add_trace(go.Scatter(
+    x=serie.prueba.index, y=serie.prueba.values, mode="lines",
+    name="observado (prueba)",
+    line=dict(color=COLORES["prueba"], width=1.8, dash="dot"),
+))
+for nombre, funcion in metodos.items():
+    fig.add_trace(go.Scatter(
+        x=serie.prueba.index, y=funcion(y, h, m), mode="lines", name=nombre,
+        line=dict(width=2),
+    ))
+fig.update_layout(height=440)
+mostrar(fig, titulo_y="unidades")
+```
+
+## Naive2, el benchmark de M4 {#sec-naive2}
+
+El naive simple es una vara baja en cualquier serie con estacionalidad: repetir el
+valor de diciembre para pronosticar enero garantiza un error grande. M4 usa una
+referencia más exigente, llamada **Naive2**, que consiste en tres pasos:
+
+1. **Desestacionalizar** la serie, si es estacional.
+2. Aplicar el **naive** a la serie desestacionalizada.
+3. **Volver a estacionalizar** el pronóstico.
+
+La desestacionalización es multiplicativa: se estiman $m$ índices estacionales
+$s_1, \ldots, s_m$ normalizados de modo que sumen $m$, y se divide cada observación
+por el índice que le corresponde:
+
+$$
+y^{\text{des}}_t = \frac{y_t}{s_{((t-1) \bmod m) + 1}},
+\qquad \sum_{j=1}^{m} s_j = m
+$$ {#eq-desestacionalizar}
+
+### El paso previo: ¿es estacional? {#sec-test-estacionalidad}
+
+El procedimiento solo desestacionaliza si la serie pasa una prueba, y la prueba que
+usa M4 merece atención. Se calcula la autocorrelación al rezago $m$ y se la compara
+contra una banda construida con las autocorrelaciones anteriores:
+
+$$
+\text{estacional si}\quad
+\left| r_m \right| >
+1{,}645 \sqrt{\frac{1 + 2\sum_{i=1}^{m-1} r_i^2}{T}}
+$$ {#eq-test-estacionalidad}
+
+El 1,645 es el cuantil del 95 % de la normal para una prueba de una cola, es decir
+un nivel del 90 % en dos colas. La banda es una versión de la
+@eq-banda del @sec-autocorrelacion, corregida por la autocorrelación acumulada de
+los rezagos anteriores.
+
+::: {.callout-note}
+## Una particularidad del código oficial de M4
+
+Al implementar la @eq-test-estacionalidad para reproducir los resultados publicados
+apareció un detalle: **en el código original de la competencia, el primer término de
+la suma no va al cuadrado.** Es decir, calcula $r_1 + \sum_{i=2}^{m-1} r_i^2$ en vez
+de $\sum_{i=1}^{m-1} r_i^2$.
+
+Difiere de la fórmula de libro y es casi con seguridad un desliz de programación,
+pero está en el código con el que se calcularon los benchmarks publicados. Para
+reproducir esos números hay que reproducir el desliz.
+
+Cuánto importa es una pregunta empírica, y en el catálogo de este libro la respuesta
+es que **no cambia ningún veredicto**: las mismas series pasan la prueba con las dos
+versiones. A escala de las 100.000 series sí puede voltear casos de borde, y por eso
+la implementación que acompaña al libro tiene un interruptor para elegir cuál usar.
+
+La lección general vale más que el detalle: **reproducir resultados publicados a
+veces obliga a reproducir sus errores**, y cuando eso pasa hay que declararlo en vez
+de corregirlo en silencio.
+:::
+
+```{python}
+def autocorrelacion(x, k):
+    """Autocorrelación al rezago k, según la @eq-autocorrelacion."""
+    x = np.asarray(x, dtype=float)
+    media_x = x.mean()
+    denominador = np.sum((x - media_x) ** 2)
+    if denominador == 0:
+        return 0.0
+    return float(np.sum((x[k:] - media_x) * (x[:-k] - media_x)) / denominador)
+
+
+def es_estacional(x, m, como_m4=True):
+    """Prueba de estacionalidad de M4, @eq-test-estacionalidad.
+
+    Con `como_m4=True` reproduce el código original, donde el primer término
+    de la suma no va al cuadrado.
+    """
+    if m <= 1 or len(x) < 3 * m:
+        return False
+    suma = autocorrelacion(x, 1) if como_m4 else autocorrelacion(x, 1) ** 2
+    for i in range(2, m):
+        suma += autocorrelacion(x, i) ** 2
+    limite = 1.645 * np.sqrt((1 + 2 * suma) / len(x))
+    return bool(abs(autocorrelacion(x, m)) > limite)
+
+
+def indices_estacionales(x, m, como_m4=True):
+    """Índices multiplicativos normalizados, o unos si no hay estacionalidad."""
+    if m <= 1 or not es_estacional(x, m, como_m4) or np.any(np.asarray(x) <= 0):
+        return np.ones(max(m, 1))
+
+    from statsmodels.tsa.seasonal import seasonal_decompose
+
+    descomposicion = seasonal_decompose(
+        x, model="multiplicative", period=m, extrapolate_trend="freq"
+    )
+    indices = np.asarray(descomposicion.seasonal[:m], dtype=float)
+    if not np.all(np.isfinite(indices)) or np.any(indices <= 0):
+        return np.ones(m)
+    return indices * m / indices.sum()
+
+
+def naive2(y, h, m):
+    """El benchmark de M4: desestacionalizar, naive, re-estacionalizar."""
+    y = np.asarray(y, dtype=float)
+    indices = indices_estacionales(y, m)
+    repetidos = np.tile(indices, len(y) // len(indices) + 1)[: len(y)]
+
+    desestacionalizada = y / repetidos
+    pronostico = np.repeat(desestacionalizada[-1], h)
+
+    factores = np.array([indices[(len(y) + i) % len(indices)] for i in range(h)])
+    return pronostico * factores
+```
+
+```{python}
+#| label: fig-naive2
+#| fig-cap: "Naive2 sobre M35927. La línea plana es el naive sobre la serie desestacionalizada; al re-estacionalizarla recupera la forma del ciclo."
+indices = indices_estacionales(y, m)
+repetidos = np.tile(indices, len(y) // m + 1)[: len(y)]
+desestacionalizada = y / repetidos
+
+fig = make_subplots(
+    rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.09,
+    subplot_titles=["serie desestacionalizada y naive sobre ella",
+                    "pronóstico re-estacionalizado"],
+)
+fig.add_trace(go.Scatter(
+    x=serie.entrenamiento.index[-48:], y=desestacionalizada[-48:], mode="lines",
+    line=dict(color=COLORES["auxiliar"], width=1.6), name="desestacionalizada",
+), row=1, col=1)
+fig.add_trace(go.Scatter(
+    x=serie.prueba.index, y=np.repeat(desestacionalizada[-1], h), mode="lines",
+    line=dict(color=COLORES["pronostico"], width=2), name="naive",
+), row=1, col=1)
+
+fig.add_trace(go.Scatter(
+    x=serie.entrenamiento.index[-48:], y=y[-48:], mode="lines",
+    line=dict(color=COLORES["observado"], width=1.6), name="observado",
+), row=2, col=1)
+fig.add_trace(go.Scatter(
+    x=serie.prueba.index, y=serie.prueba.values, mode="lines",
+    line=dict(color=COLORES["prueba"], width=1.6, dash="dot"),
+    name="observado (prueba)",
+), row=2, col=1)
+fig.add_trace(go.Scatter(
+    x=serie.prueba.index, y=naive2(y, h, m), mode="lines",
+    line=dict(color=COLORES["pronostico"], width=2.2), name="Naive2",
+), row=2, col=1)
+
+fig.update_layout(height=560, showlegend=False)
+mostrar(fig)
+
+print(f"la serie pasa la prueba de estacionalidad: {es_estacional(y, m)}")
+print(f"índices estacionales (suman {indices.sum():.1f}): "
+      f"{np.round(indices, 3)[:6]} ...")
+print(f"\nsMAPE naive  : {smape(serie.prueba.to_numpy(), naive(y, h)):.2f}")
+print(f"sMAPE Naive2 : {smape(serie.prueba.to_numpy(), naive2(y, h, m)):.2f}")
+```
+
+::: {.callout-note}
+## Que la implementación reproduce los valores publicados
+
+Esta implementación se validó contra los benchmarks de la competencia. El sMAPE
+global de `Naive2` da **13,548** contra el **13,564** publicado
+[@makridakis2020]: una diferencia de **0,016 puntos**. Las tres frecuencias donde
+$m = 1$ —anual, semanal y diaria— coinciden exactamente, porque ahí `Naive2`
+degenera en el naive simple y no hay descomposición que pueda diferir. Las
+estacionales difieren en décimas porque la descomposición de `statsmodels`
+[@seabold2010] no es idéntica al código original.
+:::
+
+## Intervalos de predicción {#sec-intervalos-simples}
+
+Cada método tiene una fórmula cerrada para el ancho de su intervalo, y las tres
+comparten la misma lógica: la incertidumbre acumula con el horizonte.
+
+Si $\hat{\sigma}$ es la desviación estándar de los residuos, para el **naive**:
+
+$$
+\hat{y}_{T+h|T} \pm z_{1-\alpha/2}\, \hat{\sigma} \sqrt{h}
+$$ {#eq-intervalo-naive}
+
+Para el **naive estacional**, la acumulación es más lenta porque cada estación se
+pronostica con su propio ciclo, con $k = \lfloor (h-1)/m \rfloor$:
+
+$$
+\hat{y}_{T+h|T} \pm z_{1-\alpha/2}\, \hat{\sigma} \sqrt{k+1}
+$$ {#eq-intervalo-snaive}
+
+Y para la **deriva** aparece un término extra, porque además del error del período
+hay incertidumbre en la pendiente estimada:
+
+$$
+\hat{y}_{T+h|T} \pm z_{1-\alpha/2}\, \hat{\sigma}
+\sqrt{h\left(1 + \frac{h}{T-1}\right)}
+$$ {#eq-intervalo-deriva}
+
+El @sec-intervalos midió que el intervalo del naive cubre menos de lo que promete.
+Con las tres fórmulas se puede comparar entre métodos:
+
+```{python}
+#| label: tbl-cobertura-metodos
+#| tbl-cap: "Cobertura empírica de los intervalos del 95 % de tres métodos, sobre las series del catálogo."
+Z = 1.96
+
+filas = []
+for nombre in ("naive", "naive estacional", "deriva"):
+    cubiertos = total = 0
+    for s in cargar(n=len(catalogo())):
+        y_s = s.entrenamiento.to_numpy()
+        te_s, h_s, m_s = s.prueba.to_numpy(), s.horizonte, s.periodo_estacional
+        pasos = np.arange(1, h_s + 1)
+
+        if nombre == "naive":
+            centro = naive(y_s, h_s)
+            sigma = np.std(np.diff(y_s), ddof=1)
+            ancho = Z * sigma * np.sqrt(pasos)
+        elif nombre == "naive estacional":
+            if m_s <= 1 or len(y_s) <= m_s:
+                continue
+            centro = naive_estacional(y_s, h_s, m_s)
+            sigma = np.std(y_s[m_s:] - y_s[:-m_s], ddof=1)
+            ancho = Z * sigma * np.sqrt(np.floor((pasos - 1) / m_s) + 1)
+        else:
+            centro = deriva(y_s, h_s)
+            sigma = np.std(np.diff(y_s), ddof=1)
+            ancho = Z * sigma * np.sqrt(pasos * (1 + pasos / (len(y_s) - 1)))
+
+        if not np.isfinite(sigma) or sigma == 0:
+            continue
+        cubiertos += int(np.sum(np.abs(te_s - centro) <= ancho))
+        total += h_s
+
+    filas.append({
+        "método": nombre,
+        "cobertura observada %": round(100 * cubiertos / total, 1),
+        "déficit (puntos)": round(95 - 100 * cubiertos / total, 1),
+        "pronósticos": total,
+    })
+
+pd.DataFrame(filas).set_index("método")
+```
+
+Los tres quedan por debajo del 95 % prometido, y el naive estacional es el peor por
+bastante. La razón es que la @eq-intervalo-snaive estima $\hat{\sigma}$ con las
+diferencias estacionales, de las que hay $T-m$ en vez de $T-1$: con menos
+observaciones, la estimación de la varianza es más pobre y tiende a quedar corta.
+
+## Diagnóstico de residuos {#sec-diagnostico-residuos}
+
+Un **residuo** es la diferencia entre lo observado y lo que el método habría
+predicho para ese momento con la información previa:
+
+$$
+e_t = y_t - \hat{y}_{t|t-1}
+$$ {#eq-residuo}
+
+Para el naive, la @eq-residuo se reduce a algo muy concreto: $\hat{y}_{t|t-1} =
+y_{t-1}$, así que **los residuos del naive son exactamente las diferencias de la
+serie**. Es una identidad útil para recordar de dónde viene la
+@eq-intervalo-naive.
+
+```{python}
+residuos_naive = y[1:] - y[:-1]
+print(f"¿los residuos del naive son las diferencias? "
+      f"{np.array_equal(residuos_naive, np.diff(y))}")
+```
+
+Un buen método deja residuos **sin información aprovechable**. Cuatro condiciones,
+en orden de cuánto importan:
+
+1. **Media cero.** Si no, el pronóstico tiene sesgo sistemático y se lo puede
+   corregir restando la media de los residuos. Un sesgo que se puede corregir es
+   información desperdiciada.
+2. **Sin autocorrelación.** Si los residuos están correlacionados, quedó estructura
+   sin modelar. Se verifica con la prueba de @ljungbox1978, preferible a mirar
+   rezago por rezago por el problema de comparaciones múltiples del
+   @sec-autocorrelacion.
+3. **Varianza constante.** Si el gráfico de residuos se abre como un embudo, falta
+   una transformación: logaritmo o Box-Cox [@boxcox1964].
+4. **Distribución aproximadamente normal.** Es la menos importante para el
+   pronóstico puntual y la más importante para los intervalos, porque de ahí sale la
+   subcobertura de la tabla anterior.
+
+Las dos primeras son necesarias para que el pronóstico puntual sea razonable; las
+dos últimas, para que el intervalo signifique lo que dice.
+
+```{python}
+#| label: fig-diagnostico-naive
+#| fig-cap: "Diagnóstico de los residuos del naive sobre M35927: serie de residuos, autocorrelación e histograma."
+from statsmodels.stats.diagnostic import acorr_ljungbox
+from statsmodels.tsa.stattools import acf
+
+REZAGOS = 24
+r = acf(residuos_naive, nlags=REZAGOS)
+banda = 1.96 / np.sqrt(len(residuos_naive))
+
+fig = make_subplots(
+    rows=1, cols=3,
+    subplot_titles=["residuos en el tiempo", "autocorrelación", "distribución"],
+)
+fig.add_trace(go.Scatter(
+    y=residuos_naive, mode="lines",
+    line=dict(color=COLORES["auxiliar"], width=1),
+), row=1, col=1)
+fig.add_trace(go.Bar(
+    x=list(range(1, REZAGOS + 1)), y=r[1:], marker_color=COLORES["observado"],
+), row=1, col=2)
+for signo in (1, -1):
+    fig.add_hline(y=signo * banda, line_dash="dot", line_width=1,
+                  line_color=COLORES["prueba"], row=1, col=2)
+fig.add_trace(go.Histogram(
+    x=residuos_naive, nbinsx=25, marker_color=COLORES["pronostico"],
+), row=1, col=3)
+fig.update_layout(height=350, showlegend=False, bargap=0.3)
+mostrar(fig)
+
+prueba = acorr_ljungbox(residuos_naive, lags=[REZAGOS], return_df=True)
+print(f"media de los residuos : {residuos_naive.mean():.3f}")
+print(f"desvío estándar       : {residuos_naive.std(ddof=1):.3f}")
+print(f"Ljung-Box, p-valor    : {prueba['lb_pvalue'].iloc[0]:.6f}")
+```
+
+El p-valor es minúsculo: los residuos del naive sobre esta serie **conservan
+autocorrelación fuerte**, y el correlograma muestra por qué —hay picos en los
+múltiplos de 12—. El naive ignora la estacionalidad por completo, así que toda la
+estructura estacional queda en el residuo.
+
+Ese diagnóstico dice exactamente qué hacer: usar un método que modele la
+estacionalidad. Es la utilidad principal del procedimiento, y por eso conviene
+hacerlo antes de probar modelos al azar.
+
+::: {.callout-tip}
+## Residuos con estructura no invalida el pronóstico
+
+Un método cuyos residuos fallan la prueba puede seguir siendo útil para pronosticar:
+simplemente no es el mejor disponible. Lo que sí queda invalidado es la
+**cuantificación de la incertidumbre**, porque las fórmulas de las ecuaciones
+@eq-intervalo-naive a @eq-intervalo-deriva suponen residuos sin autocorrelación.
+
+Dicho de otro modo: con residuos autocorrelacionados, el pronóstico puntual es
+mejorable y el intervalo es directamente incorrecto.
+:::
+
+## Los cinco métodos, medidos {#sec-comparacion-simples}
+
+```{python}
+#| label: tbl-comparacion-simples
+#| tbl-cap: "Los cuatro métodos simples y el benchmark Naive2 sobre las series del catálogo."
+filas = []
+for s in cargar(n=len(catalogo())):
+    y_s, te_s = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    h_s, m_s = s.horizonte, s.periodo_estacional
+    filas.append({
+        "serie": s.id,
+        "naive": smape(te_s, naive(y_s, h_s)),
+        "naive estacional": smape(te_s, naive_estacional(y_s, h_s, m_s)),
+        "media": smape(te_s, media(y_s, h_s)),
+        "deriva": smape(te_s, deriva(y_s, h_s)),
+        "Naive2": smape(te_s, naive2(y_s, h_s, m_s)),
+    })
+
+resultados = pd.DataFrame(filas).set_index("serie")
+nombres = ["naive", "naive estacional", "media", "deriva", "Naive2"]
+
+resumen = resultados[nombres].agg(["mean", "median"]).T
+resumen.columns = ["sMAPE medio", "sMAPE mediano"]
+resumen.round(2)
+```
+
+```{python}
+#| label: tbl-ganadores-simples
+#| tbl-cap: "En cuántas series gana cada método."
+resultados[nombres].idxmin(axis=1).value_counts().rename("series donde gana").to_frame()
+```
+
+Tres cosas.
+
+**Naive2 tiene el mejor promedio y, sobre todo, la mejor mediana**, con varios
+puntos de ventaja sobre el naive estacional. Eso justifica la elección de M4: como
+benchmark es exigente, y superarlo dice algo.
+
+**Pero gana en menos series que otros métodos.** El reparto de victorias está
+bastante distribuido, y ningún método domina. Es la misma tensión entre promedio,
+mediana y conteo del @sec-agregacion: los tres resúmenes responden preguntas
+distintas y no tienen por qué coincidir.
+
+**La media es el peor de los cinco por lejos**, y sigue ganando en algunas series.
+Son las que oscilan alrededor de un nivel estable, donde promediar todo el pasado es
+lo correcto. Ningún método es inútil; cada uno es el correcto en alguna parte.
+
+## Pruébalo {#sec-probalo-06}
+
+La celda que sigue implementa `Naive2` completo en tu navegador: la prueba de
+estacionalidad, los índices y el pronóstico. Cambia la serie y mira si pasa la
+prueba.
+
+Vale la pena probar dos cosas: la serie de estacionalidad débil, donde la prueba
+puede no pasar y `Naive2` se reduce al naive simple; y cambiar el interruptor
+`como_m4` para ver si la particularidad del código oficial altera el veredicto.
+
+```{pyodide}
+#| caption: Naive2 — cambia `cual` y `como_m4`
+#| autorun: true
+import numpy as np
+import pandas as pd
+from statsmodels.tsa.seasonal import seasonal_decompose
+
+datos = pd.read_csv("datos/cap04_estacionales.csv", parse_dates=["ds"])
+
+# "estacionalidad marcada", "estacionalidad débil", "amplitud creciente",
+# "quiebre de nivel"
+cual = "estacionalidad débil"
+como_m4 = True          # False usa la fórmula de libro
+
+
+def autocorrelacion(x, k):
+    x = np.asarray(x, float)
+    mu = x.mean()
+    den = np.sum((x - mu) ** 2)
+    return float(np.sum((x[k:] - mu) * (x[:-k] - mu)) / den) if den else 0.0
+
+
+def es_estacional(x, m, como_m4=True):
+    if m <= 1 or len(x) < 3 * m:
+        return False
+    suma = autocorrelacion(x, 1) if como_m4 else autocorrelacion(x, 1) ** 2
+    for i in range(2, m):
+        suma += autocorrelacion(x, i) ** 2
+    limite = 1.645 * np.sqrt((1 + 2 * suma) / len(x))
+    return abs(autocorrelacion(x, m)) > limite
+
+
+g = datos[(datos["etiqueta"] == cual) & (datos["split"] == "entrenamiento")]
+y = g["y"].to_numpy()
+m = int(g["m"].iloc[0])
+
+pasa = es_estacional(y, m, como_m4)
+print(f"serie: {cual}   ({len(y)} observaciones, m = {m})")
+print(f"r_m = {autocorrelacion(y, m):+.3f}")
+print(f"¿pasa la prueba de estacionalidad? {pasa}")
+
+if pasa:
+    d = seasonal_decompose(y, model="multiplicative", period=m,
+                           extrapolate_trend="freq")
+    indices = np.asarray(d.seasonal[:m], float)
+    indices = indices * m / indices.sum()
+    print(f"índices estacionales: {np.round(indices, 3)}")
+else:
+    print("sin desestacionalizar: Naive2 se reduce al naive simple")
+```
+
+## Ejercicios
+
+Las soluciones están en el @sec-soluciones-06.
+
+**1.** Verifica que los residuos de la media sobre `Q1915` tienen media cero pero
+autocorrelación fuerte. ¿Qué te dice cada una de las dos cosas?
+
+**2.** Aplica la @eq-test-estacionalidad a mano a `Q22252` y compara tu resultado
+con el de la función `es_estacional`. ¿Qué valor toma $r_m$ y cuál es el límite?
+
+**3.** Calcula el sMAPE de `Naive2` y del naive estacional sobre las series
+estacionales del catálogo. ¿En cuántas gana cada uno? ¿Por qué crees que M4 eligió
+`Naive2` y no el naive estacional como referencia?
+
+**4.** La @eq-intervalo-deriva tiene un término extra respecto de la
+@eq-intervalo-naive. Calcula cuánto más ancho es el intervalo de la deriva a $h=1$ y
+a $h=18$ para una serie de 100 observaciones. ¿Cuándo importa el término extra?
+
+**5.** Toma una serie con quiebre de nivel y calcula el sMAPE de los cuatro métodos.
+¿Cuál gana? Explica en dos frases por qué la media es especialmente mala ahí.
+
+**6.** Los residuos del naive son las diferencias de la serie. Usando eso, muestra
+que el denominador del MASE del @sec-metricas con $m = 1$ es exactamente el error
+absoluto medio del naive dentro de la muestra. Después calcula también la desviación
+estándar de esos mismos residuos: ¿por qué no es el mismo número?
+
+## Referencias {.unnumbered}
+
+::: {#refs}
 :::
