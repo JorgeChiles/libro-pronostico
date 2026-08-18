@@ -1,7 +1,541 @@
 # Ingeniería de características {#sec-ingenieria}
 
-Rezagos, ventanas móviles, calendario, Fourier y codificación de categóricas.
+```{python}
+#| echo: false
+import warnings
 
-::: {.callout-note appearance="simple"}
-Capítulo en preparación.
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+from sklearn.linear_model import ElasticNet, Lasso, LinearRegression, Ridge
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from statsmodels.tsa.stattools import acf
+
+from libro.datos import cargar, catalogo
+from libro.graficos import COLORES, mostrar
+
+warnings.simplefilter("ignore")
+
+
+def smape(real, pron):
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    den = np.abs(real) + np.abs(pron)
+    den[den == 0] = 1e-9
+    return 200 * np.mean(np.abs(real - pron) / den)
+```
+
+Una serie de M4 es una columna de números. Todo lo que un modelo supervisado vea de ella hay que
+construirlo, y el @sec-los-datos ya cerró la puerta más obvia: **las fechas de M4 no sirven**,
+así que no hay "es diciembre" ni "es feriado". Lo que queda son transformaciones de la propia
+serie.
+
+Este capítulo mide cuatro familias —cuántos rezagos, cuáles rezagos, la posición estacional y los
+estadísticos de ventana móvil— y encuentra que una de ellas es una trampa.
+
+Conviene distinguir de entrada dos cosas que se llaman igual. Las **características de una serie**
+del @sec-caracteristicas —fuerza de la tendencia, entropía espectral, coeficiente de Hurst— son un
+resumen de la serie *completa*, un número por serie, y sirven para clasificarla o para elegirle un
+método [@wang2006; @hyndman2015]. Las características de este capítulo son otra cosa: un vector por
+**fila** de la tabla supervisada, que cambia en cada período y alimenta el pronóstico. Los dos usos
+son legítimos y no se mezclan.
+
+```{python}
+#| echo: false
+def caracteristicas(historia, p, m, *, ventana=False, K=0, dummies=False,
+                    rezagos=None):
+    """Vector de características para predecir el valor siguiente a `historia`."""
+    historia = np.asarray(historia, float)
+    if rezagos is None:
+        rezagos = range(1, p + 1)
+    f = [historia[-r] for r in rezagos]
+
+    if ventana:
+        for w in (3, m if m > 1 else 6, 12):
+            trozo = historia[-w:] if len(historia) >= w else historia
+            f += [trozo.mean(), trozo.std(), trozo.min(), trozo.max()]
+
+    t = len(historia)                 # posición del valor a predecir
+    if K and m > 1:
+        for k in range(1, K + 1):
+            f += [np.sin(2 * np.pi * k * t / m), np.cos(2 * np.pi * k * t / m)]
+    if dummies and m > 1:
+        posicion = t % m
+        f += [1.0 if posicion == j else 0.0 for j in range(m - 1)]
+
+    return np.array(f, float)
+
+
+def tabla(y, p, m, **kw):
+    y = np.asarray(y, float)
+    inicio = max(p, 12 if kw.get("ventana") else p)
+    X, objetivo = [], []
+    for i in range(inicio, len(y)):
+        X.append(caracteristicas(y[:i], p, m, **kw))
+        objetivo.append(y[i])
+    return np.array(X), np.array(objetivo)
+
+
+def pronosticar(y, p, m, h, construir, **kw):
+    X, objetivo = tabla(y, p, m, **kw)
+    if len(X) < X.shape[1] + 3:
+        return None
+    modelo = construir().fit(X, objetivo)
+    historia, salida = list(y), []
+    for _ in range(h):
+        salida.append(
+            float(modelo.predict([caracteristicas(historia, p, m, **kw)])[0])
+        )
+        historia.append(salida[-1])
+    return np.array(salida)
+
+
+RIDGE = lambda: make_pipeline(StandardScaler(), Ridge(alpha=1.0))
+OLS = lambda: LinearRegression()
+
+APTAS = [i for i in catalogo()["serie"] if len(cargar(i).entrenamiento) >= 60]
+ESTACIONALES = [i for i in APTAS
+                if cargar(i).periodo_estacional > 1
+                and len(cargar(i).entrenamiento) >= 80]
+```
+
+## Cuántos rezagos {#sec-cuantos-rezagos}
+
+La familia más simple es la de la @eq-ventana: los $p$ valores anteriores. La única decisión es
+$p$, y el @sec-sobreajuste ya predijo qué forma va a tener la respuesta.
+
+```{python}
+#| label: fig-curva-rezagos
+#| fig-cap: "sMAPE de prueba contra la cantidad de rezagos, con Ridge y estrategia recursiva, sobre las series del catálogo con al menos 60 observaciones."
+CANTIDADES = (1, 2, 3, 6, 12, 18, 24, 36)
+
+medias, medianas = [], []
+for P in CANTIDADES:
+    errores = []
+    for identificador in APTAS:
+        s = cargar(identificador)
+        pron = pronosticar(s.entrenamiento.to_numpy(), P, s.periodo_estacional,
+                           s.horizonte, RIDGE)
+        if pron is not None:
+            errores.append(smape(s.prueba.to_numpy(), pron))
+    medias.append(np.mean(errores))
+    medianas.append(np.median(errores))
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=CANTIDADES, y=medias, mode="lines+markers",
+                         name="media", line=dict(color=COLORES["prueba"], width=2)))
+fig.add_trace(go.Scatter(x=CANTIDADES, y=medianas, mode="lines+markers",
+                         name="mediana",
+                         line=dict(color=COLORES["observado"], width=2)))
+fig.update_xaxes(title="cantidad de rezagos p", type="log",
+                 tickvals=list(CANTIDADES), ticktext=[str(c) for c in CANTIDADES])
+mostrar(fig, alto=420, titulo_y="sMAPE de prueba")
+```
+
+```{python}
+#| label: tbl-curva-rezagos
+#| tbl-cap: "Los mismos valores de la @fig-curva-rezagos en tabla."
+pd.DataFrame({"rezagos": CANTIDADES, "sMAPE medio": medias,
+              "sMAPE mediano": medianas}).set_index("rezagos").round(2)
+```
+
+**La media dibuja la U del @sec-sobreajuste con una nitidez de libro de texto.** Baja de 21,45 con
+un solo rezago a **13,54 con doce**, y después sube: 16,07 con dieciocho, 18,80 con veinticuatro
+y 31,06 con treinta y seis. El mínimo está en 12, que para las series mensuales del catálogo es
+exactamente el período estacional.
+
+**Y la mediana no dibuja ninguna U**: baja de manera monótona hasta 7,74 en veinticuatro rezagos y
+apenas sube en treinta y seis. Es el mismo patrón del @sec-que-compra y ya conviene tenerlo como
+reflejo: cuando la media y la mediana discrepan, el efecto vive en la cola. Acá significa que
+**agregar rezagos mejora la serie típica y destruye unas pocas**, y las pocas destruidas pesan más
+que las muchas mejoradas.
+
+Cuál de las dos importa depende de para qué. Si el pronóstico alimenta una decisión por serie, la
+mediana. Si alimenta un total —un presupuesto, un inventario agregado, una capacidad—, la media,
+porque una serie catastrófica arruina el total.
+
+## Cuáles rezagos {#sec-cuales-rezagos}
+
+Usar los primeros $p$ es una decisión perezosa: incluye el rezago 7 de una serie mensual, que no
+tiene ningún motivo para importar, y excluye el 13 y el 24. La alternativa es elegirlos.
+
+El correlograma del @sec-caja-de-herramientas ya dice cuáles rezagos tienen relación lineal con el
+presente, y elegir órdenes con él es la práctica que @boxjenkins1970 establecieron para identificar
+modelos ARIMA. Acá se usa para lo mismo un nivel más abajo: qué columnas poner en la tabla.
+Quedarse con los significativos es una línea:
+
+```{python}
+#| label: tbl-rezagos-acf
+#| tbl-cap: "Rezagos que el correlograma marca como significativos, para diez series del catálogo. El criterio es $|r_k| > 1{,}96/\\sqrt{n}$, quedándose con los seis más fuertes."
+def rezagos_por_acf(y, maximo=24, cuantos=6):
+    n = len(y)
+    correlaciones = acf(y, nlags=min(maximo, n - 2), fft=True)[1:]
+    limite = 1.96 / np.sqrt(n)
+    significativos = [k + 1 for k, r in enumerate(correlaciones)
+                      if abs(r) > limite]
+    if not significativos:
+        return [1]
+    mejores = sorted(significativos,
+                     key=lambda k: -abs(correlaciones[k - 1]))[:cuantos]
+    return sorted(mejores)
+
+
+filas = []
+for identificador in APTAS[:10]:
+    s = cargar(identificador)
+    elegidos = rezagos_por_acf(s.entrenamiento.to_numpy())
+    filas.append({"serie": identificador, "m": s.periodo_estacional,
+                  "rezagos elegidos": ", ".join(str(r) for r in elegidos),
+                  "cuántos": len(elegidos)})
+
+pd.DataFrame(filas).set_index("serie")
+```
+
+La tabla se lee sola y es la mejor defensa del método. En las series de tendencia dominante el
+correlograma elige `1, 2, 3, 4, 5, 6`: los vecinos inmediatos, porque la serie se mueve despacio.
+En `M18514` elige `10, 12`, dos rezagos y ninguno de ellos el primero. Y en `H272`, que es horaria
+con $m = 24$, elige `1, 2, 16, 17, 18, 19`, que se acercan al ciclo diario desde abajo.
+
+```{python}
+#| label: tbl-conjuntos
+#| tbl-cap: "Cinco conjuntos de características sobre las mismas series, con Ridge. La cantidad de columnas es la mediana."
+CONJUNTOS = {
+    "12 rezagos": dict(p=12),
+    "24 rezagos": dict(p=24),
+    "+ Fourier K = 2": dict(p=12, K=2),
+    "+ ventana móvil": dict(p=12, ventana=True),
+}
+
+filas = []
+for identificador in APTAS:
+    s = cargar(identificador)
+    y_tr, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    h, m = s.horizonte, s.periodo_estacional
+    fila = {"serie": identificador}
+    completa = True
+    for nombre, kw in CONJUNTOS.items():
+        pron = pronosticar(y_tr, m=m, h=h, construir=RIDGE, **kw)
+        if pron is None:
+            completa = False
+            break
+        fila[nombre] = smape(y_te, pron)
+        resto = {k: v for k, v in kw.items() if k != "p"}
+        fila[nombre + " cols"] = tabla(y_tr, kw["p"], m, **resto)[0].shape[1]
+    elegidos = rezagos_por_acf(y_tr)
+    pron = pronosticar(y_tr, p=max(elegidos), m=m, h=h, construir=RIDGE,
+                       rezagos=elegidos)
+    if pron is not None and completa:
+        fila["rezagos por ACF"] = smape(y_te, pron)
+        fila["rezagos por ACF cols"] = len(elegidos)
+        filas.append(fila)
+
+CONJ = pd.DataFrame(filas)
+COLUMNAS = list(CONJUNTOS) + ["rezagos por ACF"]
+
+pd.DataFrame({
+    "sMAPE medio": CONJ[COLUMNAS].mean(),
+    "sMAPE mediano": CONJ[COLUMNAS].median(),
+    "columnas": [CONJ[c + " cols"].median() for c in COLUMNAS],
+    "gana en": CONJ[COLUMNAS].idxmin(axis=1).value_counts().reindex(
+        COLUMNAS, fill_value=0),
+}).round(2)
+```
+
+**Seleccionar con el correlograma es lo mejor de la tabla en la media —12,85— con la mitad de las
+columnas.** Seis características le ganan a doce y a veinticuatro, y también le ganan en la mediana
+a las doce.
+
+Vale notar de dónde sale la ventaja, porque no es que el correlograma sea sabio: es que **elegir
+seis de veinticuatro es sobre todo una manera de tener seis columnas**. La @fig-curva-rezagos ya
+mostró que en estas series el problema es la cantidad, y el @sec-sobreajuste explicó por qué. La
+selección por ACF gana por la misma razón que Lasso ganaba ahí.
+
+Y la última columna modera el entusiasmo: los cinco conjuntos ganan en entre 3 y 7 series cada
+uno, y el que gana en más es justamente el de veinticuatro rezagos, que es el segundo peor en la
+media. **Ninguno domina serie por serie**, y elegir el conjunto de características es una decisión
+que hay que tomar con el @sec-validacion-cruzada y no con esta tabla.
+
+## La posición estacional {#sec-posicion-estacional}
+
+Un rezago de orden $m$ le dice al modelo qué pasó en esta misma posición del ciclo anterior. No le
+dice **en qué posición está**. Esa información se codifica de dos maneras.
+
+Con **variables indicadoras**, una por posición menos una:
+
+$$
+d_{j,t} = \begin{cases} 1 & \text{si } t \bmod m = j \\ 0 & \text{si no} \end{cases}
+\qquad j = 0, \dots, m - 2
+$$ {#eq-dummies}
+
+Con **términos de Fourier**, $2K$ columnas de senos y cosenos, que es la codificación que
+@hyndman2021 recomiendan cuando $m$ es grande:
+
+$$
+\left\{ \sin\!\left( \frac{2\pi k t}{m} \right),\;
+        \cos\!\left( \frac{2\pi k t}{m} \right) \right\}_{k = 1}^{K}
+$$ {#eq-fourier}
+
+El @sec-regresion midió que con $K = m/2$ las dos codificaciones **coinciden exactamente**, porque
+generan el mismo subespacio de funciones. Conviene volver a verificarlo acá, donde además hay doce
+rezagos en la tabla y el modelo está regularizado.
+
+```{python}
+#| label: tbl-fourier-dummies
+#| tbl-cap: "Fourier con $K = m/2$ contra variables indicadoras, sobre las series estacionales del catálogo. Sin penalización coinciden; con penalización no."
+filas = []
+for identificador in ESTACIONALES:
+    s = cargar(identificador)
+    y_tr, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    h, m = s.horizonte, s.periodo_estacional
+    fila = {"serie": identificador, "m": m}
+    for nombre, construir in (("OLS", OLS), ("Ridge", RIDGE)):
+        f = pronosticar(y_tr, 12, m, h, construir, K=m // 2)
+        d = pronosticar(y_tr, 12, m, h, construir, dummies=True)
+        if f is None or d is None:
+            continue
+        fila[f"{nombre}: Fourier"] = smape(y_te, f)
+        fila[f"{nombre}: indicadoras"] = smape(y_te, d)
+        fila[f"{nombre}: |diferencia|"] = abs(smape(y_te, f) - smape(y_te, d))
+    filas.append(fila)
+
+EQUIVALENCIA = pd.DataFrame(filas).set_index("serie")
+pd.DataFrame({
+    "series": [len(EQUIVALENCIA)] * 2,
+    "diferencia media |Fourier − indicadoras|": [
+        EQUIVALENCIA["OLS: |diferencia|"].mean(),
+        EQUIVALENCIA["Ridge: |diferencia|"].mean(),
+    ],
+    "diferencia máxima": [
+        EQUIVALENCIA["OLS: |diferencia|"].max(),
+        EQUIVALENCIA["Ridge: |diferencia|"].max(),
+    ],
+}, index=["OLS", "Ridge"]).round(6)
+```
+
+El resultado es limpio y tiene una consecuencia que vale más que el número.
+
+**Sin penalización coinciden exactamente**: la diferencia es 0 en las diecinueve series, hasta el
+último decimal. Confirma lo del @sec-regresion. Las ecuaciones @eq-dummies y @eq-fourier con
+$K = m/2$ son dos bases del mismo subespacio, y mínimos cuadrados encuentra la misma proyección sin
+importar en qué base se la escriba.
+
+**Con penalización no coinciden.** La diferencia media es 0,24 y la máxima 1,12. La razón es
+exactamente la del aviso del @sec-regularizacion: la @eq-ridge penaliza $\sum \beta_j^2$, y esa
+suma **no es invariante ante un cambio de base**. Las mismas funciones, escritas en otra base,
+tienen otros coeficientes y por lo tanto otra penalización, así que el modelo regularizado que sale
+es otro.
+
+::: {.callout-important}
+## La equivalencia es del espacio, no del modelo
+
+Dos codificaciones que generan el mismo espacio de funciones dan el mismo modelo **solo si el
+criterio de ajuste depende únicamente del espacio**. Mínimos cuadrados cumple eso; Ridge, Lasso y
+cualquier cosa con penalización, no.
+
+La consecuencia práctica es incómoda y hay que decirla: **en cuanto se regulariza, "da lo mismo
+cómo lo parametrices" deja de ser cierto**, y la elección entre indicadoras y Fourier pasa a ser un
+hiperparámetro más que hay que validar. No es un detalle: es la mitad del sentido de la
+regularización, que es preferir unos coeficientes sobre otros.
+
+Con $K < m/2$ la comparación ya no es entre bases del mismo espacio, porque Fourier genera un
+subespacio más chico. Ahí la elección de $K$ es una decisión de suavidad, y el ejercicio 2 la
+recorre.
+:::
+
+## La trampa de la ventana móvil {#sec-trampa-ventana}
+
+Los estadísticos de ventana móvil —media, desviación, mínimo y máximo de los últimos $w$
+períodos— son la familia que más se recomienda en los tutoriales de pronóstico con aprendizaje
+automático, y `tsfresh` [@christ2018] genera cientos de variantes automáticamente.
+
+En la @tbl-conjuntos son **la peor de las cinco filas en la media**: 23,11 contra los 13,54 de los
+doce rezagos solos. Y son **la mejor en la mediana**: 8,17 contra 8,49. Ese contraste ya avisa que
+hay una cola, y la cola tiene una causa concreta.
+
+```{python}
+#| label: tbl-ventana-culpables
+#| tbl-cap: "Las series donde agregar estadísticos de ventana móvil empeora más el pronóstico."
+culpables = CONJ.assign(
+    daño=CONJ["+ ventana móvil"] - CONJ["12 rezagos"]
+).nlargest(5, "daño")
+
+culpables.set_index("serie")[["12 rezagos", "+ ventana móvil", "daño"]].round(2)
+```
+
+`H272` pasa de 8,60 a **152,31**. No es un problema de filas: la serie tiene 960 observaciones de
+entrenamiento y la tabla tiene 24 columnas, o sea casi cuarenta filas por columna. Es otra cosa.
+
+```{python}
+#| label: tbl-ventana-mecanismo
+#| tbl-cap: "Desviación estándar de la ventana de entrada durante el pronóstico recursivo de H272. La característica se calcula sobre las predicciones del propio modelo."
+s = cargar("H272")
+y_tr, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+h, m = s.horizonte, s.periodo_estacional
+
+X, objetivo = tabla(y_tr, 12, m, ventana=True)
+modelo = RIDGE().fit(X, objetivo)
+
+historia, registro = list(y_tr), []
+for k in range(h):
+    registro.append({
+        "paso": k + 1,
+        "sd de los últimos 3": float(np.std(historia[-3:])),
+        f"sd de los últimos {m}": float(np.std(historia[-m:])),
+        "sd de los últimos 12": float(np.std(historia[-12:])),
+    })
+    historia.append(
+        float(modelo.predict([caracteristicas(historia, 12, m, ventana=True)])[0])
+    )
+
+seguimiento = pd.DataFrame(registro).set_index("paso")
+referencia = pd.DataFrame([{
+    "sd de los últimos 3": float(np.std(y_tr[-3:])),
+    f"sd de los últimos {m}": float(np.std(y_tr[-m:])),
+    "sd de los últimos 12": float(np.std(y_tr[-12:])),
+}], index=["al final del entrenamiento"])
+
+pd.concat([referencia, seguimiento.loc[[1, 5, 12, 24, 48]]]).round(2)
+```
+
+Ahí está el mecanismo, y es un **lazo de realimentación positiva**.
+
+Al final del entrenamiento la desviación de la ventana de 24 vale 2,89, y en el paso 48 vale
+**41,93**: catorce veces más. El valor real de esa desviación en el período de prueba es del orden
+del 1,3 que tenía la ventana de 3 al empezar.
+
+La cadena es corta. El pronóstico recursivo del @sec-prediccion realimenta sus predicciones. Un
+error chico ensancha la ventana; la desviación de la ventana es una **característica de entrada**;
+un valor de desviación que el modelo nunca vio durante el entrenamiento lo empuja a extrapolar; la
+extrapolación agranda el error; y el error vuelve a ensanchar la ventana. Cada iteración amplifica
+la anterior.
+
+::: {.callout-warning}
+## La regla que evita esto
+
+**Una característica que se calcula sobre valores predichos es una característica que se puede
+salir de su rango de entrenamiento.** Los rezagos también se calculan sobre predicciones, pero un
+rezago predicho vive en la misma escala que la serie; una desviación calculada sobre una
+trayectoria que divergió, no.
+
+Tres maneras de usar ventanas móviles sin caer en esto:
+
+1. **Con estrategia directa.** La @eq-directa no realimenta nada, así que las características se
+   calculan siempre sobre datos reales. Es un caso donde la directa tiene una ventaja que el
+   @sec-prediccion no midió.
+2. **Congelando la característica.** Calcular los estadísticos con la última ventana de datos
+   reales y mantenerlos fijos durante todo el horizonte. Pierde información y no puede divergir.
+3. **Acotando la entrada.** Recortar cada característica al rango que tuvo en el entrenamiento
+   antes de pasarla al modelo. Es el mismo tipo de cota que una aplicación de pronóstico necesita
+   sobre su salida, y el @sec-produccion la trata en detalle.
+
+El ejercicio 4 mide las tres.
+:::
+
+## Regularización con grupos de rezagos {#sec-grupos-rezagos}
+
+El @sec-regularizacion dejó una cuenta pendiente. Lasso, sobre una tabla de rezagos consecutivos,
+se queda con un representante de cada grupo correlacionado de manera bastante arbitraria, y la
+*elastic net* [@zou2005] existe justamente para eso.
+
+```{python}
+#| label: tbl-elastic-net
+#| tbl-cap: "Cinco maneras de regularizar una tabla de 24 rezagos, sobre las series del catálogo con al menos 80 observaciones."
+REGULARIZADORES = {
+    "sin regularizar": OLS,
+    "Ridge λ = 1": RIDGE,
+    "Lasso λ = 1": lambda: make_pipeline(
+        StandardScaler(), Lasso(alpha=1.0, max_iter=50_000)),
+    "elastic net, l1 = 0,5": lambda: make_pipeline(
+        StandardScaler(), ElasticNet(alpha=1.0, l1_ratio=0.5, max_iter=50_000)),
+    "elastic net, l1 = 0,2": lambda: make_pipeline(
+        StandardScaler(), ElasticNet(alpha=1.0, l1_ratio=0.2, max_iter=50_000)),
+}
+
+filas = []
+for identificador in APTAS:
+    s = cargar(identificador)
+    if len(s.entrenamiento) < 80:
+        continue
+    y_tr, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    fila = {"serie": identificador}
+    for nombre, construir in REGULARIZADORES.items():
+        pron = pronosticar(y_tr, 24, s.periodo_estacional, s.horizonte, construir)
+        fila[nombre] = smape(y_te, pron) if pron is not None else np.nan
+    filas.append(fila)
+
+REG = pd.DataFrame(filas)
+nombres_reg = list(REGULARIZADORES)
+pd.DataFrame({
+    "sMAPE medio": REG[nombres_reg].mean(),
+    "sMAPE mediano": REG[nombres_reg].median(),
+    "gana en": REG[nombres_reg].idxmin(axis=1).value_counts().reindex(
+        nombres_reg, fill_value=0),
+}).round(2)
+```
+
+La respuesta a la cuenta pendiente es un **sí muy modesto**. La elastic net con $\ell_1 = 0{,}2$
+—o sea casi Ridge— da el mejor sMAPE medio de la tabla, 13,68, apenas por debajo de los 13,81 de no
+regularizar nada. Y Lasso es la peor de las cinco, con 15,25.
+
+Eso confirma el aviso del @sec-regularizacion en su parte negativa: **con grupos de rezagos
+correlacionados, la selección dura de Lasso hace daño.** Lo que no confirma es que la elastic net
+sea la solución: la mejora sobre no regularizar es de 0,13 puntos de sMAPE en 25 series, que es
+ruido.
+
+Lo interesante es que **sin regularizar gana en 10 de las 25 series**, más que cualquier
+alternativa. Con 24 columnas y una mediana de más de 150 filas, estas series no están en el régimen
+donde la regularización paga, y el @sec-regularizacion-no-ayuda ya había medido lo mismo en el caso
+extremo. La regularización es una respuesta a un exceso de capacidad, y acá el exceso lo produce el
+número de rezagos, no la falta de penalización: la @fig-curva-rezagos dice que la solución es usar
+doce columnas, no penalizar veinticuatro.
+
+## Resumen operativo {#sec-resumen-caracteristicas}
+
+| familia | cuánto cuesta | qué midió este capítulo |
+|---|---|---|
+| rezagos $1 \dots p$ | $p$ columnas | la media es una U con mínimo en $p = m$; la mediana baja hasta $p = 24$ |
+| rezagos por correlograma | 6 columnas | el mejor sMAPE medio del capítulo, 12,85, con la mitad de columnas |
+| Fourier | $2K$ columnas | mejora media y mediana; con $K = m/2$ equivale a indicadoras solo sin penalización |
+| indicadoras estacionales | $m - 1$ columnas | cara en columnas y equivalente a Fourier completo |
+| estadísticos de ventana móvil | 4 por ventana | trampa en pronóstico recursivo: realimentación positiva |
+| características de calendario | — | **imposible en M4**: las fechas no son fechas |
+
+: Las familias de características de este capítulo. {#tbl-resumen-caracteristicas}
+
+Y una advertencia sobre el género completo. Existe una tradición de generar cientos de
+características automáticamente y dejar que el modelo elija [@christ2018], y hay trabajo que la usa
+muy bien: @monteromanso2020 quedaron segundos en M4 calculando 42 características por serie y
+usándolas **no como entradas del pronóstico sino para decidir cómo combinar modelos**. Es una idea
+distinta, y el @sec-seleccion-escala la desarrolla.
+
+Para el pronóstico directo, lo que este capítulo mide es que **la cantidad de columnas es el
+hiperparámetro que manda**, y que generar cientos de características en series de 100 observaciones
+va exactamente en la dirección contraria a la @fig-curva-rezagos.
+
+## Ejercicios
+
+Las soluciones están en el @sec-soluciones-18.
+
+**1.** Repite la @fig-curva-rezagos separando las series por $n/h$, como en el
+@sec-cuando-directa. ¿El mínimo de la U se corre a la derecha en las series largas?
+
+**2.** Barre $K$ de 1 a $m/2$ en los términos de Fourier de la @eq-fourier y busca el mejor. ¿Está
+en $m/2$ o antes? Explica el resultado en términos de cuántas columnas agrega cada $K$.
+
+**3.** La selección por correlograma se queda con los seis rezagos de mayor $|r_k|$. Prueba con
+tres, seis y doce, y con el criterio de quedarse con **todos** los significativos. ¿Cuál gana?
+
+**4.** Implementa las tres soluciones del recuadro del @sec-trampa-ventana —estrategia directa,
+característica congelada y entrada acotada— y mide cuál recupera el error de `H272`.
+
+**5.** Construye la característica "cuántos períodos pasaron desde el máximo de la historia" y
+agrégala a los doce rezagos. ¿Ayuda? ¿Se puede calcular sobre predicciones sin caer en el problema
+del @sec-trampa-ventana?
+
+**6.** Con la tabla de 24 rezagos y Lasso, lista qué rezagos sobreviven en cada serie del catálogo
+y cuenta cuántas veces sobrevive cada uno. ¿Los rezagos 1 y $m$ aparecen más que el resto?
+
+## Referencias {.unnumbered}
+
+::: {#refs}
 :::
