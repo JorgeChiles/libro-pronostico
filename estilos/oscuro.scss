@@ -11,3 +11,21 @@ $code-bg: #1f2229;
   color: #a8a8a8;
   margin-top: -0.6rem;
 }
+
+/* Referencias por capítulo.
+   Quarto agrega la bibliografía del libro entero en el primer div #refs que
+   encuentra y oculta los demás. El prefacio tiene uno envuelto en
+   .absorbe-bibliografia que se queda con ese agregado y no se muestra; el resto
+   se vuelve a hacer visible acá. */
+.absorbe-bibliografia {
+  display: none;
+}
+
+div#refs {
+  display: block !important;
+}
+
+div#refs .csl-entry {
+  margin-bottom: 0.6rem;
+  font-size: 0.94em;
+}

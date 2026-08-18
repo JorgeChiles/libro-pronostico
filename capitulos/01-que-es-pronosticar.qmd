@@ -48,8 +48,8 @@ fig.add_trace(go.Scatter(
 mostrar(fig, titulo_y="unidades")
 ```
 
-Antes de seguir leyendo, mirá el gráfico y decidí qué valor esperás para el mes
-siguiente. Después decidí un rango: dos números tales que te sorprendería que el
+Antes de seguir leyendo, mira el gráfico y decide qué valor esperás para el mes
+siguiente. Después decide un rango: dos números tales que te sorprendería que el
 valor real quedara afuera.
 
 Esas dos respuestas son las dos mitades de un pronóstico. La primera es el
@@ -59,7 +59,7 @@ incertidumbre hay alrededor de ese número. Un pronóstico sin la segunda mitad
 está incompleto, y en la práctica es peor que incompleto: invita a tratar una
 conjetura como un dato.
 
-La competencia M4 reservó las 18 observaciones siguientes para evaluar. Son
+La competencia M4 [@makridakis2020] reservó las 18 observaciones siguientes para evaluar. Son
 estas:
 
 ```{python}
@@ -149,7 +149,8 @@ Esa última afirmación es más fuerte de lo que parece. Vamos a ponerle número
 
 ### Cuatro métodos que no aprenden nada {#sec-metodos-simples}
 
-Los cuatro métodos que siguen son deliberadamente tontos. No estiman
+Los cuatro métodos que siguen son deliberadamente tontos, y son los mismos que
+usa @hyndman2021 como punto de partida. No estiman
 parámetros, no optimizan nada, y se implementan en una línea. Van a acompañarnos
 todo el libro como punto de comparación.
 
@@ -182,7 +183,8 @@ naive, ese modelo no está aportando nada, por elegante que sea su formulación.
 
 Ahora medimos. La métrica que usamos acá es el **error absoluto porcentual
 simétrico** o **sMAPE** (*symmetric mean absolute percentage error*), que es la
-que usó M4. En el @sec-evaluacion la discutimos en serio, con sus defectos; por
+que usó M4 [@makridakis2018]. En el @sec-evaluacion la discutimos en serio, con las
+objeciones que se le han hecho [@armstrong1992; @makridakis1993], con sus defectos; por
 ahora basta con saber que es un porcentaje y que menos es mejor:
 
 ```{python}
@@ -347,8 +349,10 @@ está ahí, y esa estimación agrega varianza sin agregar señal.
 ## De dónde salen estos números
 
 Los descriptores estructurales, el índice de complejidad y los errores de esta
-sección salen de un trabajo sobre las 100.000 series de M4 que acompaña a este
-libro. Están calculados con las convenciones oficiales de la competencia y son
+sección salen de un trabajo sobre las 100.000 series de M4 [@makridakis2020] que
+acompaña a este libro. Como referencia de lo que es alcanzable: el método
+ganador de la competencia, un híbrido de suavizado exponencial y redes
+recurrentes [@smyl2020], obtuvo un OWA de 0,821 contra el 1,000 del benchmark. Están calculados con las convenciones oficiales de la competencia y son
 reproducibles: `libro.datos.metadatos()` devuelve la tabla completa. Las
 99.935, y no 100.000, son las series con todos los descriptores calculables; 65
 series semanales quedan afuera por ser demasiado cortas.
@@ -423,10 +427,10 @@ resultados con todo lo publicado sobre M4. El libro expone las dos:
 `serie.periodo_estacional` da la de M4 y `serie.periodo_natural` la del
 calendario. Cuál usar depende de para qué; lo que no se puede es confundirlas.
 
-## Probalo {#sec-widget}
+## Pruébalo {#sec-widget}
 
 El widget que sigue toma las cuatro series y los cuatro métodos de este
-capítulo. Elegí una serie, elegí un método, mové el horizonte y mirá el error.
+capítulo. Elige una serie, elige un método, mueve el horizonte y mira el error.
 
 Vale la pena buscar tres cosas: un método que gane en una serie y pierda en
 otra; una serie donde ningún método le gane al naive; y qué le pasa a la deriva
@@ -535,7 +539,7 @@ def servidor(input, output, session):
         y = entrenamiento["y"].to_numpy()
         real = prueba["y"].to_numpy()
         if not input.metodos():
-            return pd.DataFrame({"": ["Elegí al menos un método"]})
+            return pd.DataFrame({"": ["Elige al menos un método"]})
         filas = [
             {"método": n, "sMAPE": round(smape(real, METODOS[n](y, h, m)), 2)}
             for n in input.metodos()
@@ -590,12 +594,12 @@ contra la que se mide todo lo demás.
 
 Las soluciones están en el @sec-soluciones-01.
 
-**1.** Cargá la serie `Y10884` y graficá su período de entrenamiento. Describí
-en una frase qué comportamiento tiene. Después mirá `serie.fenomeno` y comparalo
+**1.** Carga la serie `Y10884` y grafica su período de entrenamiento. Describe
+en una frase qué comportamiento tiene. Después mira `serie.fenomeno` y comparalo
 con tu descripción.
 
-**2.** Aplicá los cuatro métodos del @sec-metodos-simples a la serie `Q1915` y
-calculá el sMAPE de cada uno. ¿Cuál gana? ¿Coincide con lo que esperabas mirando
+**2.** Aplica los cuatro métodos del @sec-metodos-simples a la serie `Q1915` y
+calcula el sMAPE de cada uno. ¿Cuál gana? ¿Coincide con lo que esperabas mirando
 el gráfico?
 
 **3.** El naive estacional necesita un período `m`. Aplicalo a una serie diaria
@@ -603,16 +607,21 @@ del catálogo con `m = 1` (la convención de M4) y con `m = 7` (la del
 calendario), y comparalo con el naive simple. ¿Qué convención da mejor
 resultado? ¿Contradice eso la decisión de M4?
 
-**4.** Tomá 30 series mensuales con `cargar(frecuencia="mensual", n=30)` y
-calculá para cada una el sMAPE del naive. Graficá esos errores contra
+**4.** Toma 30 series mensuales con `cargar(frecuencia="mensual", n=30)` y
+calcula para cada una el sMAPE del naive. Grafica esos errores contra
 `serie.complejidad`. ¿Se ve la relación de la @fig-correlacion con solo 30
 series? ¿Qué dice eso sobre sacar conclusiones de muestras chicas?
 
 **5.** La @tbl-arima-vs-naive muestra que el ARIMA pierde contra el naive en las
 series diarias y horarias. Se podría concluir que el ARIMA es un mal modelo.
-Escribí en un párrafo por qué esa conclusión no se sigue, y qué habría que medir
+Escribe en un párrafo por qué esa conclusión no se sigue, y qué habría que medir
 para sostenerla o descartarla.
 
-**6.** Elegí una decisión concreta de tu trabajo o tu campo que dependa de un
-pronóstico. Respondé las tres preguntas del @sec-utilidad. ¿Qué horizonte
+**6.** Elige una decisión concreta de tu trabajo o tu campo que dependa de un
+pronóstico. Responde las tres preguntas del @sec-utilidad. ¿Qué horizonte
 necesita? ¿Es simétrico el costo del error? ¿Alcanza un número?
+
+## Referencias {.unnumbered}
+
+::: {#refs}
+:::

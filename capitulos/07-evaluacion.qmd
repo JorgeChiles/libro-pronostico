@@ -133,14 +133,15 @@ el mismo número, y elegir la métrica es elegir qué se está pronosticando.
 graves: no existe cuando la serie vale cero, y es asimétrico. Sobrepronosticar un
 100 % da un MAPE de 100; subpronosticar hasta cero también da 100, pero
 sobrepronosticar al triple da 200. Castiga más pasarse que quedarse corto, lo que
-sesga cualquier optimización que lo use.
+sesga cualquier optimización que lo use. La crítica es vieja y está bien
+documentada [@armstrong1992; @makridakis1993].
 
 **sMAPE** intenta arreglar la asimetría poniendo la suma de los dos valores en el
 denominador. Es la métrica que usó M4 y la que usa este libro para comparar entre
 series.
 
-**MASE** divide el error por el error que habría cometido un naive dentro de la
-muestra de entrenamiento. Un MASE de 1 significa "igual que el naive"; de 0,5,
+**MASE**, propuesto por @hyndman2006, divide el error por el error que habría
+cometido un naive dentro de la muestra de entrenamiento. Un MASE de 1 significa "igual que el naive"; de 0,5,
 "la mitad del error"; de 2, "el doble". Es la métrica más interpretable de las
 cinco.
 
@@ -265,13 +266,13 @@ De ahí salen dos reglas prácticas:
    dispara: el naive no puede divergir.
 :::
 
-## Movelo vos {#sec-widget-07}
+## Muévelo vos {#sec-widget-07}
 
 Todo lo anterior supone que el punto de corte está dado. Cuando uno lo elige
 —porque no hay una competencia que lo fije— la elección cambia el resultado más de
 lo que sería cómodo.
 
-Mové el corte y mirá los errores. Vale la pena buscar dos cosas: cuánto varía el
+Mueve el corte y mira los errores. Vale la pena buscar dos cosas: cuánto varía el
 error de un mismo método según dónde se corte, y **si el orden entre los métodos
 se mantiene**.
 
@@ -421,7 +422,9 @@ Es decir: con un solo punto de corte se puede "demostrar" cualquiera de las dos
 conclusiones. Por eso una evaluación seria usa varios cortes —lo que se llama
 **validación cruzada temporal** u **origen móvil**, y es el tema del
 @sec-validacion-cruzada— y por eso las competencias fijan el corte de antemano,
-para que nadie lo elija después de ver los resultados.
+para que nadie lo elija después de ver los resultados. La discusión clásica sobre
+evaluación fuera de muestra es la de @tashman2000, y @bergmeir2012 analizan
+específicamente cuándo la validación cruzada es válida en series de tiempo.
 
 ## Agregar errores: dos trampas {#sec-agregacion}
 
@@ -499,7 +502,7 @@ $$
 \frac{\overline{\text{sMAPE}}}{\overline{\text{sMAPE}}_{\text{Naive2}}} +
 \frac{\overline{\text{MASE}}}{\overline{\text{MASE}}_{\text{Naive2}}}
 \right)
-$$
+$$ {#eq-owa}
 
 Las barras son promedios sobre las series del grupo, y están donde están a
 propósito: es razón de promedios. `Naive2` vale 1,000 por definición, así que un
@@ -596,7 +599,10 @@ de lo que dicen**, y esto no es una anomalía del catálogo: la subcobertura es 
 regla en la práctica, y tiene causas identificables.
 
 La fórmula supone que los errores son independientes, de varianza constante y
-normales, y que el modelo es el correcto. En una serie real ninguna de las cuatro
+normales, y que el modelo es el correcto. @chatfield1993 revisa por qué esos
+supuestos casi nunca se cumplen y qué consecuencias tiene; para evaluar
+pronósticos probabilísticos en serio hacen falta reglas de puntaje propias
+[@gneiting2007]. En una serie real ninguna de las cuatro
 cosas se cumple del todo, y todas las desviaciones empujan en la misma dirección:
 la incertidumbre real es mayor que la que el modelo declara. El @sec-bootstrapping
 muestra cómo construir intervalos sin apoyarse en esos supuestos.
@@ -628,23 +634,28 @@ propio de seis meses atrás.
 
 Las soluciones están en el @sec-soluciones-07.
 
-**1.** Ajustá un `ExponentialSmoothing` a `Q22252` y calculá el MAE dentro y fuera
-de la muestra. ¿Cuál es el cociente? Compará con el de `M35927` en el
+**1.** Ajusta un `ExponentialSmoothing` a `Q22252` y calcula el MAE dentro y fuera
+de la muestra. ¿Cuál es el cociente? Compara con el de `M35927` en el
 @sec-fuera-de-muestra.
 
-**2.** Tomá `M3007` y calculá el MAPE del naive dos veces: una como está definido
+**2.** Toma `M3007` y calcula el MAPE del naive dos veces: una como está definido
 en este capítulo, y otra invirtiendo real y pronóstico en el denominador. ¿Cuánto
 cambia? ¿Qué dice eso sobre la simetría del MAPE?
 
-**3.** Construí un pronóstico deliberadamente absurdo para una serie del catálogo
-—por ejemplo, el negativo de la serie— y calculá sMAPE y MASE. ¿Cuál de las dos
+**3.** Construye un pronóstico deliberadamente absurdo para una serie del catálogo
+—por ejemplo, el negativo de la serie— y calcula sMAPE y MASE. ¿Cuál de las dos
 métricas comunica mejor el desastre?
 
-**4.** Evaluá el naive y el naive estacional sobre `Q15481` en diez puntos de corte
+**4.** Evalúa el naive y el naive estacional sobre `Q15481` en diez puntos de corte
 distintos. ¿En cuántos gana cada uno? ¿Qué reportarías si tuvieras que elegir uno?
 
-**5.** Calculá la cobertura empírica de los intervalos del 80 % —usando 1,28 en vez
+**5.** Calcula la cobertura empírica de los intervalos del 80 % —usando 1,28 en vez
 de 1,96— sobre el catálogo. ¿La subcobertura es proporcional a la del 95 %?
 
 **6.** Un colega informa que su modelo logró "un sMAPE de 8,3, mucho mejor que el
-14,2 del naive". Escribí las cinco preguntas que le harías antes de creerle.
+14,2 del naive". Escribe las cinco preguntas que le harías antes de creerle.
+
+## Referencias {.unnumbered}
+
+::: {#refs}
+:::

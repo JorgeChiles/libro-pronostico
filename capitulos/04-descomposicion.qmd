@@ -41,7 +41,7 @@ $$
 y_t = T_t + S_t + R_t
 \qquad\text{o}\qquad
 y_t = T_t \times S_t \times R_t
-$$
+$$ {#eq-descomposicion}
 
 La **aditiva** supone que la estacionalidad suma siempre lo mismo: si diciembre
 agrega 200 unidades, agrega 200 tanto cuando la serie vale 1.000 como cuando vale
@@ -71,6 +71,8 @@ A ojo se ve, pero conviene medirlo. Si la amplitud crece con el nivel, el nivel
 promedio de cada ciclo y su desviación estándar tienen que correlacionar:
 
 ```{python}
+#| label: tbl-por-ciclo
+#| tbl-cap: "Nivel promedio y amplitud de cada ciclo anual de Q15481."
 por_ciclo = (
     pd.DataFrame({"y": y.to_numpy(), "ciclo": np.arange(len(y)) // m})
     .groupby("ciclo")["y"]
@@ -91,7 +93,7 @@ en sumas, así que
 
 $$
 \log y_t = \log T_t + \log S_t + \log R_t
-$$
+$$ {#eq-log-aditiva}
 
 y todo el aparato aditivo vuelve a servir. Que ayuda se puede verificar:
 
@@ -118,7 +120,7 @@ serie y el mismo método; lo único que cambió es la escala en la que se lo apl
 Si la amplitud del ciclo crece con el nivel, y si todos los valores son positivos.
 La segunda condición no es un detalle: el logaritmo de un valor negativo o cero no
 existe, y muchas series económicas tienen ceros. Para esos casos hay
-transformaciones más generales, como la de Box-Cox, que aparece en el
+transformaciones más generales, como la de @boxcox1964, que aparece en el
 @sec-regresion.
 :::
 
@@ -216,8 +218,10 @@ Y tiene otras dos:
 
 ## STL {#sec-stl}
 
-STL —*Seasonal and Trend decomposition using Loess*— resuelve las tres. Estima la
-tendencia y la estacionalidad con regresiones locales, en vez de promedios, y las
+STL —*Seasonal and Trend decomposition using Loess*—, propuesto por
+@cleveland1990, resuelve las tres. Estima la
+tendencia y la estacionalidad con regresión local ponderada [@cleveland1979], en
+vez de promedios, y las
 recalcula de manera iterativa.
 
 Lo que hay que saber para usarlo:
@@ -320,18 +324,18 @@ preguntas sobre la misma serie, y eso es lo incómodo de la descomposición: **e
 reparto entre componentes depende de una decisión del analista, no solo de los
 datos**.
 
-## Movelo vos {#sec-widget-04}
+## Muévelo vos {#sec-widget-04}
 
-El widget que sigue tiene el deslizador de la ventana estacional. Elegí una serie,
-movelo, y mirá cómo se redistribuye la varianza entre las tres componentes.
+El widget que sigue tiene el deslizador de la ventana estacional. Elige una serie,
+muévelo, y mira cómo se redistribuye la varianza entre las tres componentes.
 
 Tres cosas que vale la pena buscar:
 
-- Con **amplitud creciente** (`Q15481`), activá el logaritmo y mirá el residuo.
-- Con **quiebre de nivel** (`M32692`), fijate que la fuerza de tendencia queda baja
+- Con **amplitud creciente** (`Q15481`), activa el logaritmo y mira el residuo.
+- Con **quiebre de nivel** (`M32692`), fíjate que la fuerza de tendencia queda baja
   con cualquier ventana: es la razón de lo que discutimos en el
   @sec-ft-no-es-tendencia.
-- Con **estacionalidad débil** (`M3007`), llevá la ventana al mínimo y mirá cómo la
+- Con **estacionalidad débil** (`M3007`), lleva la ventana al mínimo y mira cómo la
   componente estacional se pone irregular. Eso no es estacionalidad: es ruido
   reasignado.
 
@@ -422,10 +426,12 @@ Si la descomposición hizo bien su trabajo, el residuo no debería tener estruct
 ni tendencia, ni ciclo, ni autocorrelación. Cuando la tiene, quedó señal sin
 explicar.
 
-Hay una prueba para eso, la de Ljung-Box, que responde "¿este residuo se distingue
-de ruido?":
+Hay una prueba para eso, la de @ljungbox1978, que responde "¿este residuo se
+distingue de ruido?":
 
 ```{python}
+#| label: tbl-ljungbox
+#| tbl-cap: "Prueba de Ljung-Box sobre el residuo de la descomposición de M35927."
 from statsmodels.stats.diagnostic import acorr_ljungbox
 
 prueba = acorr_ljungbox(d.resid.dropna(), lags=[2 * m_m], return_df=True)
@@ -449,7 +455,7 @@ puede repetir, pero la tendencia hay que proyectarla, y eso ya es un modelo con 
 propios supuestos.
 
 Igualmente hay una receta útil que M4 usa como referencia: desestacionalizar la
-serie, pronosticar con un método simple, y volver a estacionalizar. Es el `Naive2`
+serie, pronosticar con un método simple, y volver a estacionalizar. Es el `Naive2` de @makridakis2020,
 contra el que se mide toda la competencia, y aparece en el
 @sec-caja-de-herramientas.
 
@@ -465,25 +471,30 @@ ruido, como se ve moviendo el widget sobre la serie de estacionalidad débil.
 
 Las soluciones están en el @sec-soluciones-04.
 
-**1.** Descomponé `Q22252` con STL y verificá que la suma de las tres componentes
+**1.** Descompón `Q22252` con STL y verifica que la suma de las tres componentes
 reproduce la serie original. ¿Con qué precisión?
 
-**2.** Aplicá la `descomposicion_clasica` de este capítulo a `M16834` y contá
-cuántas observaciones quedan sin tendencia. Compará con cuántas le faltan a la
+**2.** Aplica la `descomposicion_clasica` de este capítulo a `M16834` y cuenta
+cuántas observaciones quedan sin tendencia. Compara con cuántas le faltan a la
 tendencia de STL sobre la misma serie. ¿Por qué difieren?
 
-**3.** Tomá `Q15481` y calculá la fuerza de estacionalidad con y sin logaritmo.
+**3.** Toma `Q15481` y calcula la fuerza de estacionalidad con y sin logaritmo.
 ¿Cuál da más alta? ¿Significa eso que la serie es "más estacional" en logaritmo?
 
-**4.** Descomponé `M47356` —la serie de valores atípicos del catálogo— dos veces, con
-`robust=True` y con `robust=False`, y graficá los dos residuos. ¿Dónde se ve la
-diferencia? Antes de empezar, fijate qué devuelve `cargar(fenomeno="atipicos")` y por
+**4.** Descompón `M47356` —la serie de valores atípicos del catálogo— dos veces, con
+`robust=True` y con `robust=False`, y grafica los dos residuos. ¿Dónde se ve la
+diferencia? Antes de empezar, fíjate qué devuelve `cargar(fenomeno="atipicos")` y por
 qué esa serie no sirve para este ejercicio.
 
-**5.** Descomponé `M35927` con `seasonal=7` y con `seasonal=51`, y graficá las dos
+**5.** Descompón `M35927` con `seasonal=7` y con `seasonal=51`, y grafica las dos
 componentes estacionales superpuestas. ¿En qué parte de la serie difieren más? ¿Qué
 dice eso sobre si el patrón estacional cambió?
 
-**6.** Aplicá la prueba de Ljung-Box al residuo de la descomposición de `M35927`,
-`Q22252` y `H242`. ¿En cuáles el residuo pasa por ruido? Para las que pasan, mirá
+**6.** Aplica la prueba de Ljung-Box al residuo de la descomposición de `M35927`,
+`Q22252` y `H242`. ¿En cuáles el residuo pasa por ruido? Para las que pasan, mira
 cuántas observaciones tienen antes de sacar conclusiones.
+
+## Referencias {.unnumbered}
+
+::: {#refs}
+:::

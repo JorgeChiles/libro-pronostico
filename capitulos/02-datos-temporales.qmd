@@ -15,7 +15,8 @@ from libro.datos import cargar, catalogo, metadatos
 from libro.graficos import COLORES, mostrar
 ```
 
-Una serie de tiempo en pandas es una `Series` con un índice de fechas. Dicho así
+Una serie de tiempo en pandas [@mckinney2010] es una `Series` con un índice de
+fechas. Dicho así
 suena trivial, y ahí es justamente donde vive la mayoría de los errores: en el
 índice. Un índice mal armado no da un mensaje de error, da un resultado plausible
 y equivocado.
@@ -202,6 +203,8 @@ print(horaria)
 ### Agregar: de horaria a diaria
 
 ```{python}
+#| label: tbl-diaria
+#| tbl-cap: "Primeros días de H317 después de agregar por promedio."
 diaria = horaria.entrenamiento.resample("D").mean()
 print(f"de {len(horaria.entrenamiento)} horas a {len(diaria)} días")
 diaria.head()
@@ -269,7 +272,9 @@ demanda horaria, la que importa para operar. El horizonte también cambió: las 
 horas que pide M4 se volvieron `{python} f"{len(te_d)}"` días.
 
 La lección vale para todo el libro: **la predictibilidad depende del nivel de
-agregación tanto como de la serie**. Un error más chico obtenido agregando no es
+agregación tanto como de la serie**. La agregación temporal es un tema de
+investigación por derecho propio: @kourentzes2014 muestran que combinar
+pronósticos hechos a distintas frecuencias de agregación mejora la precisión. Un error más chico obtenido agregando no es
 un mejor pronóstico si la decisión necesitaba el detalle. Antes de comparar dos
 errores hay que verificar que respondan la misma pregunta.
 
@@ -287,6 +292,8 @@ print(f"faltantes al pasar a semanal: {semanal.isna().sum()} de {len(semanal)}")
 decisión, no un cálculo, y cada opción supone algo distinto:
 
 ```{python}
+#| label: tbl-relleno-semanal
+#| tbl-cap: "Tres maneras de rellenar los períodos nuevos al pasar a frecuencia semanal."
 pd.DataFrame({
     "sin rellenar": semanal,
     "ffill": semanal.ffill(),
@@ -375,6 +382,8 @@ su versión temporal cuesta verla porque no deja rastro.
 Tres operaciones que aparecen en todo el libro:
 
 ```{python}
+#| label: tbl-rezagos
+#| tbl-cap: "Rezago, diferencia y media móvil de las últimas observaciones de M3007."
 y = cargar("M3007").entrenamiento.tail(6)
 
 pd.DataFrame({
@@ -394,6 +403,8 @@ Ese "los dos anteriores" es el punto. `rolling` tiene un argumento `center` que
 parece inocente:
 
 ```{python}
+#| label: tbl-rolling-centrada
+#| tbl-cap: "Media móvil hacia atrás y centrada sobre una secuencia simple."
 x = pd.Series(range(10), dtype=float)
 
 pd.DataFrame({
@@ -403,7 +414,7 @@ pd.DataFrame({
 }).head(5)
 ```
 
-Mirá la fila 1. La ventana hacia atrás da `NaN`, porque en el instante 1 todavía
+Mira la fila 1. La ventana hacia atrás da `NaN`, porque en el instante 1 todavía
 no hay tres observaciones. La centrada da `1.0`, que es el promedio de las
 posiciones 0, 1 y 2: **usó el valor del instante 2 para calcular el del instante
 1**. Usó el futuro.
@@ -441,17 +452,17 @@ series de M4 tienen largos muy distintos —de 13 a 9.919 observaciones—, y en
 formato ancho eso obliga a una matriz llena de huecos. En formato largo, cada
 serie ocupa exactamente las filas que tiene.
 
-## Probalo {#sec-probalo-02}
+## Pruébalo {#sec-pruébalo-02}
 
-La celda que sigue corre en tu navegador, con la serie horaria `H317`. Cambiá la
-frecuencia de destino y la función de agregación, y mirá qué le pasa a la serie.
+La celda que sigue corre en tu navegador, con la serie horaria `H317`. Cambia la
+frecuencia de destino y la función de agregación, y mira qué le pasa a la serie.
 
 Vale la pena probar tres cosas: `"D"` con `"mean"` y con `"sum"` —la forma del
 gráfico es la misma, la escala no—; `"6h"`, que conserva parte del ciclo diario; y
 `"W"`, que lo borra por completo y deja apenas un puñado de puntos.
 
 ```{pyodide}
-#| caption: Remuestreo — cambiá `frecuencia` y `como`
+#| caption: Remuestreo — cambia `frecuencia` y `como`
 #| autorun: true
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -459,8 +470,8 @@ import matplotlib.pyplot as plt
 datos = pd.read_csv("datos/cap02_horaria.csv", parse_dates=["ds"])
 serie = datos[datos["split"] == "entrenamiento"].set_index("ds")["y"]
 
-frecuencia = "D"      # probá "6h", "12h", "D", "W"
-como = "mean"         # probá "mean", "sum", "max", "last"
+frecuencia = "D"      # prueba "6h", "12h", "D", "W"
+como = "mean"         # prueba "mean", "sum", "max", "last"
 
 agregada = serie.resample(frecuencia).agg(como)
 
@@ -478,30 +489,35 @@ plt.show()
 
 Las soluciones están en el @sec-soluciones-02.
 
-**1.** Cargá `H242` y comprobá que su índice tiene frecuencia y que no tiene
-faltantes. Después reconstruí el índice con
-`pd.DatetimeIndex(list(serie.index))` y volvé a mirar `.freq`. ¿Por qué se
+**1.** Carga `H242` y comprueba que su índice tiene frecuencia y que no tiene
+faltantes. Después reconstruye el índice con
+`pd.DatetimeIndex(list(serie.index))` y vuelve a mirar `.freq`. ¿Por qué se
 perdió, si las fechas son las mismas?
 
-**2.** Tomá `M35927`, quitale las observaciones en las posiciones 20, 21 y 40, y
-ajustá un `ExponentialSmoothing` con `trend="add"`. Mirá el índice del
-pronóstico. Después reparala con `asfreq` e `interpolate`, y volvé a ajustar.
+**2.** Toma `M35927`, quítale las observaciones en las posiciones 20, 21 y 40, y
+ajusta un `ExponentialSmoothing` con `trend="add"`. Mira el índice del
+pronóstico. Después repárala con `asfreq` e `interpolate`, y vuelve a ajustar.
 ¿Cambia el pronóstico? ¿Cambia su índice?
 
-**3.** Agregá la serie `H313` a frecuencia diaria con `mean` y con `sum`.
-Graficá las dos. ¿En qué se parecen y en qué no? ¿Cuál usarías si fuera consumo
+**3.** Agrega la serie `H313` a frecuencia diaria con `mean` y con `sum`.
+Grafica las dos. ¿En qué se parecen y en qué no? ¿Cuál usarías si fuera consumo
 eléctrico y tuvieras que dimensionar una red?
 
 **4.** El @sec-agregar-enganio muestra que el error del naive cae mucho al agregar
-a diario. Repetí el cálculo con `H242` y con `H282`. ¿Se repite el patrón?
-Escribí en dos frases por qué esa caída no significa que el pronóstico diario sea
+a diario. Repite el cálculo con `H242` y con `H282`. ¿Se repite el patrón?
+Escribe en dos frases por qué esa caída no significa que el pronóstico diario sea
 mejor.
 
-**5.** Construí una tabla con `y`, su rezago 1, su rezago 12 y una media móvil de
+**5.** Construye una tabla con `y`, su rezago 1, su rezago 12 y una media móvil de
 12 períodos hacia atrás, para `M16834`. ¿Cuántas filas tienen algún `NaN`? ¿Por
 qué es exactamente ese número?
 
-**6.** Tomá una serie del catálogo y calculá una media móvil de 5 períodos
-centrada y otra hacia atrás. Restalas y graficá la diferencia. ¿Dónde difieren
-más? Explicá en una frase por qué usar la centrada como variable de entrada
+**6.** Toma una serie del catálogo y calcula una media móvil de 5 períodos
+centrada y otra hacia atrás. Réstalas y grafica la diferencia. ¿Dónde difieren
+más? Explica en una frase por qué usar la centrada como variable de entrada
 inflaría el desempeño medido de un modelo.
+
+## Referencias {.unnumbered}
+
+::: {#refs}
+:::
