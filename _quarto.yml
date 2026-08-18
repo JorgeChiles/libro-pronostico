@@ -9,7 +9,7 @@ book:
   date: today
   date-format: "MMMM YYYY"
   search: true
-  repo-url: https://github.com/USUARIO/libro-pronostico
+  repo-url: https://github.com/JorgeChiles/libro-pronostico
   repo-actions: [issue, source]
   page-footer:
     left: "Pronóstico de series de tiempo con Python"
