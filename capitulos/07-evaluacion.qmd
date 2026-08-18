@@ -1,7 +1,650 @@
+---
+resources:
+  - datos/cap04_estacionales.csv
+---
+
 # Evaluación {#sec-evaluacion}
 
-Partición temporal, backtesting, MAE, RMSE, MAPE, sMAPE, MASE; intervalos de predicción.
+```{python}
+#| echo: false
+import warnings
 
-::: {.callout-note appearance="simple"}
-Capítulo en preparación.
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+
+from libro.datos import cargar, catalogo
+from libro.graficos import COLORES, mostrar
+
+warnings.simplefilter("ignore")
+```
+
+Medir el error de un pronóstico parece la parte fácil del oficio y es donde se
+cometen los errores más caros. No porque las fórmulas sean difíciles —son cuatro
+divisiones— sino porque cada una responde una pregunta distinta, y elegir la que
+no corresponde lleva a conclusiones que parecen sólidas y no lo son.
+
+Este capítulo es el más importante de la Parte I. Todo lo que viene después
+—elegir entre modelos, ajustar parámetros, decidir si algo sirve— depende de
+poder medir bien.
+
+## El error que importa es el que no viste {#sec-fuera-de-muestra}
+
+Un modelo ajustado a una serie deja **residuos**: la diferencia entre lo que
+predijo y lo que ocurrió, en los datos que usó para ajustarse. Es tentador medir
+ahí, y es la primera trampa.
+
+```{python}
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+
+serie = cargar("M35927")
+y = serie.entrenamiento
+m = serie.periodo_estacional
+
+modelo = ExponentialSmoothing(
+    y, trend="add", seasonal="add", seasonal_periods=m,
+    initialization_method="estimated",
+).fit()
+
+residuos = y.to_numpy() - modelo.fittedvalues.to_numpy()
+errores = serie.prueba.to_numpy() - modelo.forecast(serie.horizonte).to_numpy()
+
+print(f"MAE sobre los datos de entrenamiento : {np.mean(np.abs(residuos)):6.2f}")
+print(f"MAE sobre los datos de prueba        : {np.mean(np.abs(errores)):6.2f}")
+print(f"cociente                             : "
+      f"{np.mean(np.abs(errores)) / np.mean(np.abs(residuos)):6.2f}×")
+```
+
+El mismo modelo, la misma serie, y el error se duplica al pasar de los datos que
+vio a los que no. No es un defecto del modelo: es la diferencia entre **explicar**
+y **pronosticar**. Los parámetros se eligieron para minimizar el error sobre esos
+datos, así que medirlos ahí es preguntarle al modelo qué tan bien recuerda.
+
+La regla, sin excepciones: **el error se mide sobre datos que el modelo no vio al
+ajustarse.**
+
+## La partición temporal {#sec-particion}
+
+En aprendizaje automático la partición habitual es aleatoria: se sortean filas
+para entrenamiento y para prueba. Con series de tiempo eso está mal, por dos
+razones independientes.
+
+**La primera es fuga de información.** Si un mes de 2015 queda en prueba y sus
+vecinos en entrenamiento, el modelo aprendió lo que pasó antes *y después*. En una
+serie autocorrelacionada, saber el valor de mayo y julio hace trivial acertar
+junio.
+
+**La segunda es más fundamental: la tarea es extrapolar.** Pronosticar es decir
+algo sobre un período posterior a todos los datos disponibles. Una evaluación que
+interpola no mide la tarea que importa, aunque no hubiera fuga.
+
+La partición correcta es un corte en el tiempo: todo lo anterior para entrenar,
+todo lo posterior para evaluar. Es lo que hace M4, y lo que el módulo del libro
+devuelve ya hecho:
+
+```{python}
+print(f"entrenamiento: {serie.entrenamiento.index.min().date()} a "
+      f"{serie.entrenamiento.index.max().date()}  ({serie.n} obs)")
+print(f"prueba       : {serie.prueba.index.min().date()} a "
+      f"{serie.prueba.index.max().date()}  ({len(serie.prueba)} obs)")
+```
+
+## Las métricas {#sec-metricas}
+
+Cinco, y conviene saber qué pregunta responde cada una.
+
+```{python}
+def mae(real, pron):
+    """Error absoluto medio. En las unidades de la serie."""
+    return np.mean(np.abs(np.asarray(real) - np.asarray(pron)))
+
+
+def rmse(real, pron):
+    """Raíz del error cuadrático medio. Castiga más los errores grandes."""
+    return np.sqrt(np.mean((np.asarray(real) - np.asarray(pron)) ** 2))
+
+
+def mape(real, pron):
+    """Error porcentual absoluto medio. No existe si algún real es cero."""
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    return 100 * np.mean(np.abs((real - pron) / real))
+
+
+def smape(real, pron):
+    """Simétrico, en la definición oficial de M4. Va de 0 a 200."""
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    return 200 * np.mean(np.abs(real - pron) / (np.abs(real) + np.abs(pron)))
+
+
+def mase(real, pron, entrenamiento, m=1):
+    """Escalado por el error del naive dentro de la muestra. Sin cota superior."""
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    escala = np.mean(np.abs(np.diff(np.asarray(entrenamiento, float), n=m)))
+    return np.mean(np.abs(real - pron)) / escala
+```
+
+**MAE y RMSE** están en las unidades de la serie, así que no se pueden comparar
+entre series distintas. La diferencia entre las dos importa más de lo que parece:
+minimizar el MAE lleva a pronosticar la **mediana** de la distribución futura;
+minimizar el RMSE lleva a pronosticar la **media**. En una serie asimétrica no son
+el mismo número, y elegir la métrica es elegir qué se está pronosticando.
+
+**MAPE** es un porcentaje, así que sí compara entre series, y tiene dos problemas
+graves: no existe cuando la serie vale cero, y es asimétrico. Sobrepronosticar un
+100 % da un MAPE de 100; subpronosticar hasta cero también da 100, pero
+sobrepronosticar al triple da 200. Castiga más pasarse que quedarse corto, lo que
+sesga cualquier optimización que lo use.
+
+**sMAPE** intenta arreglar la asimetría poniendo la suma de los dos valores en el
+denominador. Es la métrica que usó M4 y la que usa este libro para comparar entre
+series.
+
+**MASE** divide el error por el error que habría cometido un naive dentro de la
+muestra de entrenamiento. Un MASE de 1 significa "igual que el naive"; de 0,5,
+"la mitad del error"; de 2, "el doble". Es la métrica más interpretable de las
+cinco.
+
+Sobre las mismas 18 observaciones:
+
+```{python}
+#| label: tbl-metricas
+#| tbl-cap: "Las cinco métricas para tres pronósticos de la misma serie."
+real = serie.prueba.to_numpy()
+entrenamiento = y.to_numpy()
+
+pronosticos = {
+    "naive": np.repeat(entrenamiento[-1], serie.horizonte),
+    "naive estacional": np.array(
+        [entrenamiento[-m + (i % m)] for i in range(serie.horizonte)]
+    ),
+    "Holt-Winters": modelo.forecast(serie.horizonte).to_numpy(),
+}
+
+pd.DataFrame([
+    {
+        "método": nombre,
+        "MAE": mae(real, p),
+        "RMSE": rmse(real, p),
+        "MAPE": mape(real, p),
+        "sMAPE": smape(real, p),
+        "MASE": mase(real, p, entrenamiento),
+    }
+    for nombre, p in pronosticos.items()
+]).set_index("método").round(2)
+```
+
+## El sMAPE está acotado y el MASE no {#sec-saturacion}
+
+Esta diferencia es la más consecuente del capítulo, y casi nunca se menciona.
+
+El sMAPE tiene un techo: por construcción no puede pasar de 200, porque el
+numerador nunca supera al denominador. El MASE no tiene techo. Se ve multiplicando
+un pronóstico por factores cada vez más grandes:
+
+```{python}
+#| label: tbl-saturacion
+#| tbl-cap: "El mismo pronóstico multiplicado por factores crecientes. El sMAPE se acerca a su techo de 200; el MASE crece sin límite."
+base = np.repeat(entrenamiento[-1], serie.horizonte)
+
+pd.DataFrame([
+    {
+        "factor": k,
+        "sMAPE": smape(real, base * k),
+        "MASE": mase(real, base * k, entrenamiento),
+    }
+    for k in [1, 2, 5, 10, 100, 1000]
+]).set_index("factor").round(2)
+```
+
+Un pronóstico mil veces más grande que la serie tiene sMAPE 199,6 —
+indistinguible de uno cien veces más grande — y MASE de más de sesenta mil. **El
+sMAPE no puede distinguir un desastre de una catástrofe. El MASE sí.**
+
+Y esto no es una curiosidad de laboratorio. Pasa con modelos razonables aplicados
+a series reales:
+
+```{python}
+#| label: tbl-holt-diverge
+#| tbl-cap: "Holt sobre las series horarias del catálogo. Extrapola una tendencia lineal a 48 pasos y se va a valores negativos, en series que solo tienen valores positivos."
+from statsmodels.tsa.holtwinters import Holt
+
+filas = []
+for s in cargar(n=len(catalogo())):
+    if s.frecuencia != "horaria":
+        continue
+    tr, te = s.entrenamiento, s.prueba.to_numpy()
+    pron = Holt(tr, initialization_method="estimated").fit().forecast(
+        s.horizonte
+    ).to_numpy()
+    filas.append({
+        "serie": s.id,
+        "sMAPE": smape(te, pron),
+        "MASE": mase(te, pron, tr.to_numpy()),
+        "mínimo observado": te.min(),
+        "mínimo pronosticado": pron.min(),
+    })
+
+divergencia = pd.DataFrame(filas).set_index("serie")
+divergencia.round(2)
+```
+
+```{python}
+#| echo: false
+negativas = int((divergencia["mínimo pronosticado"] < 0).sum())
+smape_max = divergencia["sMAPE"].max()
+mase_min, mase_max = divergencia["MASE"].min(), divergencia["MASE"].max()
+```
+
+En `{python} f"{negativas}"` de las `{python} f"{len(divergencia)}"` series los
+pronósticos se van a valores **negativos**, en series que nunca lo son. El sMAPE
+las reporta como máximo en `{python} f"{smape_max:.0f}"` —alto, pero todavía
+dentro de una escala que parece manejable—, mientras el MASE dice que el error es
+entre `{python} f"{mase_min:.0f}"` y `{python} f"{mase_max:.0f}"` veces el del
+naive. Solo una de las dos métricas transmite el tamaño del problema.
+
+Ese es también el argumento a favor de imponer una **cota de cordura** antes de
+mostrar un pronóstico: si la serie histórica nunca fue negativa, un pronóstico
+negativo es un error detectable sin saber nada del futuro. Sobre eso vuelve el
+@sec-produccion.
+
+::: {.callout-important}
+## El caso extremo, documentado
+
+En la evaluación de 26 modelos sobre las series de M4 que acompaña a este libro
+apareció un caso límite: la serie `H366` con un SARIMA(1,1,1)(1,1,1,24) dio
+**sMAPE 199,99** —saturado— y **MASE 127.224**. Esa serie sola explicaba el 100 %
+del MASE promedio de todas las series horarias.
+
+De ahí salen dos reglas prácticas:
+
+1. **Al reportar un MASE promedio, acompañarlo de la mediana y del conteo de
+   casos extremos.** Un promedio alto puede significar "el modelo es malo" o "una
+   serie de mil divergió", y son diagnósticos opuestos.
+2. **Un MASE altísimo tiene dos causas posibles**: el modelo divergió, o la serie
+   tiene un denominador casi nulo. Se distinguen mirando si el naive también se
+   dispara: el naive no puede divergir.
 :::
+
+## Movelo vos {#sec-widget-07}
+
+Todo lo anterior supone que el punto de corte está dado. Cuando uno lo elige
+—porque no hay una competencia que lo fije— la elección cambia el resultado más de
+lo que sería cómodo.
+
+Mové el corte y mirá los errores. Vale la pena buscar dos cosas: cuánto varía el
+error de un mismo método según dónde se corte, y **si el orden entre los métodos
+se mantiene**.
+
+```{shinylive-python}
+#| standalone: true
+#| viewerHeight: 720
+#| components: [viewer]
+
+from pathlib import Path
+
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from shiny import App, reactive, render, ui
+
+AQUI = Path(__file__).parent
+datos = pd.read_csv(AQUI / "cap04_estacionales.csv", parse_dates=["ds"])
+ETIQUETAS = list(dict.fromkeys(datos["etiqueta"]))
+
+
+def smape(real, pron):
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    return 200 * np.mean(np.abs(real - pron) / (np.abs(real) + np.abs(pron)))
+
+
+METODOS = {
+    "naive": lambda y, h, m: np.repeat(y[-1], h),
+    "naive estacional": lambda y, h, m: np.array([y[-m + (i % m)] for i in range(h)]),
+    "media": lambda y, h, m: np.repeat(y.mean(), h),
+    "deriva": lambda y, h, m: y[-1] + (y[-1] - y[0]) / (len(y) - 1)
+                                       * np.arange(1, h + 1),
+}
+
+app_ui = ui.page_fluid(
+    ui.layout_columns(
+        ui.input_select("serie", "Serie", ETIQUETAS, selected=ETIQUETAS[0]),
+        ui.input_slider("corte", "Punto de corte (% de la serie)", 40, 95, 80, step=1),
+        ui.input_slider("h", "Horizonte", 4, 24, 12),
+        col_widths=[3, 5, 4],
+    ),
+    ui.output_ui("resumen"),
+    ui.output_plot("grafico", height="330px"),
+    ui.output_table("tabla"),
+)
+
+
+def servidor(input, output, session):
+
+    @reactive.calc
+    def partes():
+        g = datos[datos["etiqueta"] == input.serie()].sort_values("ds")
+        y = g["y"].to_numpy()
+        fechas = g["ds"].to_numpy()
+        m = int(g["m"].iloc[0])
+        h = int(input.h())
+        corte = int(len(y) * input.corte() / 100)
+        corte = max(2 * m + 1, min(corte, len(y) - h))
+        return y, fechas, m, h, corte
+
+    @reactive.calc
+    def errores():
+        y, _, m, h, corte = partes()
+        tr, te = y[:corte], y[corte:corte + h]
+        return {n: smape(te, f(tr, h, m)) for n, f in METODOS.items()}
+
+    @render.ui
+    def resumen():
+        y, _, m, h, corte = partes()
+        e = errores()
+        mejor = min(e, key=e.get)
+        return ui.markdown(
+            f"Entrenamiento: **{corte}** observaciones · prueba: **{h}** · "
+            f"mejor método acá: **{mejor}** (sMAPE {e[mejor]:.2f})"
+        )
+
+    @render.plot
+    def grafico():
+        y, fechas, m, h, corte = partes()
+        tr, te = y[:corte], y[corte:corte + h]
+
+        fig, ax = plt.subplots(figsize=(9, 3.2))
+        ax.plot(fechas[:corte], tr, lw=1.2, color="#1f4e79", label="entrenamiento")
+        ax.plot(fechas[corte:corte + h], te, lw=1.8, ls="--",
+                color="#c0504d", label="prueba")
+        for nombre, f in METODOS.items():
+            ax.plot(fechas[corte:corte + h], f(tr, h, m), lw=1.4, label=nombre)
+        ax.axvline(fechas[corte], color="gray", lw=1, ls=":")
+        ax.legend(loc="upper left", fontsize=7, ncol=3)
+        ax.xaxis.set_major_locator(mdates.AutoDateLocator(maxticks=7))
+        ax.xaxis.set_major_formatter(
+            mdates.ConciseDateFormatter(ax.xaxis.get_major_locator())
+        )
+        fig.tight_layout()
+        return fig
+
+    @render.table
+    def tabla():
+        e = errores()
+        return (
+            pd.DataFrame({"método": list(e), "sMAPE": [round(v, 2) for v in e.values()]})
+            .sort_values("sMAPE")
+        )
+
+
+app = App(app_ui, servidor)
+
+## file: cap04_estacionales.csv
+{{< include datos/cap04_estacionales.csv >}}
+```
+
+Lo que el widget muestra de forma interactiva se puede medir:
+
+```{python}
+#| label: tbl-corte
+#| tbl-cap: "El mismo par de métodos evaluado en seis puntos de corte distintos de la misma serie. La última columna dice quién gana."
+completa = serie.completa.to_numpy()
+h = serie.horizonte
+
+filas = []
+for corte in range(len(completa) - h - 60, len(completa) - h + 1, 12):
+    tr, te = completa[:corte], completa[corte:corte + h]
+    e_naive = smape(te, np.repeat(tr[-1], h))
+    e_snaive = smape(te, np.array([tr[-m + (i % m)] for i in range(h)]))
+    filas.append({
+        "corte": corte,
+        "naive": e_naive,
+        "naive estacional": e_snaive,
+        "gana": "naive" if e_naive < e_snaive else "naive estacional",
+    })
+
+pd.DataFrame(filas).set_index("corte").round(2)
+```
+
+```{python}
+#| echo: false
+tabla_corte = pd.DataFrame(filas).set_index("corte")
+rango_snaive = tabla_corte["naive estacional"].max() / tabla_corte["naive estacional"].min()
+```
+
+Dos cosas para leer ahí. El error del naive estacional varía por un factor de
+`{python} f"{rango_snaive:.1f}"` según dónde se corte, sobre la misma serie y con
+el mismo método. Y en el primer corte **gana el naive**, mientras que en los demás
+gana el estacional por bastante.
+
+Es decir: con un solo punto de corte se puede "demostrar" cualquiera de las dos
+conclusiones. Por eso una evaluación seria usa varios cortes —lo que se llama
+**validación cruzada temporal** u **origen móvil**, y es el tema del
+@sec-validacion-cruzada— y por eso las competencias fijan el corte de antemano,
+para que nadie lo elija después de ver los resultados.
+
+## Agregar errores: dos trampas {#sec-agregacion}
+
+Cuando hay muchas series, hay que resumir. Y resumir errores tiene dos trampas que
+cambian conclusiones.
+
+### Razón de promedios, no promedio de razones {#sec-razon-de-promedios}
+
+Para decir "este modelo es un 20 % mejor que la referencia" hay dos cálculos
+posibles, y no dan lo mismo:
+
+```{python}
+todas = cargar(n=len(catalogo()))
+estacionales = [s for s in todas if s.periodo_estacional > 1]
+
+del_modelo, de_referencia = [], []
+for s in estacionales:
+    tr, te, hh = s.entrenamiento.to_numpy(), s.prueba.to_numpy(), s.horizonte
+    mm = s.periodo_estacional
+    del_modelo.append(
+        smape(te, np.array([tr[-mm + (i % mm)] for i in range(hh)]))
+    )
+    de_referencia.append(smape(te, np.repeat(tr[-1], hh)))
+
+razon_de_promedios = np.mean(del_modelo) / np.mean(de_referencia)
+promedio_de_razones = np.mean([a / b for a, b in zip(del_modelo, de_referencia)])
+
+print(f"series evaluadas    : {len(estacionales)}")
+print(f"razón de promedios  : {razon_de_promedios:.3f}")
+print(f"promedio de razones : {promedio_de_razones:.3f}")
+```
+
+Los dos números describen el mismo modelo sobre las mismas series, y dicen cosas
+**opuestas**: la razón de promedios dice que el modelo comete un 38 % menos error
+que la referencia; el promedio de razones dice que comete un 8 % más.
+
+No hay ningún error de cálculo. La razón de promedios está dominada por las series
+de error grande, porque son las que pesan en el promedio del numerador y del
+denominador. El promedio de razones le da el mismo peso a cada serie, así que una
+serie fácil donde el modelo pierde por poco cuenta lo mismo que una difícil donde
+gana por mucho.
+
+**Cuál usar depende de la pregunta**, y hay que decir cuál se usó. La métrica
+oficial de M4 usa **razón de promedios**: primero promedia el error sobre todas las
+series del grupo y recién después divide por el de la referencia. Calcularlo serie
+por serie y promediar da un número distinto que no es el de la competencia.
+
+### El denominador tiene que ser el de las mismas series {#sec-denominador}
+
+La segunda trampa aparece cuando el modelo no se puede aplicar a todas las series.
+Holt-Winters, por ejemplo, necesita estacionalidad: no existe donde $m = 1$.
+
+Si se lo evalúa sobre las series estacionales pero se lo divide por una referencia
+promediada sobre **todas** las series, el cociente mezcla dos poblaciones. Y como
+las series donde el modelo no corre pueden ser sistemáticamente más fáciles o más
+difíciles, el sesgo tiene cualquier signo.
+
+En la evaluación de M4 que acompaña al libro, este error hacía la diferencia entre
+dos conclusiones opuestas: Holt-Winters, que solo existe en 2.414 de las 4.773
+series evaluadas, daba **OWA 0,992** —le gana a la referencia— dividido por un
+Naive2 promediado sobre las 4.773, y **OWA 1,135** —no le gana— restringido
+correctamente a las 2.414 que el modelo vio.
+
+La regla es simple y hay que aplicarla siempre: **el denominador se calcula sobre
+exactamente el mismo conjunto de series que el numerador.**
+
+## OWA, la métrica de M4 {#sec-owa}
+
+Con lo anterior ya se puede entender la métrica oficial de la competencia. El
+**OWA** (*overall weighted average*) promedia el sMAPE y el MASE, cada uno
+normalizado contra el benchmark `Naive2`:
+
+$$
+\text{OWA} = \frac{1}{2}\left(
+\frac{\overline{\text{sMAPE}}}{\overline{\text{sMAPE}}_{\text{Naive2}}} +
+\frac{\overline{\text{MASE}}}{\overline{\text{MASE}}_{\text{Naive2}}}
+\right)
+$$
+
+Las barras son promedios sobre las series del grupo, y están donde están a
+propósito: es razón de promedios. `Naive2` vale 1,000 por definición, así que un
+OWA menor a 1 le gana al benchmark y uno mayor no.
+
+`Naive2` no es el naive simple: es un naive aplicado a la serie
+**desestacionalizada** —con la descomposición del @sec-descomposicion— y después
+re-estacionalizado. Es un benchmark deliberadamente difícil de superar.
+
+::: {.callout-note}
+## Que la implementación reproduce los valores publicados
+
+Implementar una métrica y creerle es un acto de fe. La forma de salir de ahí es
+reproducir números publicados.
+
+La implementación de `Naive2` que acompaña a este libro se validó contra los
+valores de la competencia. El sMAPE global de `Naive2` da **13,548** contra el
+**13,564** publicado: una diferencia de **0,016 puntos**. Tres frecuencias
+—anual, semanal y diaria— coinciden exactamente, y las estacionales difieren en
+décimas porque la descomposición de `statsmodels` no es idéntica al código
+original de M4.
+
+Ese ejercicio también sacó a la luz una particularidad del código oficial de M4:
+en su prueba de estacionalidad, el primer término de la suma no va al cuadrado, lo
+que difiere de la fórmula de libro. Se reprodujo tal cual para igualar los
+resultados publicados. Es la clase de detalle que solo aparece cuando uno intenta
+reproducir en serio, y la razón por la que vale la pena hacerlo.
+:::
+
+## Intervalos de predicción {#sec-intervalos}
+
+Un pronóstico puntual sin intervalo es una conjetura presentada como dato. El
+intervalo dice cuánta incertidumbre hay.
+
+Para el naive, el ancho crece con la raíz del horizonte: la incertidumbre acumula
+a medida que se pronostica más lejos.
+
+```{python}
+#| label: fig-intervalo
+#| fig-cap: "Pronóstico naive con intervalo del 95 %. El ancho crece con la raíz del horizonte."
+tr = serie.entrenamiento
+sigma = np.std(np.diff(tr.to_numpy()), ddof=1)
+pasos = np.arange(1, serie.horizonte + 1)
+
+centro = np.repeat(tr.to_numpy()[-1], serie.horizonte)
+ancho = 1.96 * sigma * np.sqrt(pasos)
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=tr.index[-48:], y=tr.to_numpy()[-48:], mode="lines", name="observado",
+    line=dict(color=COLORES["observado"], width=1.8),
+))
+fig.add_trace(go.Scatter(
+    x=list(serie.prueba.index) + list(serie.prueba.index[::-1]),
+    y=list(centro + ancho) + list((centro - ancho)[::-1]),
+    fill="toself", fillcolor=COLORES["intervalo"], line=dict(width=0),
+    name="intervalo 95 %", hoverinfo="skip",
+))
+fig.add_trace(go.Scatter(
+    x=serie.prueba.index, y=centro, mode="lines", name="pronóstico",
+    line=dict(color=COLORES["pronostico"], width=2),
+))
+fig.add_trace(go.Scatter(
+    x=serie.prueba.index, y=serie.prueba.values, mode="lines", name="observado (prueba)",
+    line=dict(color=COLORES["prueba"], width=2, dash="dot"),
+))
+fig.update_layout(height=430)
+mostrar(fig, titulo_y="unidades")
+```
+
+Y ahora la pregunta que casi nunca se hace: **¿cubre lo que promete?** Un intervalo
+del 95 % debería contener el valor real el 95 % de las veces. Se puede medir sobre
+el catálogo entero:
+
+```{python}
+cubiertos = total = 0
+for s in cargar(n=len(catalogo())):
+    tr_s, te_s = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    sigma_s = np.std(np.diff(tr_s), ddof=1)
+    if not np.isfinite(sigma_s) or sigma_s == 0:
+        continue
+    for i in range(s.horizonte):
+        if abs(te_s[i] - tr_s[-1]) <= 1.96 * sigma_s * np.sqrt(i + 1):
+            cubiertos += 1
+        total += 1
+
+cobertura = 100 * cubiertos / total
+print(f"cobertura empírica del intervalo del 95 %: {cobertura:.1f} %  "
+      f"({total} pronósticos)")
+```
+
+`{python} f"{cobertura:.1f}"` % en vez de 95 %. Los intervalos son **más angostos
+de lo que dicen**, y esto no es una anomalía del catálogo: la subcobertura es la
+regla en la práctica, y tiene causas identificables.
+
+La fórmula supone que los errores son independientes, de varianza constante y
+normales, y que el modelo es el correcto. En una serie real ninguna de las cuatro
+cosas se cumple del todo, y todas las desviaciones empujan en la misma dirección:
+la incertidumbre real es mayor que la que el modelo declara. El @sec-bootstrapping
+muestra cómo construir intervalos sin apoyarse en esos supuestos.
+
+Un intervalo que promete 95 y entrega 87 no es inútil: es útil si uno sabe que
+entrega 87. Lo peligroso es tomarlo al pie de la letra en una decisión donde el
+peor caso importa.
+
+## Qué reportar {#sec-que-reportar}
+
+Un resumen de lo que este capítulo recomienda al informar el desempeño de un
+modelo:
+
+1. **La métrica y su definición exacta.** Hay varias versiones del sMAPE en
+   circulación —algunas en fracción, otras en porcentaje, otras con épsilon en el
+   denominador— y los números no son comparables entre ellas.
+2. **Promedio y mediana.** Si difieren mucho, hay casos extremos que el promedio
+   está escondiendo.
+3. **El conteo de casos extremos**, con un umbral declarado.
+4. **Cuántas series y cuáles.** Si el modelo no corre en todas, decir en cuántas
+   corrió, y calcular el denominador sobre esas.
+5. **El punto de corte y el horizonte.** Sin eso, el número no significa nada.
+6. **La cobertura observada de los intervalos**, si se reportan intervalos.
+
+Parece burocrático hasta la primera vez que uno intenta reproducir un resultado
+propio de seis meses atrás.
+
+## Ejercicios
+
+Las soluciones están en el @sec-soluciones-07.
+
+**1.** Ajustá un `ExponentialSmoothing` a `Q22252` y calculá el MAE dentro y fuera
+de la muestra. ¿Cuál es el cociente? Compará con el de `M35927` en el
+@sec-fuera-de-muestra.
+
+**2.** Tomá `M3007` y calculá el MAPE del naive dos veces: una como está definido
+en este capítulo, y otra invirtiendo real y pronóstico en el denominador. ¿Cuánto
+cambia? ¿Qué dice eso sobre la simetría del MAPE?
+
+**3.** Construí un pronóstico deliberadamente absurdo para una serie del catálogo
+—por ejemplo, el negativo de la serie— y calculá sMAPE y MASE. ¿Cuál de las dos
+métricas comunica mejor el desastre?
+
+**4.** Evaluá el naive y el naive estacional sobre `Q15481` en diez puntos de corte
+distintos. ¿En cuántos gana cada uno? ¿Qué reportarías si tuvieras que elegir uno?
+
+**5.** Calculá la cobertura empírica de los intervalos del 80 % —usando 1,28 en vez
+de 1,96— sobre el catálogo. ¿La subcobertura es proporcional a la del 95 %?
+
+**6.** Un colega informa que su modelo logró "un sMAPE de 8,3, mucho mejor que el
+14,2 del naive". Escribí las cinco preguntas que le harías antes de creerle.

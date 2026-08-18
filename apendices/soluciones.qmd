@@ -956,3 +956,268 @@ Es un chequeo que conviene hacer siempre con cualquier componente principal, por
 el signo que devuelve la descomposición es arbitrario: depende de detalles
 numéricos de la implementación y puede cambiar entre versiones de la biblioteca sin
 que nada avise.
+
+## Capítulo 7 · Evaluación {#sec-soluciones-07}
+
+```{python}
+#| echo: false
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+
+from libro.datos import catalogo
+
+
+def smape_m4(real, pron):
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    return 200 * np.mean(np.abs(real - pron) / (np.abs(real) + np.abs(pron)))
+
+
+def mase_m4(real, pron, entrenamiento, m=1):
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    escala = np.mean(np.abs(np.diff(np.asarray(entrenamiento, float), n=m)))
+    return np.mean(np.abs(real - pron)) / escala
+```
+
+### Ejercicio 1
+
+```{python}
+filas = []
+for serie_id in ["Q22252", "M35927"]:
+    s = cargar(serie_id)
+    y, m = s.entrenamiento, s.periodo_estacional
+    modelo = ExponentialSmoothing(
+        y, trend="add", seasonal="add", seasonal_periods=m,
+        initialization_method="estimated",
+    ).fit()
+    dentro = np.mean(np.abs(y.to_numpy() - modelo.fittedvalues.to_numpy()))
+    fuera = np.mean(
+        np.abs(s.prueba.to_numpy() - modelo.forecast(s.horizonte).to_numpy())
+    )
+    filas.append({
+        "serie": s.id,
+        "observaciones": s.n,
+        "MAE dentro": round(dentro, 2),
+        "MAE fuera": round(fuera, 2),
+        "cociente": round(fuera / dentro, 2),
+    })
+
+pd.DataFrame(filas).set_index("serie")
+```
+
+El resultado es el contrario del esperado: en `Q22252` el error **fuera** de la
+muestra es menos de la mitad del error dentro. Vale la pena entender por qué, porque
+desarma una intuición que se enuncia como si fuera una ley.
+
+"El error dentro de la muestra siempre es menor" no es una ley: es una tendencia que
+vale cuando el modelo tiene margen para ajustarse a los datos que vio. Acá pasan dos
+cosas a la vez.
+
+**La serie es corta y el modelo grande.** Con 56 observaciones y un Holt-Winters
+trimestral, el modelo estima nivel, tendencia y cuatro factores estacionales sobre
+muy pocos datos. No logra un ajuste bueno *en ninguna parte*, así que el error dentro
+de la muestra es alto en términos absolutos.
+
+**El período de prueba puede ser más fácil que el promedio de la serie.** Son ocho
+observaciones. Si caen en un tramo tranquilo, el error ahí es bajo por suerte, no por
+mérito del modelo.
+
+La lección práctica: un cociente fuera/dentro menor que 1 no es motivo de festejo, es
+motivo de sospecha. Casi siempre significa que el período de prueba es corto o poco
+representativo, y que ese número no va a sostenerse en el siguiente corte. Es
+exactamente el problema que la validación cruzada temporal del @sec-validacion-cruzada
+resuelve.
+
+### Ejercicio 2
+
+```{python}
+s = cargar("M3007")
+tr, te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+pron = np.repeat(tr[-1], s.horizonte)
+
+como_definido = 100 * np.mean(np.abs((te - pron) / te))
+invertido = 100 * np.mean(np.abs((te - pron) / pron))
+
+print(f"MAPE con el real en el denominador      : {como_definido:.2f}")
+print(f"MAPE con el pronóstico en el denominador: {invertido:.2f}")
+print(f"cociente entre ambos                    : "
+      f"{invertido / como_definido:.2f}×")
+```
+
+Cambia por un factor de casi tres. El mismo pronóstico, la misma serie, y dos
+números que llevarían a evaluaciones muy distintas.
+
+La razón: `M3007` es la serie que se acelera —la del @sec-una-serie—, así que en el
+período de prueba los valores reales son mucho más grandes que el último valor
+observado, que es lo que el naive pronostica. Con el real en el denominador, cada
+error se divide por un número grande y el porcentaje sale chico. Con el pronóstico en
+el denominador, se divide por un número chico y sale grande.
+
+Eso es exactamente la asimetría del MAPE. La consecuencia práctica es que **un
+modelo que subpronostica sistemáticamente se ve mejor de lo que es** cuando se lo
+mide con MAPE. Si se usa el MAPE como función objetivo de una optimización, el
+modelo aprende a quedarse corto, porque le sale más barato. El sMAPE reduce el
+problema poniendo la suma de los dos valores en el denominador, aunque no lo elimina
+del todo.
+
+### Ejercicio 3
+
+```{python}
+s = cargar("M35927")
+tr, te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+
+absurdos = {
+    "el negativo del último valor": np.repeat(-tr[-1], s.horizonte),
+    "todo cero": np.zeros(s.horizonte),
+    "el naive (referencia)": np.repeat(tr[-1], s.horizonte),
+}
+
+pd.DataFrame([
+    {
+        "pronóstico": nombre,
+        "sMAPE": round(smape_m4(te, p), 2),
+        "MASE": round(mase_m4(te, p, tr), 1),
+    }
+    for nombre, p in absurdos.items()
+]).set_index("pronóstico")
+```
+
+El **MASE**, sin dudas, y la tabla lo muestra de manera contundente: los dos
+pronósticos absurdos dan **exactamente el mismo sMAPE, 200,00**, el techo de la
+métrica. El sMAPE no puede distinguirlos.
+
+El MASE sí: dice que el pronóstico negativo es unas dos veces peor que el de ceros.
+Y tiene razón, porque estar en $-1.000$ cuando la serie vale $1.000$ es el doble de
+distancia que estar en cero.
+
+Es el mismo fenómeno del @sec-saturacion, en su versión más simple. Un modelo que
+diverge queda disimulado en el sMAPE y arrastra sin límite el promedio del MASE. Al
+evaluar un conjunto de modelos, esa combinación es peligrosa en las dos direcciones:
+si se mira solo el sMAPE, los desastres pasan desapercibidos; si se mira solo el
+promedio del MASE, un desastre aislado hunde a un modelo que en la mediana era
+bueno.
+
+### Ejercicio 4
+
+```{python}
+s = cargar("Q15481")
+completa = s.completa.to_numpy()
+m, h = s.periodo_estacional, s.horizonte
+
+filas = []
+for corte in np.linspace(2 * m + 8, len(completa) - h, 10, dtype=int):
+    tr_c, te_c = completa[:corte], completa[corte:corte + h]
+    e_naive = smape_m4(te_c, np.repeat(tr_c[-1], h))
+    e_snaive = smape_m4(
+        te_c, np.array([tr_c[-m + (i % m)] for i in range(h)])
+    )
+    filas.append({
+        "corte": int(corte),
+        "naive": round(e_naive, 2),
+        "naive estacional": round(e_snaive, 2),
+        "gana": "naive" if e_naive < e_snaive else "naive estacional",
+    })
+
+resultados = pd.DataFrame(filas).set_index("corte")
+resultados
+```
+
+```{python}
+print(resultados["gana"].value_counts().to_string())
+print(f"\nrango del naive estacional: "
+      f"{resultados['naive estacional'].min():.2f} a "
+      f"{resultados['naive estacional'].max():.2f}")
+```
+
+El naive estacional gana en los diez cortes. Y eso es una respuesta más interesante
+que un empate, porque contrasta con lo que pasaba en `M35927` en la @tbl-corte,
+donde el ganador cambiaba según el corte.
+
+La diferencia entre las dos series es la fuerza de la estacionalidad. `Q15481` tiene
+$F_S$ cercano a 0,94: su ciclo es tan dominante que ningún corte razonable lo hace
+desaparecer. En `M35927` el patrón estacional cambia con el tiempo —lo vimos en el
+@sec-soluciones-04— así que hay tramos donde repetir el último ciclo funciona muy
+bien y otros donde no.
+
+Qué reportaría si tuviera que elegir uno: el naive estacional, **y el rango**. Decir
+"sMAPE 4,4" es peor que decir "sMAPE entre 2,7 y 8,0 según el corte, con mediana
+4,4, y gana en 10 de 10 cortes". Lo segundo es más largo y es lo que otra persona
+necesita para saber cuánto confiar.
+
+La regla general: cuando la conclusión es estable en todos los cortes, se puede
+afirmar con seguridad. Cuando cambia, hay que reportar la variabilidad, no elegir el
+corte que dé el resultado más lindo.
+
+### Ejercicio 5
+
+```{python}
+filas = []
+for z, nominal in [(1.28, 80), (1.96, 95)]:
+    cubiertos = total = 0
+    for s in cargar(n=len(catalogo())):
+        tr_s, te_s = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+        sigma = np.std(np.diff(tr_s), ddof=1)
+        if not np.isfinite(sigma) or sigma == 0:
+            continue
+        for i in range(s.horizonte):
+            if abs(te_s[i] - tr_s[-1]) <= z * sigma * np.sqrt(i + 1):
+                cubiertos += 1
+            total += 1
+    empirica = 100 * cubiertos / total
+    filas.append({
+        "nominal %": nominal,
+        "empírica %": round(empirica, 1),
+        "déficit (puntos)": round(nominal - empirica, 1),
+        "pronósticos": total,
+    })
+
+pd.DataFrame(filas).set_index("nominal %")
+```
+
+**No es proporcional: es peor en el intervalo más ancho.** El del 80 % pierde unos
+6,7 puntos y el del 95 % pierde 8,4. Si el déficit fuera proporcional, el del 95 %
+debería perder menos en puntos absolutos, no más.
+
+La explicación está en dónde falla el supuesto. El ancho del intervalo se calcula
+suponiendo que los errores son normales. Un intervalo del 80 % depende de la parte
+central de esa distribución, que la normal aproxima razonablemente. Uno del 95 %
+depende de las **colas**, y ahí es donde las distribuciones de errores reales se
+separan más de la normal: tienen colas más gruesas, es decir, los eventos extremos
+son más frecuentes de lo que la normal predice.
+
+De ahí una consecuencia práctica incómoda: **cuanto más confianza se pide a un
+intervalo, menos confiable es su promesa**. Un intervalo del 99 % construido con
+esta fórmula va a fallar por más margen todavía. Y justamente los intervalos de
+confianza alta son los que se usan para decisiones donde el peor caso importa. Es
+la razón para construirlos por remuestreo, sin supuesto de normalidad, como se hace
+en el @sec-bootstrapping.
+
+### Ejercicio 6
+
+Ejercicio abierto. Las cinco preguntas, en orden de cuánto pueden invalidar la
+afirmación:
+
+**1. ¿Sobre qué datos lo mediste?** Si el 8,3 salió de los datos de entrenamiento y
+el 14,2 del período de prueba, la comparación no existe. Es el error del
+@sec-fuera-de-muestra y es el más común de todos.
+
+**2. ¿Cuál es la mediana, y cuántos casos extremos hay?** Un promedio de 8,3 puede
+venir de un modelo consistente o de uno que anda muy bien en el 99 % de los casos y
+diverge en el 1 %. Para decidir si se pone en producción, esos dos modelos son
+opuestos.
+
+**3. ¿En cuántas series corrió cada uno?** Si el modelo falló en las series difíciles
+y esas quedaron fuera del promedio, mientras el naive corrió en todas, el 8,3 se
+calculó sobre una población más fácil. Es la trampa del @sec-denominador.
+
+**4. ¿Qué punto de corte y qué horizonte usaste?** Como muestra la @tbl-corte, el
+mismo método sobre la misma serie puede variar por un factor de cinco según dónde se
+corte. Y un modelo que gana a un paso puede perder a doce.
+
+**5. ¿Qué versión exacta del sMAPE?** Hay al menos tres en circulación —en fracción,
+en porcentaje, con épsilon en el denominador— y difieren por factores de 100. Si los
+dos números salieron de implementaciones distintas, no son comparables.
+
+Una sexta, si la conversación da para más: **¿probaste el naive estacional?** El
+naive simple es una vara baja en cualquier serie con estacionalidad, y superarlo no
+dice mucho. La referencia honesta es el mejor método simple disponible, no el más
+fácil de vencer.
+
