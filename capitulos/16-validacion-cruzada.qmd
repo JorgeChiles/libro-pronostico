@@ -1,7 +1,746 @@
+---
+resources:
+  - datos/cap04_estacionales.csv
+---
+
 # Validación cruzada {#sec-validacion-cruzada}
 
-k-fold, por qué no sirve tal cual en series temporales, y validación cruzada temporal.
+```{python}
+#| echo: false
+import warnings
 
-::: {.callout-note appearance="simple"}
-Capítulo en preparación.
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+from sklearn.linear_model import LinearRegression, Ridge
+from statsmodels.tsa.holtwinters import ExponentialSmoothing, SimpleExpSmoothing
+
+from libro.datos import cargar, catalogo
+from libro.graficos import COLORES, mostrar
+
+warnings.simplefilter("ignore")
+
+
+def smape(real, pron):
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    den = np.abs(real) + np.abs(pron)
+    den[den == 0] = 1e-9
+    return 200 * np.mean(np.abs(real - pron) / den)
+```
+
+```{python}
+#| echo: false
+def naive(y, h, m):
+    return np.repeat(y[-1], h)
+
+
+def snaive(y, h, m):
+    if m <= 1:
+        return naive(y, h, m)
+    return np.array([y[-m + (i % m)] for i in range(h)])
+
+
+def media(y, h, m):
+    return np.repeat(y.mean(), h)
+
+
+def deriva(y, h, m):
+    pendiente = (y[-1] - y[0]) / (len(y) - 1)
+    return y[-1] + pendiente * np.arange(1, h + 1)
+
+
+def ses(y, h, m):
+    return SimpleExpSmoothing(y, initialization_method="estimated").fit().forecast(h)
+
+
+def holt(y, h, m):
+    return (ExponentialSmoothing(y, trend="add", initialization_method="estimated")
+            .fit().forecast(h))
+
+
+def holt_amortiguado(y, h, m):
+    return (ExponentialSmoothing(y, trend="add", damped_trend=True,
+                                 initialization_method="estimated").fit().forecast(h))
+
+
+def holt_winters(y, h, m):
+    if m <= 1 or len(y) < 2 * m + 4:
+        return snaive(y, h, m)
+    return (ExponentialSmoothing(y, trend="add", seasonal="add", seasonal_periods=m,
+                                 initialization_method="estimated").fit().forecast(h))
+
+
+def _rezagos(y, p):
+    y = np.asarray(y, float)
+    return (np.array([y[i - p:i] for i in range(p, len(y))]),
+            np.array([y[i] for i in range(p, len(y))]))
+
+
+def _recursivo(modelo, y, p, h):
+    historia, salida = list(y), []
+    for _ in range(h):
+        valor = float(modelo.predict([historia[-p:]])[0])
+        salida.append(valor)
+        historia.append(valor)
+    return np.array(salida)
+
+
+def _lineal(estimador):
+    def metodo(y, h, m):
+        p = min(max(m, 4), 12)
+        if len(y) < p + 8:
+            return naive(y, h, m)
+        X, objetivo = _rezagos(y, p)
+        return _recursivo(estimador.fit(X, objetivo), y, p, h)
+    return metodo
+
+
+METODOS = {
+    "naive": naive, "snaive": snaive, "media": media, "deriva": deriva,
+    "SES": ses, "Holt": holt, "Holt amortiguado": holt_amortiguado,
+    "Holt-Winters": holt_winters,
+    "rezagos OLS": _lineal(LinearRegression()),
+    "rezagos Ridge": _lineal(Ridge(alpha=1.0)),
+}
+NOMBRES = list(METODOS)
+```
+
+El @sec-particiones midió lo que cuesta apartar un bloque de validación: el 20,7 % del
+historial en la serie anual mediana de M4, y la imposibilidad total en cuatro series del
+catálogo. La validación cruzada promete no pagar ese precio: en vez de apartar datos, los
+reutiliza.
+
+Este capítulo mide si la promesa se cumple. El resultado tiene matices y no coincide del todo
+con la recomendación habitual.
+
+## Origen móvil {#sec-origen-movil}
+
+La validación cruzada de $k$ pliegues del aprendizaje automático clásico sortea las
+observaciones en $k$ grupos y usa cada grupo por turno como conjunto de evaluación. En series
+de tiempo eso está mal por las dos razones del @sec-particion: fuga entre vecinos y evaluación
+que interpola en vez de extrapolar.
+
+Con una salvedad importante que conviene no saltear. @bergmeir2018 demuestran que para modelos
+**autorregresivos bien especificados** el sorteo *sí* es válido: si los rezagos incluidos capturan
+la dependencia y los residuos quedan sin autocorrelación, la fuga entre vecinos desaparece porque
+lo que el vecino sabía ya está en los predictores. El ejercicio 4 lo verifica sobre el catálogo y
+encuentra que en esas condiciones la validación cruzada aleatoria es prácticamente insesgada.
+
+O sea: la prohibición no es sobre el sorteo, es sobre el sorteo cuando el modelo puede memorizar
+al vecino. El @sec-trampa lo midió del lado en que la prohibición vale.
+
+La versión temporal reemplaza el sorteo por un **origen de pronóstico que se mueve**. Se elige
+una sucesión de orígenes $o_1 < o_2 < \cdots < o_k$ y para cada uno se ajusta el modelo con lo
+anterior y se evalúa sobre los $h$ períodos siguientes:
+
+$$
+\widehat{\text{CV}}(f) = \frac{1}{k} \sum_{j=1}^{k}
+    L\!\left( y_{o_j + 1 : o_j + h},\;
+              \hat{f}^{(o_j)}\!\left( y_{1 : o_j} \right) \right)
+$$ {#eq-cv-temporal}
+
+donde $\hat{f}^{(o_j)}$ es el modelo reajustado usando solo los datos hasta $o_j$. La notación
+importa: **cada pliegue reajusta**. Si el modelo se ajusta una vez con toda la serie y después
+se evalúa en varios tramos, lo que se mide no es pronóstico sino memoria.
+
+Con $k = 1$ y $o_1 = n - h$ la @eq-cv-temporal es exactamente la partición del
+@sec-tres-conjuntos. Todo lo que sigue es la pregunta de qué pasa al subir $k$.
+
+```{python}
+#| label: fig-pliegues
+#| fig-cap: "Cinco pliegues de origen móvil sobre M39292 con paso $h$. Cada fila es un pliegue: en azul lo que usa para ajustar, en rojo lo que evalúa."
+s = cargar("M39292")
+y = s.entrenamiento.to_numpy()
+h = s.horizonte
+
+fig = go.Figure()
+for j in range(5):
+    origen = len(y) - h - j * h
+    fila = 5 - j
+    fig.add_trace(go.Scatter(
+        x=[0, origen], y=[fila, fila], mode="lines", showlegend=(j == 0),
+        name="ajuste", line=dict(color=COLORES["observado"], width=9),
+    ))
+    fig.add_trace(go.Scatter(
+        x=[origen, origen + h], y=[fila, fila], mode="lines", showlegend=(j == 0),
+        name="evaluación", line=dict(color=COLORES["prueba"], width=9),
+    ))
+
+fig.update_yaxes(tickvals=[5, 4, 3, 2, 1],
+                 ticktext=["pliegue 1", "pliegue 2", "pliegue 3", "pliegue 4",
+                           "pliegue 5"],
+                 range=[0.4, 5.6])
+fig.update_xaxes(title="período", range=[0, len(y)])
+mostrar(fig, alto=320)
+```
+
+Las tres decisiones de la @eq-cv-temporal son cuántos pliegues, con qué paso entre orígenes y
+si la ventana de ajuste crece o se desliza. Las tres se miden más abajo. El procedimiento en sí
+es viejo en la literatura de pronóstico —@tashman2000 lo llama *rolling-origin evaluation* y ya
+lo trataba como práctica establecida— y @cerqueira2020 lo comparan empíricamente contra una
+docena de alternativas.
+
+## Mueve los pliegues {#sec-widget-16}
+
+El widget deja recorrer los pliegues uno por uno. Arriba se ve qué tramo usa para ajustar y
+qué tramo evalúa; abajo, el error de cada pliegue y el promedio acumulado que es el estimador
+de la @eq-cv-temporal.
+
+Tres cosas que vale la pena buscar:
+
+- **El promedio acumulado se mueve mucho con los primeros pliegues y después se calma.** Eso
+  es lo único que la validación cruzada garantiza: un estimador más estable.
+- **Los pliegues viejos ajustan con muchos menos datos.** En la serie de estacionalidad marcada,
+  que tiene 335 observaciones de entrenamiento, el pliegue 1 ajusta con 317 y el pliegue 8 con
+  191: un 40 % menos. Los ocho errores que la @eq-cv-temporal promedia no vienen del mismo
+  modelo.
+- Cambia a **ventana deslizante** y mira qué le pasa al error de los pliegues viejos. Con
+  ventana fija todos ajustan con la misma cantidad de datos, y eso cambia qué se está midiendo.
+
+```{shinylive-python}
+#| standalone: true
+#| viewerHeight: 860
+#| components: [viewer]
+
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from shiny import App, reactive, render, ui
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+
+AQUI = Path(__file__).parent
+datos = pd.read_csv(AQUI / "cap04_estacionales.csv", parse_dates=["ds"])
+ETIQUETAS = list(dict.fromkeys(datos["etiqueta"]))
+
+app_ui = ui.page_fluid(
+    ui.layout_columns(
+        ui.input_select("serie", "Serie", ETIQUETAS, selected=ETIQUETAS[0]),
+        ui.input_select("metodo", "Método",
+                        ["snaive", "Holt", "Holt-Winters", "naive"],
+                        selected="Holt-Winters"),
+        ui.input_slider("pliegue", "Pliegue", 1, 8, 1, animate=True),
+        ui.input_checkbox("deslizante", "Ventana deslizante", False),
+        col_widths=[3, 3, 4, 2],
+    ),
+    ui.output_ui("resumen"),
+    ui.output_plot("grafico", height="640px"),
+)
+
+
+def servidor(input, output, session):
+
+    @reactive.calc
+    def serie():
+        g = datos[datos["etiqueta"] == input.serie()].sort_values("ds")
+        m = int(g["m"].iloc[0])
+        h = int((g["split"] == "prueba").sum())
+        # Solo el período de entrenamiento: la prueba no se toca.
+        y = g[g["split"] == "entrenamiento"]["y"].to_numpy()
+        return y, m, h
+
+    def pronostico(y_ajuste, h, m):
+        nombre = input.metodo()
+        if nombre == "naive" or len(y_ajuste) < 2 * m + 4:
+            return np.repeat(y_ajuste[-1], h)
+        if nombre == "snaive":
+            return np.array([y_ajuste[-m + (i % m)] for i in range(h)])
+        if nombre == "Holt":
+            return (ExponentialSmoothing(y_ajuste, trend="add",
+                                         initialization_method="estimated")
+                    .fit().forecast(h))
+        return (ExponentialSmoothing(y_ajuste, trend="add", seasonal="add",
+                                     seasonal_periods=m,
+                                     initialization_method="estimated")
+                .fit().forecast(h))
+
+    @reactive.calc
+    def pliegues():
+        """(origen, error) de cada pliegue, del más reciente al más viejo."""
+        y, m, h = serie()
+        ventana = max(3 * h, 2 * m + 4)
+        salida = []
+        for j in range(8):
+            origen = len(y) - h - j * h
+            desde = max(0, origen - ventana) if input.deslizante() else 0
+            if origen - desde < max(4, m + 1):
+                break
+            y_ajuste, y_eval = y[desde:origen], y[origen:origen + h]
+            pron = pronostico(y_ajuste, h, m)
+            error = 200 * np.mean(
+                np.abs(y_eval - pron) / (np.abs(y_eval) + np.abs(pron))
+            )
+            salida.append((desde, origen, float(error), len(y_ajuste)))
+        return salida
+
+    @render.ui
+    def resumen():
+        p = pliegues()
+        j = min(int(input.pliegue()), len(p)) - 1
+        errores = [e for _, _, e, _ in p[:j + 1]]
+        return ui.markdown(
+            f"Pliegue **{j + 1}** de {len(p)}  ·  ajusta con **{p[j][3]}** "
+            f"observaciones  ·  sMAPE del pliegue **{p[j][2]:.2f}**  ·  "
+            f"promedio acumulado **{np.mean(errores):.2f}**  ·  "
+            f"promedio de los {len(p)} **{np.mean([e for _, _, e, _ in p]):.2f}**"
+        )
+
+    @render.plot
+    def grafico():
+        y, m, h = serie()
+        p = pliegues()
+        j = min(int(input.pliegue()), len(p)) - 1
+        desde, origen, _, _ = p[j]
+
+        fig, (arriba, medio, abajo) = plt.subplots(
+            3, 1, figsize=(9, 6.9), gridspec_kw={"height_ratios": [2, 1.6, 1.6]}
+        )
+
+        arriba.plot(np.arange(len(y)), y, lw=1, color="#bbbbbb")
+        arriba.plot(np.arange(desde, origen), y[desde:origen], lw=1.8,
+                    color="#1f4e79", label="ajuste")
+        arriba.plot(np.arange(origen, origen + h), y[origen:origen + h], lw=2,
+                    color="#c0504d", label="evaluación")
+        pron = pronostico(y[desde:origen], h, m)
+        arriba.plot(np.arange(origen, origen + h), pron, lw=2, ls="--",
+                    color="#2e8b57", label="pronóstico")
+        arriba.legend(loc="upper left", fontsize=8)
+        arriba.set_title(f"pliegue {j + 1}: ajusta con {origen - desde} "
+                         f"observaciones y evalúa {h}", fontsize=9)
+
+        indices = np.arange(1, len(p) + 1)
+        errores = np.array([e for _, _, e, _ in p])
+        colores = ["#c0504d" if i <= j else "#dddddd" for i in range(len(p))]
+        medio.bar(indices, errores, color=colores)
+        medio.set_xticks(indices)
+        medio.set_title("sMAPE de cada pliegue", fontsize=9)
+
+        acumulado = np.cumsum(errores) / indices
+        abajo.plot(indices[:j + 1], acumulado[:j + 1], lw=2, marker="o", ms=5,
+                   color="#1f4e79")
+        abajo.plot(indices, acumulado, lw=1, ls=":", color="#bbbbbb")
+        abajo.axhline(errores[0], color="#c0504d", lw=1, ls="--",
+                      label="un solo pliegue")
+        abajo.set_xticks(indices)
+        abajo.set_xlabel("pliegues promediados")
+        abajo.legend(fontsize=8)
+        abajo.set_title("promedio acumulado: el estimador de la validación cruzada",
+                        fontsize=9)
+
+        fig.tight_layout()
+        return fig
+
+
+app = App(app_ui, servidor)
+
+## file: cap04_estacionales.csv
+{{< include datos/cap04_estacionales.csv >}}
+```
+
+## Ventana expansiva o deslizante {#sec-expansiva-deslizante}
+
+Hay dos maneras de armar el conjunto de ajuste de cada pliegue. La **expansiva** usa todo lo
+anterior al origen; la **deslizante** usa una ventana de largo fijo $w$:
+
+$$
+\text{expansiva: } y_{1 : o_j}
+\qquad\qquad
+\text{deslizante: } y_{\,o_j - w + 1 \,:\, o_j}
+$$ {#eq-expansiva-deslizante}
+
+La deslizante tiene el argumento a favor de que **todos los pliegues miden lo mismo**: con la
+expansiva, el pliegue más viejo ajusta con la mitad de los datos que el más reciente, así que
+la @eq-cv-temporal promedia errores de modelos entrenados en condiciones distintas. La
+expansiva tiene el argumento de que usa más datos, y en series cortas eso pesa.
+
+## Qué compra la validación cruzada {#sec-que-compra}
+
+La pregunta correcta no es "¿cuál estimador es más chico?" sino "¿cuál se parece más al error
+que el modelo va a tener en el futuro?". Como en el catálogo el futuro está disponible —el
+período de prueba oficial de M4 no se tocó en ninguna de las cuentas anteriores—, la pregunta
+se puede contestar directamente.
+
+```{python}
+#| echo: false
+def evaluar_en(y, origen, h, m, desde=0):
+    """sMAPE de cada método ajustado en y[desde:origen] y evaluado en los h siguientes."""
+    salida = {}
+    for nombre, metodo in METODOS.items():
+        try:
+            salida[nombre] = smape(y[origen:origen + h], metodo(y[desde:origen], h, m))
+        except Exception:
+            salida[nombre] = np.inf
+    return salida
+
+
+PESOS = np.array([0.40, 0.25, 0.18, 0.11, 0.06])
+
+cat = catalogo().set_index("serie")
+_pares = []
+for _sid in cat.index:
+    _s = cargar(_sid)
+    _ytr, _yte = _s.entrenamiento.to_numpy(), _s.prueba.to_numpy()
+    _h, _m = _s.horizonte, _s.periodo_estacional
+    if len(_ytr) < 5 * _h + 12:
+        continue
+
+    _prueba = {}
+    for _n, _f in METODOS.items():
+        try:
+            _prueba[_n] = smape(_yte, _f(_ytr, _h, _m))
+        except Exception:
+            _prueba[_n] = np.inf
+
+    _ventana = max(12, 3 * _h)
+    _exp = [evaluar_en(_ytr, len(_ytr) - _h - j * _h, _h, _m) for j in range(5)]
+    _des = [
+        evaluar_en(_ytr, len(_ytr) - _h - j * _h, _h, _m,
+                   desde=max(0, len(_ytr) - _h - j * _h - _ventana))
+        for j in range(5)
+    ]
+
+    for _n in NOMBRES:
+        _valores = [_prueba[_n]] + [p[_n] for p in _exp] + [p[_n] for p in _des]
+        if not all(np.isfinite(v) for v in _valores):
+            continue
+        _pares.append({
+            "serie": _sid, "metodo": _n, "prueba": _prueba[_n],
+            "un corte": _exp[0][_n],
+            "CV expansiva": float(np.mean([p[_n] for p in _exp])),
+            "CV deslizante": float(np.mean([p[_n] for p in _des])),
+            "CV ponderada": float(np.dot(PESOS, [p[_n] for p in _exp])),
+            "fenomeno": cat.loc[_sid, "fenomeno"],
+        })
+
+PARES = pd.DataFrame(_pares)
+ESTIMADORES = ["un corte", "CV expansiva", "CV deslizante", "CV ponderada"]
+```
+
+```{python}
+#| label: tbl-estimadores
+#| tbl-cap: "Cuatro estimadores del error de prueba, evaluados sobre 26 series del catálogo por 10 métodos. El sesgo es la estimación menos el error real; negativo significa optimista."
+filas = []
+for nombre in ESTIMADORES:
+    diferencia = PARES[nombre] - PARES["prueba"]
+    filas.append({
+        "estimador": nombre,
+        "sesgo medio": diferencia.mean(),
+        "error absoluto medio": diferencia.abs().mean(),
+        "error absoluto mediano": diferencia.abs().median(),
+    })
+
+pd.DataFrame(filas).set_index("estimador").round(2)
+```
+
+La @tbl-estimadores no dice lo que uno esperaría, y vale leerla despacio.
+
+**El error absoluto mediano mejora**: 2,14 con validación cruzada expansiva contra 2,78 con un
+solo corte. En la serie típica, promediar cinco orígenes estima mejor el error futuro.
+
+**El error absoluto medio empeora**: 8,65 contra 7,43. Es decir, la validación cruzada acierta
+mejor en el caso típico y se equivoca más en el promedio. Media y mediana apuntando en
+direcciones opuestas es la firma de una distribución con cola: hay unas pocas series donde la
+validación cruzada estima mucho peor y arrastran el promedio.
+
+**El sesgo medio parece mejorar mucho** —de $-1{,}94$ a $-0{,}65$, y a $-0{,}21$ con la variante
+ponderada—, y acá hay que frenar. Ese número también está dominado por la cola: el sesgo
+*mediano* es $-0{,}02$ para el corte único y $+0{,}12$ para la validación cruzada, o sea
+prácticamente cero en los dos casos. Y al repetir la cuenta sobre el subconjunto de series
+largas, el ejercicio 1 encuentra que la mejora **se da vuelta**. Dicho de otra manera: la
+corrección de sesgo que se le atribuye a la validación cruzada no aparece de manera estable en
+estos datos, y no conviene contarla como un beneficio.
+
+Lo único que sobrevive a cambiar la muestra es la primera afirmación: **la validación cruzada
+temporal mejora el caso típico y empeora la cola.** Es una compra de robustez a cambio de riesgo,
+que es lo contrario de lo que suele venderse.
+
+::: {.callout-important}
+## Este resultado es una medición, no una ley
+
+Veintiséis series no alcanzan para zanjar la pregunta, y el catálogo de este libro está elegido
+para cubrir fenómenos distintos, no para ser representativo de M4. Lo que la @tbl-estimadores
+sostiene es más modesto y más útil que un veredicto: **la validación cruzada temporal no domina
+al corte único**, así que la elección entre las dos merece un argumento y no un reflejo. La
+sección que sigue da el argumento.
+
+Es también la razón de que el ejercicio 1 exista y de que su resultado esté en el apéndice y no
+escondido: cuando una medición propia no reproduce la recomendación de la literatura, lo
+honesto es publicar las dos y explicar de qué depende la diferencia.
+:::
+
+Y la ventana deslizante es la peor de las cuatro en error absoluto —11,52— aunque tenga el
+menor sesgo. El motivo es directo: tira datos. Su ventaja de la @eq-expansiva-deslizante —que
+todos los pliegues midan lo mismo— se paga con modelos peor estimados en todos ellos.
+
+## Dónde gana y dónde pierde {#sec-donde-gana}
+
+Los promedios de la @tbl-estimadores esconden dos regímenes opuestos, y separarlos por
+fenómeno los hace evidentes.
+
+```{python}
+#| label: tbl-por-fenomeno
+#| tbl-cap: "Error absoluto medio al estimar el sMAPE de prueba, por fenómeno del catálogo. La última columna dice qué estimador conviene."
+por_fenomeno = (PARES.assign(
+        **{f"e_{n}": (PARES[n] - PARES["prueba"]).abs() for n in ESTIMADORES})
+    .groupby("fenomeno")[[f"e_{n}" for n in ESTIMADORES]].mean())
+por_fenomeno.columns = ESTIMADORES
+por_fenomeno["mejor"] = por_fenomeno.idxmin(axis=1)
+por_fenomeno.sort_values("un corte", ascending=False).round(2)
+```
+
+Los dos extremos tienen una explicación mecánica y no hace falta más que la definición de cada
+fenómeno para verla.
+
+**La validación cruzada gana en las series con quiebre de nivel** —de 14,69 a 9,86— y con
+cambio de varianza —de 7,01 a 4,01—. En una serie con quiebre, un solo corte cae de un lado
+del quiebre o del otro, y en cualquiera de los dos casos estima el error del régimen
+equivocado. Promediar sobre cinco orígenes cubre los dos regímenes.
+
+**Pierde, y por mucho, en las caminatas aleatorias**: de 14,68 a 22,73. Acá el mecanismo es el
+inverso. En una caminata aleatoria el nivel de hace cinco horizontes no tiene relación con el
+nivel actual, así que los pliegues viejos no aportan información sobre el período que viene:
+aportan ruido de otra época. El pliegue más reciente es el único relevante, y promediarlo con
+cuatro irrelevantes lo empeora.
+
+De ahí sale la regla que este capítulo puede defender:
+
+::: {.callout-tip}
+## Cuándo conviene cada uno
+
+**Validación cruzada** cuando la serie cambia de régimen —quiebres, cambios de varianza,
+atípicos— porque un solo corte queda a merced de qué régimen le tocó. Es también la
+recomendación por defecto de @hyndman2021 y de @bergmeir2012 cuando no hay motivo para
+sospechar lo contrario.
+
+**Corte único reciente** cuando la serie es una caminata aleatoria o tiene tendencia fuerte,
+porque los orígenes viejos describen un mundo que ya no existe.
+
+Y en cualquier caso, **ponderar los pliegues** hacia lo reciente en vez de promediarlos
+plano: es la variante que mejor se comporta en las dos situaciones.
+:::
+
+## Ponderar los pliegues {#sec-ponderar}
+
+La variante ponderada de la @tbl-estimadores reemplaza el promedio simple de la
+@eq-cv-temporal por uno con pesos que decaen hacia el pasado:
+
+$$
+\widehat{\text{CV}}_{w}(f) = \sum_{j=1}^{k} w_j \,
+    L\!\left( y_{o_j + 1 : o_j + h},\; \hat{f}^{(o_j)} \right),
+\qquad
+\sum_{j=1}^{k} w_j = 1, \quad w_1 > w_2 > \cdots > w_k
+$$ {#eq-cv-ponderada}
+
+con $j = 1$ el origen más reciente. Los pesos de la tabla son 0,40, 0,25, 0,18, 0,11 y 0,06,
+que decaen aproximadamente a la mitad cada dos pliegues.
+
+El resultado es el compromiso que uno esperaría de la @sec-donde-gana: error absoluto medio de
+8,04, entre el 7,43 del corte único y el 8,65 de la validación cruzada plana. **La ponderación
+es un dial continuo entre los dos extremos**, y el ejercicio 3 lo recorre con pesos
+$w_j \propto \gamma^{\,j-1}$: con $\gamma \to 0$ se recupera el corte único y con
+$\gamma = 1$ el promedio plano.
+
+Lo que el ejercicio encuentra es que **el óptimo está en un extremo, y en cuál depende de la
+métrica**: el error absoluto medio se minimiza con $\gamma$ chico —es decir, quedándose con el
+pliegue reciente— y el mediano con $\gamma = 1$. Es la misma tensión de la @tbl-estimadores, y
+la ponderación no la resuelve: la parametriza.
+
+No es una técnica estándar y no hay una regla establecida para elegir los pesos; el ejercicio 3
+explora la sensibilidad. Lo que sí es estándar es la idea de fondo, la misma del
+@sec-suavizado: los datos recientes valen más, y un promedio simple es un caso
+particular —el peor— de un promedio ponderado.
+
+## El paso entre orígenes {#sec-paso}
+
+Queda la tercera decisión de la @eq-cv-temporal. Los orígenes pueden avanzar de $h$ en $h$,
+dejando los tramos de evaluación sin solaparse, o de uno en uno, generando muchos más
+pliegues sobre el mismo tramo de serie.
+
+```{python}
+#| label: tbl-paso
+#| tbl-cap: "Cubrir el mismo tramo de cinco horizontes con tres pasos distintos, sobre seis series del catálogo."
+SEIS = ["M39292", "Q1915", "M35927", "M32571", "Q5932", "M6696"]
+
+filas = []
+for etiqueta, calcular_paso in (("h", lambda h: h),
+                                ("h/2", lambda h: max(1, h // 2)),
+                                ("1", lambda h: 1)):
+    total, estimaciones, errores_prueba = 0, [], []
+    for identificador in SEIS:
+        s = cargar(identificador)
+        y_tr, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+        h, m = s.horizonte, s.periodo_estacional
+        prueba = {}
+        for nombre, metodo in METODOS.items():
+            try:
+                prueba[nombre] = smape(y_te, metodo(y_tr, h, m))
+            except Exception:
+                prueba[nombre] = np.inf
+
+        paso = calcular_paso(h)
+        origenes = [len(y_tr) - h - j * paso for j in range(1 + (5 * h) // paso)]
+        origenes = [o for o in origenes if o >= 12]
+        total += len(origenes)
+
+        acumulado = {n: [] for n in NOMBRES}
+        for origen in origenes:
+            evaluado = evaluar_en(y_tr, origen, h, m)
+            for n in NOMBRES:
+                if np.isfinite(evaluado[n]):
+                    acumulado[n].append(evaluado[n])
+        cv = {n: (np.mean(v) if v else np.inf) for n, v in acumulado.items()}
+        ganador = min(cv, key=cv.get)
+        estimaciones.append(cv[ganador])
+        errores_prueba.append(prueba[ganador])
+
+    filas.append({
+        "paso": etiqueta, "pliegues en total": total,
+        "estimación media": np.mean(estimaciones),
+        "sMAPE de prueba del elegido": np.mean(errores_prueba),
+    })
+
+pd.DataFrame(filas).set_index("paso").round(2)
+```
+
+El paso $h$ usa 36 pliegues y el paso 1 usa 446 —**doce veces más ajustes**— para llegar a un
+resultado que no es mejor: la estimación queda en 5,77 contra 5,42 y el error de prueba del
+método elegido empeora de 4,52 a 5,84.
+
+La razón es que los pliegues del paso 1 **casi no aportan información nueva**. Dos orígenes
+consecutivos comparten $h - 1$ de sus $h$ períodos de evaluación y todos menos uno de sus
+datos de ajuste, así que sus errores están correlacionadísimos: promediar 446 números que se
+repiten no reduce la varianza como promediar 36 independientes.
+
+La recomendación es entonces **paso igual a $h$**, con tramos de evaluación disjuntos. Es
+también la única variante en la que la @eq-cv-temporal promedia mediciones que se pueden tratar
+como aproximadamente independientes, que es lo que hace falta para que el promedio signifique
+algo.
+
+## Lo que la validación cruzada no arregla {#sec-cv-no-arregla}
+
+El @sec-costo-validacion propuso la validación cruzada como primera salida para las cuatro
+series del catálogo demasiado cortas para apartar un bloque. Conviene medir si funciona.
+
+```{python}
+#| label: tbl-cv-cortas
+#| tbl-cap: "Las cuatro series cortas: método elegido por validación cruzada con paso 1, contra snaive fijo y contra el oráculo."
+CORTAS = ["Q5655", "Q23425", "Y21804", "Y22817"]
+
+filas = []
+for identificador in CORTAS:
+    s = cargar(identificador)
+    y_tr, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    h, m = s.horizonte, s.periodo_estacional
+    prueba = {}
+    for nombre, metodo in METODOS.items():
+        try:
+            prueba[nombre] = smape(y_te, metodo(y_tr, h, m))
+        except Exception:
+            prueba[nombre] = np.inf
+    finitos = {k: v for k, v in prueba.items() if np.isfinite(v)}
+
+    # Con series así de cortas no hay margen: paso 1 y el piso de ajuste más bajo
+    # que permite un método estacional.
+    piso = max(4, m + 1)
+    acumulado = {n: [] for n in NOMBRES}
+    origenes = list(range(piso, len(y_tr)))
+    for origen in origenes:
+        evaluado = evaluar_en(y_tr, origen, min(h, len(y_tr) - origen), m)
+        for n in NOMBRES:
+            if np.isfinite(evaluado[n]):
+                acumulado[n].append(evaluado[n])
+    cv = {n: (np.mean(v) if v else np.inf) for n, v in acumulado.items()}
+    elegido = min(cv, key=cv.get)
+
+    filas.append({
+        "serie": identificador, "n": len(y_tr), "h": h,
+        "pliegues": len(origenes),
+        "CV elige": elegido,
+        "prueba del elegido": prueba[elegido],
+        "snaive fijo": prueba["snaive"],
+        "oráculo": min(finitos.values()),
+    })
+
+cortas = pd.DataFrame(filas).set_index("serie")
+cortas.round(2)
+```
+
+```{python}
+#| label: tbl-cv-cortas-media
+#| tbl-cap: "Promedio sobre las cuatro series cortas."
+cortas[["prueba del elegido", "snaive fijo", "oráculo"]].mean().round(2).to_frame(
+    "sMAPE medio"
+)
+```
+
+**La validación cruzada elige peor que no elegir.** Da 29,19 de sMAPE medio contra los 24,10 de
+`snaive` fijo, con el oráculo en 21,57. Y el detalle importa: acierta perfectamente en `Q5655`,
+donde encuentra el mejor de los diez métodos, y se equivoca de manera costosa en `Y22817`, donde
+elige `rezagos Ridge` con 81,16 contra los 54,91 del método fijo.
+
+El motivo es el mismo que el @sec-particiones ya había anticipado, y la validación cruzada no lo
+elimina: con 13 observaciones, los pliegues ajustan con entre 4 y 12 datos. **No es que falte
+información para apartar un bloque; es que falta información, punto.** La validación cruzada
+resuelve el problema contable de no tener dónde apartar el bloque y no resuelve el problema
+estadístico de no tener datos.
+
+La conclusión es la tercera salida del @sec-costo-validacion y no la primera: cuando la serie es
+así de corta, **un método fijo y sensato le gana a cualquier procedimiento de selección**,
+porque no tiene varianza de selección. El @sec-seleccion-escala vuelve sobre esto con más
+series.
+
+## Cómo queda la receta {#sec-receta-cv}
+
+Todo lo medido en el capítulo, en seis líneas:
+
+| decisión | recomendación | por qué |
+|---|---|---|
+| usarla o no | sí, si importa el caso típico | mejora la mediana (2,14 contra 2,78) y empeora la media (8,65 contra 7,43) |
+| cuántos pliegues | 3 a 5 | más pliegues no mejoraron la elección y el costo crece lineal |
+| paso entre orígenes | $h$, tramos disjuntos | el paso 1 cuesta doce veces más y da peor: los pliegues se solapan casi del todo |
+| ventana de ajuste | expansiva | la deslizante tira datos: 11,52 de error absoluto contra 8,65 |
+| cómo promediar | pesos que decaen hacia atrás | dial continuo entre el corte único y el promedio plano |
+| cuándo no usarla | caminata aleatoria y series muy cortas | los orígenes viejos son irrelevantes; con 13 datos elige ruido |
+
+: Decisiones de la @eq-cv-temporal y lo que este capítulo midió sobre cada una. {#tbl-receta}
+
+
+Y una advertencia sobre el uso de la @eq-cv-temporal para **elegir**, que es distinto de usarla
+para **estimar**. Todo lo medido acá es sobre la calidad del estimador. Cuando la validación
+cruzada se usa para seleccionar entre candidatos, el optimismo de la @eq-optimismo vuelve a
+aparecer entero: el mínimo de $K$ estimaciones cruzadas sigue siendo un mínimo de $K$
+estimaciones ruidosas, y sigue haciendo falta un conjunto de prueba que no se haya mirado
+[@varma2006].
+
+## Ejercicios
+
+Las soluciones están en el @sec-soluciones-16.
+
+**1.** Reproduce la @tbl-estimadores con 3 y con 10 pliegues en vez de 5. ¿El sesgo sigue
+bajando al agregar pliegues? ¿Y el error absoluto?
+
+**2.** Toma la serie de quiebre de nivel `M32692` y calcula el sMAPE de un método fijo en cada
+uno de los cinco pliegues por separado. ¿Cuánto varían entre sí? Relaciona la respuesta con por
+qué la validación cruzada gana en ese fenómeno según la @tbl-por-fenomeno.
+
+**3.** Los pesos de la @eq-cv-ponderada son arbitrarios. Prueba con pesos proporcionales a
+$\gamma^{\,j-1}$ para $\gamma \in \{0{,}5;\ 0{,}7;\ 0{,}9;\ 1\}$ y busca cuál minimiza el error
+absoluto medio. ¿El óptimo está en un extremo?
+
+**4.** Implementa la validación cruzada **aleatoria** sobre la tabla de rezagos —`KFold` con
+`shuffle=True`— usando Ridge sobre 12 rezagos y midiendo el error a un paso. Compárala con el
+origen móvil y con el error real a un paso sobre el período de prueba. ¿Subestima? Contrasta el
+resultado con lo que midió el ejercicio 4 del @sec-particiones y explica la diferencia.
+
+**5.** La @tbl-paso usa seis series. Repítela sobre las series horarias del catálogo, donde
+$h = 48$ y hay 960 observaciones. ¿Cambia la conclusión cuando hay datos de sobra?
+
+**6.** Un modelo cuyo ajuste tarda un minuto y una validación cruzada de 5 pliegues sobre 10
+candidatos: ¿cuántos minutos de cómputo? Repite la cuenta para las 48.000 series mensuales de
+M4 y decide qué decisión de la @tbl-receta es la que más importa a escala.
+
+## Referencias {.unnumbered}
+
+::: {#refs}
 :::
