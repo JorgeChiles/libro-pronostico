@@ -1,7 +1,727 @@
+---
+resources:
+  - datos/cap04_estacionales.csv
+---
+
 # Suavizado exponencial {#sec-suavizado}
 
-Simple, Holt, Holt-Winters y la familia ETS.
+```{python}
+#| echo: false
+import warnings
 
-::: {.callout-note appearance="simple"}
-Capítulo en preparación.
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+
+from libro.datos import cargar, catalogo
+from libro.graficos import COLORES, mostrar
+
+warnings.simplefilter("ignore")
+
+
+def smape(real, pron):
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    return 200 * np.mean(np.abs(real - pron) / (np.abs(real) + np.abs(pron)))
+```
+
+Los métodos del @sec-que-es-pronosticar usan una sola observación —la última— o
+todas con el mismo peso —la media—. Ninguna de las dos opciones es razonable: la
+última observación tiene ruido, y una observación de hace veinte años ya no dice
+nada sobre el mes que viene.
+
+El suavizado exponencial resuelve eso con una idea de una línea: **promediar todas
+las observaciones, con pesos que decaen a medida que se va hacia atrás**.
+
+## Pesos que decaen {#sec-pesos}
+
+Con un parámetro $\alpha \in (0, 1)$, el pronóstico es
+
+$$
+\hat{y}_{T+1|T} = \alpha y_T + \alpha(1-\alpha) y_{T-1}
+                + \alpha(1-\alpha)^2 y_{T-2} + \cdots
+                = \sum_{j=0}^{T-1} \alpha(1-\alpha)^j\, y_{T-j}
+$$ {#eq-pesos}
+
+La notación $\hat{y}_{T+h|T}$ se lee "el pronóstico de $y$ en $T+h$ hecho con la
+información disponible hasta $T$", y se usa en todo el resto del libro.
+
+Los pesos de la @eq-pesos forman una progresión geométrica: cada observación pesa
+$(1-\alpha)$ veces lo que pesa la siguiente. Y suman aproximadamente 1, así que el
+resultado es un promedio ponderado legítimo. Lo que hace $\alpha$ es decidir cuánta
+memoria tiene el método:
+
+```{python}
+#| label: fig-pesos
+#| fig-cap: "Peso que recibe cada observación pasada según α. Con α grande el método casi solo mira la última observación; con α chico reparte el peso entre muchas."
+rezagos = np.arange(0, 20)
+
+fig = go.Figure()
+for alfa in [0.1, 0.3, 0.6, 0.9]:
+    fig.add_trace(go.Scatter(
+        x=rezagos, y=alfa * (1 - alfa) ** rezagos,
+        mode="lines+markers", name=f"α = {alfa}",
+        marker=dict(size=5),
+        hovertemplate="rezago %{x}<br>peso %{y:.4f}<extra>α=" + str(alfa) + "</extra>",
+    ))
+
+fig.update_layout(height=420)
+fig.update_xaxes(title="observaciones hacia atrás")
+mostrar(fig, titulo_y="peso")
+```
+
+Con $\alpha = 0{,}9$ la última observación recibe el 90 % del peso y el método es
+casi un naive. Con $\alpha = 0{,}1$ el peso se reparte entre unas veinte
+observaciones y el método es casi una media móvil larga. **Todo el suavizado
+exponencial es esta idea, aplicada por separado al nivel, a la tendencia y a la
+estacionalidad.**
+
+## Suavizado exponencial simple {#sec-ses}
+
+La @eq-pesos se puede escribir de una forma mucho más útil, llamada **forma de
+componentes**. Separa el pronóstico de la actualización del estado interno:
+
+$$
+\begin{aligned}
+\text{pronóstico:} \quad & \hat{y}_{t+h|t} = \ell_t \\
+\text{nivel:} \quad & \ell_t = \alpha y_t + (1-\alpha)\, \ell_{t-1}
+\end{aligned}
+$$ {#eq-ses}
+
+$\ell_t$ es el **nivel** estimado en el momento $t$. La segunda línea dice cómo se
+actualiza: una mezcla entre lo que se acaba de observar y lo que se creía antes.
+La primera dice que el pronóstico es ese nivel, para cualquier horizonte.
+
+Esa última parte es importante: **el pronóstico es constante en $h$**. El suavizado
+exponencial simple no tiene tendencia, así que pronostica una línea horizontal. Es
+el método adecuado para una serie que oscila alrededor de un nivel que se mueve
+despacio, y solo para eso.
+
+```{python}
+#| label: fig-ses
+#| fig-cap: "Suavizado exponencial simple sobre M3007, con α optimizado y con dos valores fijos. El pronóstico es siempre una línea horizontal."
+from statsmodels.tsa.holtwinters import SimpleExpSmoothing
+
+serie = cargar("M3007")
+y, h = serie.entrenamiento, serie.horizonte
+
+ajustes = {}
+ajustes["α optimizado"] = SimpleExpSmoothing(
+    y, initialization_method="estimated"
+).fit()
+for alfa in (0.1, 0.9):
+    ajustes[f"α = {alfa}"] = SimpleExpSmoothing(
+        y, initialization_method="estimated"
+    ).fit(smoothing_level=alfa, optimized=False)
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=y.index[-60:], y=y.to_numpy()[-60:], mode="lines", name="observado",
+    line=dict(color=COLORES["observado"], width=1.8),
+))
+fig.add_trace(go.Scatter(
+    x=serie.prueba.index, y=serie.prueba.values, mode="lines",
+    name="observado (prueba)",
+    line=dict(color=COLORES["prueba"], width=1.8, dash="dot"),
+))
+for nombre, ajuste in ajustes.items():
+    fig.add_trace(go.Scatter(
+        x=serie.prueba.index, y=ajuste.forecast(h).to_numpy(),
+        mode="lines", name=nombre, line=dict(width=2),
+    ))
+
+fig.update_layout(height=430)
+mostrar(fig, titulo_y="unidades")
+
+alfa_optimo = ajustes["α optimizado"].params["smoothing_level"]
+print(f"α elegido por máxima verosimilitud: {alfa_optimo:.3f}")
+```
+
+El $\alpha$ no se elige a mano: se estima minimizando la suma de los errores de
+pronóstico a un paso dentro de la muestra. Es la misma idea que ajustar los
+coeficientes de una regresión, y `statsmodels` [@seabold2010] lo hace por
+verosimilitud.
+
+## Holt: agregar tendencia {#sec-holt}
+
+Si la serie tiene tendencia, un pronóstico horizontal se queda corto de manera
+sistemática. @holt2004 propuso agregar una segunda componente que se actualiza
+igual que el nivel, con su propio parámetro $\beta^*$:
+
+$$
+\begin{aligned}
+\text{pronóstico:} \quad & \hat{y}_{t+h|t} = \ell_t + h\, b_t \\
+\text{nivel:} \quad & \ell_t = \alpha y_t + (1-\alpha)(\ell_{t-1} + b_{t-1}) \\
+\text{tendencia:} \quad & b_t = \beta^* (\ell_t - \ell_{t-1})
+                          + (1-\beta^*)\, b_{t-1}
+\end{aligned}
+$$ {#eq-holt}
+
+$b_t$ es la pendiente estimada: cuánto se espera que cambie la serie de un período
+al siguiente. La ecuación del nivel ahora compara la observación nueva contra
+$\ell_{t-1} + b_{t-1}$ —el nivel anterior más lo que se esperaba que creciera— y la
+de tendencia mezcla el cambio recién observado con la pendiente que se creía.
+
+El término $h\, b_t$ del pronóstico es la parte peligrosa: **la pendiente se
+extrapola linealmente, sin límite**. A un paso es razonable; a cuarenta y ocho, no.
+
+### El problema que esto causa, medido {#sec-holt-diverge}
+
+En el @sec-saturacion vimos que Holt aplicado a las series horarias del catálogo
+produce pronósticos negativos en series que nunca lo son. Vale la pena ver por qué:
+
+```{python}
+#| label: fig-holt-diverge
+#| fig-cap: "Holt sobre H272. La pendiente estimada con las últimas observaciones se extrapola 48 horas y lleva el pronóstico a valores negativos."
+from statsmodels.tsa.holtwinters import Holt
+
+horaria = cargar("H272")
+tr, te = horaria.entrenamiento, horaria.prueba
+h_horas = horaria.horizonte
+
+sin_amortiguar = Holt(tr, initialization_method="estimated").fit()
+pron_holt = sin_amortiguar.forecast(h_horas).to_numpy()
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=tr.index[-120:], y=tr.to_numpy()[-120:], mode="lines", name="observado",
+    line=dict(color=COLORES["observado"], width=1.4),
+))
+fig.add_trace(go.Scatter(
+    x=te.index, y=te.values, mode="lines", name="observado (prueba)",
+    line=dict(color=COLORES["prueba"], width=1.6, dash="dot"),
+))
+fig.add_trace(go.Scatter(
+    x=te.index, y=pron_holt, mode="lines", name="Holt",
+    line=dict(color="#8B0000", width=2),
+))
+fig.add_hline(y=0, line_width=1, line_color=COLORES["auxiliar"])
+fig.update_layout(height=430)
+mostrar(fig, titulo_y="unidades")
+
+print(f"pendiente estimada b_T : {sin_amortiguar.params['smoothing_trend']:.4f}")
+print(f"mínimo observado       : {te.min():.1f}")
+print(f"mínimo pronosticado    : {pron_holt.min():.1f}")
+```
+
+La serie tiene un ciclo diario y, en el tramo final de los datos de
+entrenamiento, ese ciclo está bajando. Holt no sabe que se trata de un ciclo: lee
+un descenso, lo toma por tendencia y lo proyecta 48 horas.
+
+### Tendencia amortiguada {#sec-amortiguada}
+
+La solución es multiplicar la pendiente por un factor $\phi \in (0,1)$ que la va
+apagando a medida que crece el horizonte:
+
+$$
+\begin{aligned}
+\text{pronóstico:} \quad & \hat{y}_{t+h|t} = \ell_t
+   + (\phi + \phi^2 + \cdots + \phi^h)\, b_t \\
+\text{nivel:} \quad & \ell_t = \alpha y_t + (1-\alpha)(\ell_{t-1} + \phi\, b_{t-1}) \\
+\text{tendencia:} \quad & b_t = \beta^* (\ell_t - \ell_{t-1})
+                          + (1-\beta^*)\, \phi\, b_{t-1}
+\end{aligned}
+$$ {#eq-holt-amortiguado}
+
+La suma geométrica $\phi + \phi^2 + \cdots + \phi^h$ converge a
+$\phi/(1-\phi)$ cuando $h \to \infty$. Es decir: **el pronóstico se aplana en un
+nivel finito** en vez de irse al infinito. Con $\phi = 0{,}9$, la pendiente
+acumulada nunca supera nueve veces $b_t$, por lejos que se pronostique.
+
+Y esto no es un refinamiento teórico. Es la diferencia entre un pronóstico
+utilizable y uno absurdo:
+
+```{python}
+#| label: tbl-amortiguado
+#| tbl-cap: "Holt con y sin amortiguamiento sobre las series horarias del catálogo. La columna φ es el factor estimado."
+filas = []
+for s in cargar(n=len(catalogo())):
+    if s.frecuencia != "horaria":
+        continue
+    tr_s, te_s, h_s = s.entrenamiento, s.prueba.to_numpy(), s.horizonte
+
+    simple = Holt(tr_s, initialization_method="estimated").fit()
+    amortiguado = Holt(
+        tr_s, damped_trend=True, initialization_method="estimated"
+    ).fit()
+
+    p_simple = simple.forecast(h_s).to_numpy()
+    p_amort = amortiguado.forecast(h_s).to_numpy()
+
+    filas.append({
+        "serie": s.id,
+        "sMAPE Holt": smape(te_s, p_simple),
+        "sMAPE amortiguado": smape(te_s, p_amort),
+        "mínimo Holt": p_simple.min(),
+        "mínimo amortiguado": p_amort.min(),
+        "φ": amortiguado.params["damping_trend"],
+    })
+
+comparacion = pd.DataFrame(filas).set_index("serie")
+comparacion.round(2)
+```
+
+```{python}
+#| echo: false
+mejora = (1 - comparacion["sMAPE amortiguado"].mean()
+          / comparacion["sMAPE Holt"].mean()) * 100
+negativos_antes = int((comparacion["mínimo Holt"] < 0).sum())
+negativos_despues = int((comparacion["mínimo amortiguado"] < 0).sum())
+```
+
+El amortiguamiento baja el error promedio un
+`{python} f"{mejora:.0f}"` % y —lo más importante— elimina por completo el
+problema de fondo: los pronósticos negativos pasan de
+`{python} f"{negativos_antes}"` series a `{python} f"{negativos_despues}"`. Los
+$\phi$ estimados quedan entre 0,80 y 0,94, así que el método decidió por sí solo
+que había que frenar la extrapolación.
+
+::: {.callout-tip}
+## Amortiguar por omisión
+
+@hyndman2021 recomiendan usar tendencia amortiguada como opción por defecto en vez
+de la tendencia lineal, y la evidencia de la @tbl-amortiguado explica por qué. El
+costo de amortiguar cuando la tendencia era genuina es pequeño —$\phi$ se estima
+cerca de 1 y el método se parece a Holt—; el costo de no amortiguar cuando no lo
+era es un pronóstico sin sentido.
+
+Es un caso general que conviene reconocer: entre dos métodos parecidos, conviene el
+que **falla menos mal**, no el que gana en promedio. Sobre esto vuelve el
+@sec-produccion.
+:::
+
+## Holt-Winters: agregar estacionalidad {#sec-holt-winters}
+
+@winters1960 completó el esquema con una tercera componente. En la versión
+**aditiva**, para un período estacional $m$:
+
+$$
+\begin{aligned}
+\text{pronóstico:} \quad & \hat{y}_{t+h|t} = \ell_t + h\, b_t
+   + s_{t+h-m(k+1)} \\
+\text{nivel:} \quad & \ell_t = \alpha (y_t - s_{t-m})
+   + (1-\alpha)(\ell_{t-1} + b_{t-1}) \\
+\text{tendencia:} \quad & b_t = \beta^* (\ell_t - \ell_{t-1})
+   + (1-\beta^*)\, b_{t-1} \\
+\text{estacionalidad:} \quad & s_t = \gamma (y_t - \ell_{t-1} - b_{t-1})
+   + (1-\gamma)\, s_{t-m}
+\end{aligned}
+$$ {#eq-hw-aditivo}
+
+donde $k = \lfloor (h-1)/m \rfloor$ garantiza que el pronóstico use el último
+factor estacional estimado para esa posición del ciclo.
+
+La lógica es la misma tres veces. Cada componente se actualiza mezclando lo que se
+acaba de observar —descontando el efecto de las otras dos— con lo que se creía
+antes. Y hay un parámetro por componente: $\alpha$ para el nivel, $\beta^*$ para la
+tendencia, $\gamma$ para la estacionalidad.
+
+Cuando la amplitud del ciclo crece con el nivel —el caso del
+@sec-aditiva-multiplicativa— corresponde la versión **multiplicativa**:
+
+$$
+\begin{aligned}
+\hat{y}_{t+h|t} &= (\ell_t + h\, b_t)\, s_{t+h-m(k+1)} \\
+\ell_t &= \alpha \frac{y_t}{s_{t-m}} + (1-\alpha)(\ell_{t-1} + b_{t-1}) \\
+s_t &= \gamma \frac{y_t}{\ell_{t-1} + b_{t-1}} + (1-\gamma)\, s_{t-m}
+\end{aligned}
+$$ {#eq-hw-multiplicativo}
+
+La estacionalidad pasa de sumar una cantidad fija a multiplicar por un factor.
+
+```{python}
+#| label: fig-holt-winters
+#| fig-cap: "Holt-Winters aditivo y multiplicativo sobre Q15481, la serie de amplitud creciente."
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+
+creciente = cargar("Q15481")
+tr_c, te_c = creciente.entrenamiento, creciente.prueba
+m_c, h_c = creciente.periodo_estacional, creciente.horizonte
+
+variantes = {}
+for etiqueta, tipo in (("aditivo", "add"), ("multiplicativo", "mul")):
+    variantes[etiqueta] = ExponentialSmoothing(
+        tr_c, trend="add", seasonal=tipo, seasonal_periods=m_c,
+        initialization_method="estimated",
+    ).fit()
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=tr_c.index[-40:], y=tr_c.to_numpy()[-40:], mode="lines", name="observado",
+    line=dict(color=COLORES["observado"], width=1.8),
+))
+fig.add_trace(go.Scatter(
+    x=te_c.index, y=te_c.values, mode="lines", name="observado (prueba)",
+    line=dict(color=COLORES["prueba"], width=1.8, dash="dot"),
+))
+for etiqueta, ajuste in variantes.items():
+    fig.add_trace(go.Scatter(
+        x=te_c.index, y=ajuste.forecast(h_c).to_numpy(), mode="lines",
+        name=etiqueta, line=dict(width=2),
+    ))
+fig.update_layout(height=430)
+mostrar(fig, titulo_y="unidades")
+
+for etiqueta, ajuste in variantes.items():
+    error = smape(te_c.to_numpy(), ajuste.forecast(h_c).to_numpy())
+    print(f"{etiqueta:16s} sMAPE {error:6.2f}   AIC {ajuste.aic:8.1f}")
+```
+
+## Muévelo {#sec-widget-09}
+
+Los tres parámetros de la @eq-hw-aditivo son la parte del método que más cuesta
+entender leyendo. El widget que sigue los pone en deslizadores: cada uno controla
+cuánta memoria tiene su componente.
+
+Vale la pena buscar tres cosas:
+
+- Con **α cerca de 1**, el nivel salta con cada observación y el pronóstico se
+  vuelve inestable: el método casi no promedia.
+- Con **β cerca de 1** en una serie con ciclo, la tendencia confunde el ciclo con
+  pendiente y el pronóstico se dispara. Es el mecanismo del @sec-holt-diverge.
+- Con **γ cerca de 0**, la estacionalidad queda congelada en la del primer ciclo
+  observado.
+
+El interruptor compara tu elección con los parámetros que el método estima solo. Y
+ahí hay una sorpresa que conviene anticipar: **es fácil encontrar a mano
+parámetros que dan un sMAPE mejor que los estimados**. No es un defecto del
+optimizador. Los parámetros se eligen minimizando el error a un paso *dentro* de la
+muestra de entrenamiento, y el widget mide el error a doce o dieciocho pasos
+*fuera* de ella. Son dos objetivos distintos, y el óptimo de uno no es el óptimo
+del otro. Sobre esto vuelve el ejercicio 1.
+
+```{shinylive-python}
+#| standalone: true
+#| viewerHeight: 760
+#| components: [viewer]
+
+from pathlib import Path
+
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from shiny import App, reactive, render, ui
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+
+AQUI = Path(__file__).parent
+datos = pd.read_csv(AQUI / "cap04_estacionales.csv", parse_dates=["ds"])
+ETIQUETAS = list(dict.fromkeys(datos["etiqueta"]))
+
+
+def smape(real, pron):
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    return 200 * np.mean(np.abs(real - pron) / (np.abs(real) + np.abs(pron)))
+
+
+app_ui = ui.page_fluid(
+    ui.layout_columns(
+        ui.input_select("serie", "Serie", ETIQUETAS, selected=ETIQUETAS[0]),
+        ui.input_slider("alfa", "α  nivel", 0.02, 0.98, 0.30, step=0.02),
+        ui.input_slider("beta", "β  tendencia", 0.02, 0.98, 0.10, step=0.02),
+        ui.input_slider("gamma", "γ  estacionalidad", 0.02, 0.98, 0.20, step=0.02),
+        col_widths=[3, 3, 3, 3],
+    ),
+    ui.input_switch("optimo", "usar los parámetros estimados por el método", False),
+    ui.output_ui("resumen"),
+    ui.output_plot("grafico", height="420px"),
+)
+
+
+def servidor(input, output, session):
+
+    @reactive.calc
+    def partes():
+        g = datos[datos["etiqueta"] == input.serie()].sort_values("ds")
+        entrenamiento = g[g["split"] == "entrenamiento"]
+        prueba = g[g["split"] == "prueba"]
+        y = entrenamiento.set_index("ds")["y"]
+        m = int(g["m"].iloc[0])
+
+        modelo = ExponentialSmoothing(
+            y.to_numpy(), trend="add", seasonal="add", seasonal_periods=m,
+            initialization_method="estimated",
+        )
+        if input.optimo():
+            ajuste = modelo.fit(optimized=True)
+        else:
+            ajuste = modelo.fit(
+                smoothing_level=input.alfa(),
+                smoothing_trend=input.beta(),
+                smoothing_seasonal=input.gamma(),
+                optimized=False,
+            )
+        return y, prueba, m, ajuste
+
+    @render.ui
+    def resumen():
+        y, prueba, m, ajuste = partes()
+        pron = ajuste.forecast(len(prueba))
+        error = smape(prueba["y"].to_numpy(), pron)
+        p = ajuste.params
+        return ui.markdown(
+            f"**m = {m}**  ·  α {p['smoothing_level']:.2f}  ·  "
+            f"β {p['smoothing_trend']:.2f}  ·  γ {p['smoothing_seasonal']:.2f}  "
+            f"·  **sMAPE {error:.2f}**"
+        )
+
+    @render.plot
+    def grafico():
+        y, prueba, m, ajuste = partes()
+        pron = ajuste.forecast(len(prueba))
+        cola = min(len(y), 8 * m)
+
+        fig, ax = plt.subplots(figsize=(9, 4.0))
+        ax.plot(y.index[-cola:], y.to_numpy()[-cola:], lw=1.4,
+                color="#1f4e79", label="entrenamiento")
+        ax.plot(prueba["ds"], prueba["y"], lw=1.8, ls="--",
+                color="#c0504d", label="observado (prueba)")
+        ax.plot(prueba["ds"], pron, lw=2.2, color="#2e8b57", label="pronóstico")
+        ax.legend(loc="upper left", fontsize=8)
+        ax.xaxis.set_major_locator(mdates.AutoDateLocator(maxticks=8))
+        ax.xaxis.set_major_formatter(
+            mdates.ConciseDateFormatter(ax.xaxis.get_major_locator())
+        )
+        fig.tight_layout()
+        return fig
+
+
+app = App(app_ui, servidor)
+
+## file: cap04_estacionales.csv
+{{< include datos/cap04_estacionales.csv >}}
+```
+
+## La familia ETS {#sec-ets}
+
+Los métodos anteriores son casos particulares de un esquema único. Cada uno se
+identifica por tres letras que dicen cómo entra el **error**, cómo es la
+**tendencia** y cómo es la **estacionalidad**:
+
+```{python}
+#| label: tbl-taxonomia
+#| tbl-cap: "La taxonomía ETS. Cada combinación de las tres dimensiones es un modelo, y varios tienen nombre propio."
+pd.DataFrame([
+    {"componente": "Error (E)", "opciones": "A: aditivo · M: multiplicativo",
+     "qué decide": "si la varianza del error crece con el nivel"},
+    {"componente": "Tendencia (T)", "opciones": "N: ninguna · A: aditiva · Ad: amortiguada",
+     "qué decide": "si hay pendiente y si se extrapola sin freno"},
+    {"componente": "Estacionalidad (S)", "opciones": "N: ninguna · A: aditiva · M: multiplicativa",
+     "qué decide": "si el ciclo suma una cantidad o multiplica por un factor"},
+]).set_index("componente")
+```
+
+Con esa notación, los métodos de este capítulo son:
+
+| Notación | Método |
+|---|---|
+| ETS(A,N,N) | suavizado exponencial simple |
+| ETS(A,A,N) | Holt |
+| ETS(A,Ad,N) | Holt con tendencia amortiguada |
+| ETS(A,A,A) | Holt-Winters aditivo |
+| ETS(A,A,M) | Holt-Winters multiplicativo |
+
+Las tres opciones de tendencia por las tres de estacionalidad dan nueve métodos, y
+cada uno admite error aditivo o multiplicativo: **dieciocho modelos**. No todos son
+utilizables en la práctica —algunas combinaciones con componentes multiplicativas
+son numéricamente inestables cuando la serie se acerca a cero—, pero quedan más de
+diez candidatos para cualquier serie. Elegir entre ellos a mano no escala.
+
+### Selección automática {#sec-seleccion-ets}
+
+La solución estándar es ajustar todos los candidatos viables y elegir por un
+criterio de información. El más usado es el **AIC corregido**:
+
+$$
+\text{AICc} = -2\log L + 2k + \frac{2k(k+1)}{T-k-1}
+$$ {#eq-aicc}
+
+donde $L$ es la verosimilitud del modelo, $k$ la cantidad de parámetros y $T$ el
+largo de la serie. El primer término premia el ajuste; el segundo penaliza la
+complejidad; el tercero corrige el sesgo del segundo en series cortas, que es
+justamente el caso de buena parte de M4.
+
+@hyndman2008 automatizaron este procedimiento, y acá conviene cambiar de
+herramienta. Hasta ahora usamos `statsmodels`, que expone las ecuaciones y permite
+fijar los parámetros a mano —lo que hace posible el widget de la sección anterior—.
+Para la selección automática usamos `statsforecast`, que implementa el algoritmo de
+Hyndman-Khandakar y es mucho más rápido:
+
+```{python}
+from statsforecast import StatsForecast
+from statsforecast.models import AutoETS
+
+estacional = cargar("M35927")
+datos_ajuste = estacional.a_frame(incluir_prueba=False)[["unique_id", "ds", "y"]]
+
+sf = StatsForecast(
+    models=[AutoETS(season_length=estacional.periodo_estacional)],
+    freq="MS", n_jobs=1,
+)
+pronostico_auto = sf.forecast(df=datos_ajuste, h=estacional.horizonte)
+sf.fit(df=datos_ajuste)
+
+elegido = sf.fitted_[0][0].model_["method"]
+error_auto = smape(estacional.prueba.to_numpy(), pronostico_auto["AutoETS"].to_numpy())
+
+manual = ExponentialSmoothing(
+    estacional.entrenamiento, trend="add", seasonal="add",
+    seasonal_periods=estacional.periodo_estacional,
+    initialization_method="estimated",
+).fit()
+error_manual = smape(
+    estacional.prueba.to_numpy(),
+    manual.forecast(estacional.horizonte).to_numpy(),
+)
+
+print(f"modelo elegido automáticamente : {elegido}")
+print(f"sMAPE de ese modelo            : {error_auto:.2f}")
+print(f"sMAPE de Holt-Winters aditivo  : {error_manual:.2f}")
+```
+
+El algoritmo eligió un modelo con error **multiplicativo**, **sin tendencia** y
+estacionalidad aditiva, y le fue mucho mejor que a la elección razonable hecha a
+mano. La lección no es que Holt-Winters sea malo: es que "esta serie tiene
+tendencia y estacionalidad, entonces uso Holt-Winters aditivo" es un razonamiento
+demasiado grueso. La forma en que entra el error también importa, y a ojo no se ve.
+
+::: {.callout-note}
+## Dos bibliotecas, y por qué
+
+El libro usa `statsmodels` para mostrar cómo funciona un modelo y `statsforecast`
+cuando el tema es elegir automáticamente o correr sobre muchas series.
+
+No es capricho. `statsmodels` permite fijar $\alpha$, $\beta^*$ y $\gamma$ a mano,
+que es lo que hace posible el widget del @sec-widget-09, y además funciona dentro
+del navegador. `statsforecast` no permite fijarlos —su punto es justamente
+elegirlos— pero implementa la selección automática completa y es órdenes de
+magnitud más rápida sobre miles de series, que es lo que hace falta en el
+@sec-caso-m4.
+:::
+
+## Cuál usar, medido sobre el catálogo {#sec-comparacion}
+
+```{python}
+#| label: tbl-comparacion-suavizado
+#| tbl-cap: "Cuatro métodos de suavizado sobre las series del catálogo. Holt-Winters solo existe donde m > 1."
+from statsmodels.tsa.holtwinters import SimpleExpSmoothing
+
+filas = []
+for s in cargar(n=len(catalogo())):
+    # Se pasan arrays y no la Series con índice de fechas: ver el aviso de más
+    # abajo sobre el desborde al extender el índice.
+    tr_s, te_s = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    h_s, m_s = s.horizonte, s.periodo_estacional
+    fila = {"serie": s.id}
+
+    fila["SES"] = smape(te_s, SimpleExpSmoothing(
+        tr_s, initialization_method="estimated"
+    ).fit().forecast(h_s))
+
+    fila["Holt"] = smape(te_s, Holt(
+        tr_s, initialization_method="estimated"
+    ).fit().forecast(h_s))
+
+    fila["amortiguado"] = smape(te_s, Holt(
+        tr_s, damped_trend=True, initialization_method="estimated"
+    ).fit().forecast(h_s))
+
+    if m_s > 1 and s.n >= 2 * m_s:
+        fila["Holt-Winters"] = smape(te_s, ExponentialSmoothing(
+            tr_s, trend="add", seasonal="add", seasonal_periods=m_s,
+            initialization_method="estimated",
+        ).fit().forecast(h_s))
+    else:
+        fila["Holt-Winters"] = np.nan
+
+    filas.append(fila)
+
+resultados = pd.DataFrame(filas).set_index("serie")
+metodos = ["SES", "Holt", "amortiguado", "Holt-Winters"]
+
+resumen = resultados[metodos].agg(["mean", "median", "count"]).T
+resumen.columns = ["sMAPE medio", "sMAPE mediano", "series"]
+resumen.round(2)
+```
+
+```{python}
+#| label: tbl-ganadores
+#| tbl-cap: "En cuántas series gana cada método."
+resultados[metodos].idxmin(axis=1).value_counts().rename("series donde gana").to_frame()
+```
+
+::: {.callout-warning}
+## Una serie del catálogo rompe el pronóstico con fechas
+
+Al armar la tabla anterior aparece un problema concreto. La serie `Y21290` tiene
+671 observaciones anuales y su índice termina en el año **2649**. Cuando
+`statsmodels` pronostica, extiende el índice para etiquetar los valores nuevos, y
+lo hace en resolución de **nanosegundos** sin importar la resolución de entrada.
+El resultado es un `OutOfBoundsDatetime`, porque los nanosegundos no llegan más
+allá de 2262.
+
+Es el mismo techo del @sec-estructura, en otro disfraz: allá aparecía al
+*construir* el índice, acá al *extenderlo*. La salida práctica es pasarle al modelo
+un array de numpy en vez de la `Series` cuando lo único que interesa es la métrica:
+
+```python
+# rompe con series anuales muy largas
+SimpleExpSmoothing(serie.entrenamiento).fit().forecast(h)
+
+# funciona siempre; el pronóstico vuelve sin fechas
+SimpleExpSmoothing(serie.entrenamiento.to_numpy()).fit().forecast(h)
+```
+
+Cuando sí hacen falta las fechas —para graficar, o para cruzar con otra tabla— hay
+que construir el índice del pronóstico a mano con `unit="s"`, como hace el módulo de
+datos del libro.
+:::
+
+Tres lecturas.
+
+**Holt-Winters gana donde puede aplicarse**, con el mejor promedio y la mejor
+mediana. No sorprende: el catálogo tiene muchas series con estacionalidad marcada,
+y es el único de los cuatro que la modela.
+
+**Holt sin amortiguar tiene el peor promedio de los cuatro**, peor incluso que el
+suavizado simple, que ni siquiera intenta modelar la tendencia. Toda esa diferencia
+viene de las series horarias de la @tbl-amortiguado.
+
+**Ninguno gana en todas.** El suavizado simple gana en ocho series —las que no
+tienen ni tendencia ni estacionalidad explotables— y ahí los métodos más
+sofisticados pierden por estimar componentes que no están. Es la misma conclusión
+del @sec-que-es-pronosticar, ahora con métodos de verdad: el mejor método depende
+de la serie, y por eso conviene la selección automática del @sec-seleccion-ets.
+
+## Ejercicios
+
+Las soluciones están en el @sec-soluciones-09.
+
+**1.** Ajusta un suavizado exponencial simple a `D2039` con $\alpha = 0{,}1$,
+$\alpha = 0{,}5$ y $\alpha$ optimizado. Compara los tres sMAPE. ¿Qué valor eligió
+el método, y qué dice eso sobre la memoria útil de esa serie?
+
+**2.** Usando la @eq-pesos, calcula qué proporción del peso total recae en las
+últimas cinco observaciones cuando $\alpha = 0{,}2$ y cuando $\alpha = 0{,}8$.
+Verifica tu cálculo numéricamente.
+
+**3.** Ajusta Holt y Holt amortiguado a `Q1915`, la serie de tendencia limpia.
+¿Cuánto vale $\phi$? ¿Amortiguar ayuda o perjudica en una serie donde la tendencia
+es genuina?
+
+**4.** La @eq-holt-amortiguado dice que la pendiente acumulada converge a
+$\phi/(1-\phi)$. Calcula ese límite para los seis valores de $\phi$ de la
+@tbl-amortiguado y compáralo con la cantidad de pasos del horizonte. ¿En cuáles el
+amortiguamiento alcanza a actuar de verdad dentro del horizonte pedido?
+
+**5.** Ajusta Holt-Winters aditivo y multiplicativo a `M35927` y compara el AICc de
+cada uno con su sMAPE fuera de muestra. ¿El criterio de información eligió el
+mismo modelo que habría elegido el error de prueba?
+
+**6.** Corre `AutoETS` sobre las diez series mensuales del catálogo y anota qué
+modelo elige en cada una. ¿Cuántas veces elige tendencia amortiguada? ¿Cuántas
+veces elige error multiplicativo?
+
+## Referencias {.unnumbered}
+
+::: {#refs}
 :::
