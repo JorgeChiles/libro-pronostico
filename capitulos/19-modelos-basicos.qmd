@@ -1,7 +1,556 @@
+---
+resources:
+  - datos/cap04_estacionales.csv
+---
+
 # Modelos básicos {#sec-modelos-basicos}
 
-Regresión lineal y regularizada, KNN, SVR y árboles de decisión.
+```{python}
+#| echo: false
+import time
+import warnings
 
-::: {.callout-note appearance="simple"}
-Capítulo en preparación.
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+from sklearn.ensemble import (ExtraTreesRegressor, HistGradientBoostingRegressor,
+                              RandomForestRegressor)
+from sklearn.linear_model import Ridge
+from sklearn.neighbors import KNeighborsRegressor
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVR
+from sklearn.tree import DecisionTreeRegressor
+
+from libro.datos import cargar, catalogo
+from libro.graficos import COLORES, mostrar
+
+warnings.simplefilter("ignore")
+
+
+def smape(real, pron):
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    den = np.abs(real) + np.abs(pron)
+    den[den == 0] = 1e-9
+    return 200 * np.mean(np.abs(real - pron) / den)
+```
+
+La Parte II lleva siete capítulos sobre cómo evaluar, cómo partir, cómo pronosticar a varios
+pasos y qué características construir, y en todos ellos el modelo fue una excusa: Ridge cuando
+hacía falta algo lineal y un bosque aleatorio cuando hacía falta algo flexible. Este capítulo mira
+los modelos.
+
+La pregunta no es cuál es el mejor en abstracto sino **cuál conviene en series de las que hay
+cien observaciones**, que es la situación de la mitad de M4 según el @sec-intro-ml.
+
+```{python}
+#| echo: false
+def ventana(y, p):
+    y = np.asarray(y, float)
+    return (np.array([y[i - p:i] for i in range(p, len(y))]),
+            np.array([y[i] for i in range(p, len(y))]))
+
+
+def recursivo(modelo, y, p, h):
+    historia, salida = list(y), []
+    for _ in range(h):
+        salida.append(float(modelo.predict([historia[-p:]])[0]))
+        historia.append(salida[-1])
+    return np.array(salida)
+
+
+def naive(y, h, m):
+    return np.repeat(y[-1], h)
+
+
+def snaive(y, h, m):
+    if m <= 1:
+        return naive(y, h, m)
+    return np.array([y[-m + (i % m)] for i in range(h)])
+
+
+MODELOS = {
+    "Ridge": lambda: make_pipeline(StandardScaler(), Ridge(alpha=1.0)),
+    "kNN, k = 3": lambda: make_pipeline(StandardScaler(), KNeighborsRegressor(3)),
+    "kNN, k = 10": lambda: make_pipeline(StandardScaler(), KNeighborsRegressor(10)),
+    "árbol, prof. 3": lambda: DecisionTreeRegressor(max_depth=3, random_state=0),
+    "árbol sin límite": lambda: DecisionTreeRegressor(random_state=0),
+    "bosque aleatorio": lambda: RandomForestRegressor(
+        n_estimators=60, random_state=0, n_jobs=1),
+    "extra trees": lambda: ExtraTreesRegressor(
+        n_estimators=60, random_state=0, n_jobs=1),
+    "boosting": lambda: HistGradientBoostingRegressor(
+        max_iter=120, random_state=0),
+    "SVR rbf": lambda: make_pipeline(StandardScaler(), SVR(C=10.0)),
+}
+
+_cat = catalogo().set_index("serie")
+_filas, _segundos = [], {n: 0.0 for n in MODELOS}
+
+for _sid in _cat.index:
+    _s = cargar(_sid)
+    _ytr, _yte = _s.entrenamiento.to_numpy(), _s.prueba.to_numpy()
+    _h, _m = _s.horizonte, _s.periodo_estacional
+    _p = min(max(_m, 4), 12)
+    if len(_ytr) < _p + 20:
+        continue
+    _X, _o = ventana(_ytr, _p)
+    _fila = {
+        "serie": _sid, "n": len(_ytr), "h": _h, "m": _m, "p": _p,
+        "n / h": len(_ytr) / _h, "filas": len(_X),
+        "fenomeno": _cat.loc[_sid, "fenomeno"],
+        "naive": smape(_yte, naive(_ytr, _h, _m)),
+        "snaive": smape(_yte, snaive(_ytr, _h, _m)),
+        "máximo del entrenamiento": float(_ytr.max()),
+        "máximo de la prueba": float(_yte.max()),
+    }
+    for _nom, _construir in MODELOS.items():
+        _t0 = time.perf_counter()
+        _pron = recursivo(_construir().fit(_X, _o), _ytr, _p, _h)
+        _segundos[_nom] += time.perf_counter() - _t0
+        _fila[_nom] = smape(_yte, _pron)
+        _fila[_nom + " máximo"] = float(np.max(_pron))
+    _filas.append(_fila)
+
+COMP = pd.DataFrame(_filas)
+NOMBRES = list(MODELOS)
+TODOS = ["naive", "snaive"] + NOMBRES
+```
+
+## Las familias {#sec-familias}
+
+Sobre la tabla supervisada de la @eq-ventana, cada familia hace algo distinto con las mismas
+columnas.
+
+**Lineales.** Un hiperplano: $\hat{y} = \mathbf{x}^{\top}\beta$. Es lo del @sec-sobreajuste, y su
+propiedad definitoria para pronóstico es que **puede devolver valores que nunca vio**.
+
+**Vecinos más cercanos.** Busca las $k$ filas más parecidas y promedia sus respuestas:
+
+$$
+\hat{f}(\mathbf{x}) = \frac{1}{k} \sum_{i \,\in\, \mathcal{N}_k(\mathbf{x})} y_i
+$$ {#eq-knn}
+
+No hay ajuste: el modelo *es* la tabla. La @eq-knn dice que la predicción es siempre un promedio
+de valores observados, así que está acotada por el mínimo y el máximo de la muestra.
+
+**Árboles.** Parten el espacio de características en rectángulos y predicen la media de cada uno:
+
+$$
+\hat{f}(\mathbf{x}) = \sum_{j=1}^{J} c_j \,\mathbb{1}\!\left[ \mathbf{x} \in R_j \right],
+\qquad
+c_j = \frac{1}{|R_j|} \sum_{i \,\in\, R_j} y_i
+$$ {#eq-arbol}
+
+Cada $c_j$ es una media de valores observados, así que **la @eq-arbol también está acotada**. El
+@sec-extrapolacion lo midió en un bosque; más abajo se ve que es una propiedad de la forma de la
+ecuación, no de un modelo.
+
+**Ensambles de árboles.** Promedios de muchos árboles, que difieren en cómo los generan.
+El bosque aleatorio [@breiman2001] los entrena sobre remuestras y con subconjuntos de columnas;
+*extra trees* [@geurts2006] elige los puntos de corte al azar en vez de optimizarlos; el
+*boosting* [@friedman2001] los agrega en secuencia, cada uno ajustando el residuo del anterior.
+
+**Máquinas de vectores de soporte.** Una regresión en un espacio de características implícito
+definido por un núcleo. Con núcleo lineal extrapola; con núcleo radial, la predicción decae hacia
+una constante al alejarse de los datos.
+
+::: {.callout-note}
+## Sobre xgboost y lightgbm
+
+En la práctica, el boosting de árboles se usa con `xgboost` [@chen2016] o `lightgbm` [@ke2017], que
+son más rápidos y tienen más opciones que la implementación de `scikit-learn`. Este libro usa
+`HistGradientBoostingRegressor`, que es la implementación de `scikit-learn` inspirada en LightGBM,
+por una razón de proyecto y no de calidad: **son dos dependencias fijas menos** que mantener, y las
+conclusiones de este capítulo no dependen de la implementación.
+
+Si vas a llevar esto a producción, `lightgbm` es la elección razonable. Lo que no cambia es lo que
+el capítulo mide, que es cuánta capacidad soportan estas series.
+:::
+
+## Todos contra todos {#sec-todos-contra-todos}
+
+```{python}
+#| label: tbl-modelos
+#| tbl-cap: "Nueve modelos y dos referencias sobre las series del catálogo, con ventana de $p = \\min(\\max(m,4),12)$ rezagos y estrategia recursiva."
+pd.DataFrame({
+    "sMAPE medio": COMP[TODOS].mean(),
+    "sMAPE mediano": COMP[TODOS].median(),
+    f"gana en (de {len(COMP)})": COMP[TODOS].idxmin(axis=1).value_counts().reindex(
+        TODOS, fill_value=0),
+    "segundos": [np.nan, np.nan] + [_segundos[n] for n in NOMBRES],
+}).round(2)
+```
+
+La tabla tiene cuatro lecturas y ninguna es la que se espera.
+
+**Gana *extra trees*, con 12,55 de media y 6,75 de mediana.** Le gana al bosque aleatorio —13,31—
+y por bastante al boosting. Que el ensamble con los cortes elegidos **al azar** le gane al que los
+optimiza no es casualidad: con doscientas filas, elegir el mejor corte es una decisión con mucha
+varianza, y renunciar a optimizarlo es una forma de regularización. Es el @sec-sobreajuste otra
+vez, disfrazado de detalle de implementación.
+
+**El boosting es peor que `snaive`.** 17,80 contra 15,31, y en la mediana 10,77 contra 11,60. Con
+120 iteraciones sobre tablas de cien a trescientas filas, el boosting ajusta el ruido: cada árbol
+corrige el residuo del anterior y el residuo de una serie corta es mayormente ruido. Es el
+resultado que más contradice la sabiduría recibida sobre datos tabulares [@grinsztajn2022], y la
+diferencia con esos resultados está en el tamaño: los conjuntos tabulares donde el boosting brilla
+tienen decenas de miles de filas.
+
+**SVR con núcleo radial es un desastre**: 36,71, peor que `naive`. Lo dejo en la tabla porque el
+@sec-diferenciar explica por qué y cómo se arregla, y porque es útil ver que un modelo respetable
+puede ser inaplicable a un problema por un motivo estructural.
+
+**Y el costo no acompaña a la calidad.** El boosting consume 9,31 segundos contra los 0,06 de
+Ridge —155 veces más— para dar un resultado peor. *Extra trees*, que gana, cuesta 1,74 segundos.
+
+```{python}
+#| label: fig-modelos
+#| fig-cap: "sMAPE medio contra segundos de cómputo. El cuadrante deseable es el de abajo a la izquierda."
+fig = go.Figure()
+for nombre in NOMBRES:
+    fig.add_trace(go.Scatter(
+        x=[_segundos[nombre]], y=[COMP[nombre].mean()], mode="markers+text",
+        text=[nombre], textposition="top center", showlegend=False,
+        marker=dict(size=11, color=COLORES["observado"]),
+    ))
+fig.add_hline(y=COMP["snaive"].mean(), line_dash="dash", line_width=1,
+              line_color=COLORES["prueba"],
+              annotation_text="snaive, sin ajustar nada")
+fig.update_xaxes(title="segundos para las 31 series", type="log")
+mostrar(fig, alto=440, titulo_y="sMAPE medio")
+```
+
+La línea de `snaive` en la @fig-modelos es la que hay que mirar. **Cuatro de los nueve modelos
+están por encima de ella**, o sea que cuestan cómputo y no le ganan a repetir el ciclo anterior.
+
+## El techo de los modelos acotados {#sec-techo}
+
+El @sec-extrapolacion mostró que un bosque aleatorio no puede pronosticar por encima del máximo
+que vio. Las ecuaciones @eq-knn y @eq-arbol dicen que eso no es del bosque: es de cualquier modelo
+cuya predicción sea un promedio de respuestas observadas.
+
+```{python}
+#| label: tbl-techo
+#| tbl-cap: "Series del catálogo donde el período de prueba supera el máximo del entrenamiento, y en cuántas de ellas cada modelo logra pronosticar por encima de ese máximo."
+suben = COMP[COMP["máximo de la prueba"] > COMP["máximo del entrenamiento"]]
+
+pd.DataFrame([
+    {"modelo": nombre,
+     "supera el techo en": int(
+         (suben[nombre + " máximo"] > suben["máximo del entrenamiento"] * 1.0001).sum()
+     ),
+     f"de {len(suben)} series": len(suben)}
+    for nombre in NOMBRES
+]).set_index("modelo")
+```
+
+El resultado es categórico. En las ocho series del catálogo donde el futuro supera el máximo
+histórico, **Ridge lo consigue en cinco y los otros ocho modelos en cero.** No en pocas: en
+ninguna.
+
+Y no es una limitación estadística que más datos podrían resolver. Es la @eq-arbol: si cada hoja
+predice una media de valores observados, ninguna combinación convexa de hojas puede pasarse del
+máximo. Lo mismo para la @eq-knn.
+
+::: {.callout-important}
+## Cuándo esto importa y cuándo no
+
+Importa cuando la serie tiene **tendencia sostenida**, porque entonces el futuro está por encima de
+todo el pasado por definición. En esas series los modelos acotados tienen un error que no baja con
+más datos ni con mejores hiperparámetros.
+
+No importa cuando la serie oscila alrededor de un nivel, que es la mayoría. En las 23 series del
+catálogo donde el máximo de prueba no supera al de entrenamiento, el techo nunca se activa.
+
+El diagnóstico previo es de una línea y vale hacerlo siempre: **comparar el último valor y la
+pendiente reciente contra el máximo histórico.** Si la serie viene subiendo y está cerca de su
+máximo, un modelo acotado va a subestimar sistemáticamente. La @tbl-modelos no lo muestra porque
+promedia sobre las dos situaciones.
+:::
+
+## Diferenciar, y por qué no alcanza {#sec-diferenciar}
+
+El @sec-quitar-tendencia propuso el remedio: ajustar el modelo sobre la serie diferenciada y
+reconstruir acumulando. La serie de diferencias no tiene tendencia, así que el techo deja de estar
+en el camino. En la serie de aquel capítulo funcionó de manera espectacular.
+
+Conviene medirlo en las treinta.
+
+```{python}
+#| label: tbl-diferenciar
+#| tbl-cap: "Cada modelo ajustado sobre el nivel y sobre la serie diferenciada, con el pronóstico reconstruido acumulando. Media sobre las series del catálogo."
+def con_diferencia(construir, y, p, h):
+    y = np.asarray(y, float)
+    diferencias = np.diff(y)
+    if len(diferencias) < p + 8:
+        return None
+    X, objetivo = ventana(diferencias, p)
+    pron = recursivo(construir().fit(X, objetivo), diferencias, p, h)
+    return y[-1] + np.cumsum(pron)
+
+
+filas = []
+for identificador in COMP["serie"]:
+    s = cargar(identificador)
+    y_tr, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    h, m = s.horizonte, s.periodo_estacional
+    p = min(max(m, 4), 12)
+    if len(y_tr) < p + 22:
+        continue
+    X, objetivo = ventana(y_tr, p)
+    fila = {"serie": identificador}
+    for nombre, construir in MODELOS.items():
+        fila[nombre + " nivel"] = smape(
+            y_te, recursivo(construir().fit(X, objetivo), y_tr, p, h))
+        pron = con_diferencia(construir, y_tr, p, h)
+        fila[nombre + " dif"] = smape(y_te, pron) if pron is not None else np.nan
+    filas.append(fila)
+
+DIF = pd.DataFrame(filas)
+pd.DataFrame([
+    {"modelo": nombre,
+     "en nivel": DIF[nombre + " nivel"].mean(),
+     "diferenciada": DIF[nombre + " dif"].mean(),
+     "cuánto empeora al diferenciar": (DIF[nombre + " dif"].mean()
+                                       - DIF[nombre + " nivel"].mean()),
+     f"mejora en (de {len(DIF)})": int(
+         (DIF[nombre + " dif"] < DIF[nombre + " nivel"]).sum()),
+    }
+    for nombre in MODELOS
+]).set_index("modelo").round(2)
+```
+
+Acá hay que corregir la lectura que dejó el @sec-quitar-tendencia, y es una corrección que importa.
+
+**Diferenciar empeora la media en siete de los nueve modelos.** El árbol sin límite pasa de 16,24
+a 23,23, el boosting de 17,13 a 24,16, el bosque de 13,21 a 19,00. Solo mejoran Ridge —de 14,88 a
+13,86— y SVR, de manera espectacular.
+
+**Y sin embargo mejora en aproximadamente la mitad de las series en todos los modelos**: entre 14 y
+18 de 30. O sea que no es que diferenciar sea malo: es que **cuando ayuda ayuda poco y cuando
+perjudica perjudica mucho.**
+
+El motivo es la reconstrucción. El pronóstico en diferencias se convierte en pronóstico de nivel
+acumulando, y una suma acumulada **acumula también el sesgo**: si el modelo sobrestima la diferencia
+típica en una cantidad chica, el nivel reconstruido se va alejando linealmente con el horizonte. Es
+el mismo mecanismo que el @sec-agregacion-temporal midió al agregar un pronóstico sesgado, aplicado
+al revés.
+
+::: {.callout-warning}
+## Lo que sí sostiene la evidencia
+
+Diferenciar **no** es una mejora general para modelos basados en árboles. Es un remedio para un
+diagnóstico específico: la serie tiene tendencia sostenida y el techo de la @tbl-techo está
+activo. El @sec-quitar-tendencia lo midió en `Q1915`, que es exactamente ese caso, y ahí funciona.
+Generalizarlo a las treinta series lo da vuelta.
+
+La regla operativa que queda: **diferenciar si el diagnóstico del recuadro anterior dice que el
+techo está activo, y no como paso por omisión.** Y verificarlo, porque la mitad de las veces sale
+mal.
+
+El caso de SVR es aparte. Pasa de 36,58 a 19,62 porque un núcleo radial sobre rezagos de nivel es
+un modelo condenado: al alejarse de los datos de entrenamiento la predicción decae hacia una
+constante, que en la escala de la serie es un número arbitrario. Sobre diferencias, esa constante
+es cero, que es una predicción razonable. Sigue siendo el peor de la tabla.
+:::
+
+## Capacidad y largo de la serie {#sec-capacidad-largo}
+
+```{python}
+#| label: tbl-por-largo-modelos
+#| tbl-cap: "Los mismos modelos separados por cuántos horizontes de historia tiene la serie."
+filas = []
+for etiqueta, seleccion in (("n / h < 10", COMP[COMP["n / h"] < 10]),
+                            ("n / h ≥ 10", COMP[COMP["n / h"] >= 10])):
+    fila = {"series": f"{etiqueta} ({len(seleccion)})"}
+    fila.update(seleccion[TODOS].mean().to_dict())
+    filas.append(fila)
+
+pd.DataFrame(filas).set_index("series").T.round(2)
+```
+
+La tabla parte el capítulo en dos.
+
+**En las series largas todo funciona.** Ocho de los nueve modelos le ganan a `snaive`, y *extra
+trees* llega a 7,97 contra los 11,42 de la referencia: una mejora del 30 %.
+
+**En las series cortas casi nada funciona.** `snaive` da 22,38 y solo *extra trees* le gana, con
+20,86. Ridge da 25,85, el boosting 31,99 y SVR 39,31. **Ocho de nueve modelos de aprendizaje
+automático son peores que repetir el ciclo del año pasado.**
+
+Es la advertencia del @sec-intro-ml con nombres y números. Ahí decía que el 51 % de las series de
+M4 tiene menos de 100 observaciones; acá se ve lo que eso implica: en ese régimen, la elección de
+modelo importa mucho menos que la decisión de no usar uno.
+
+```{python}
+#| label: tbl-boosting-capacidad
+#| tbl-cap: "¿Se puede rescatar al boosting en series cortas bajándole la capacidad? Cinco configuraciones."
+CONFIGURACIONES = {
+    "por omisión (120 iteraciones)": dict(max_iter=120),
+    "profundidad máxima 2": dict(max_iter=120, max_depth=2),
+    "30 iteraciones": dict(max_iter=30),
+    "hoja mínima 10, profundidad 2": dict(max_iter=60, max_depth=2,
+                                          min_samples_leaf=10),
+    "penalización l2 = 1, prof. 3": dict(max_iter=50, max_depth=3,
+                                         l2_regularization=1.0),
+}
+
+filas = []
+for etiqueta, kw in CONFIGURACIONES.items():
+    cortas, largas = [], []
+    for _, r in COMP.iterrows():
+        s = cargar(r["serie"])
+        y_tr, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+        p = int(r["p"])
+        X, objetivo = ventana(y_tr, p)
+        modelo = HistGradientBoostingRegressor(random_state=0, **kw).fit(X, objetivo)
+        error = smape(y_te, recursivo(modelo, y_tr, p, s.horizonte))
+        (cortas if r["n / h"] < 10 else largas).append(error)
+    filas.append({"configuración": etiqueta,
+                  "series cortas": np.mean(cortas),
+                  "series largas": np.mean(largas),
+                  "todas": np.mean(cortas + largas)})
+
+pd.DataFrame(filas).set_index("configuración").round(2)
+```
+
+**No, no se puede.** La mejor configuración para series cortas —hoja mínima de 10 y profundidad
+2— baja de 31,99 a 28,38, sigue muy por encima de los 22,38 de `snaive`, y para conseguirlo
+empeora las series largas de 9,99 a 12,91.
+
+Eso es información útil sobre dónde está el problema. **No es de hiperparámetros: es de datos.**
+Bajarle capacidad al boosting no lo convierte en un buen modelo para cien filas; lo convierte en un
+modelo mediocre para todo. El @sec-ensambles y el @sec-seleccion-escala atacan el problema por el
+otro lado, que es el que funciona: en vez de achicar el modelo, agrandar los datos juntando series.
+
+## Pruébalo {#sec-probalo-19}
+
+La celda que sigue corre cuatro de estos modelos en tu navegador. Arranca con la única de las
+cuatro series donde el techo del @sec-techo se activa, y avisa cuando no se activa. Cambia `cual`
+y mira dos cosas: cuál gana en cada serie, y qué le pasa a la columna del máximo pronosticado.
+
+```{pyodide}
+#| caption: Modelos sobre la tabla supervisada — cambia `cual` y `p`
+#| autorun: true
+import numpy as np
+import pandas as pd
+from sklearn.ensemble import ExtraTreesRegressor, RandomForestRegressor
+from sklearn.linear_model import Ridge
+from sklearn.neighbors import KNeighborsRegressor
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+
+datos = pd.read_csv("datos/cap04_estacionales.csv", parse_dates=["ds"])
+
+# "estacionalidad débil" es la única de las cuatro donde el futuro supera el
+# máximo del pasado, o sea la única donde el techo se activa. Prueba las otras
+# tres para ver la diferencia.
+cual = "estacionalidad débil"
+p = 12                        # rezagos
+
+
+def smape(real, pron):
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    return 200 * np.mean(np.abs(real - pron) / (np.abs(real) + np.abs(pron)))
+
+
+g = datos[datos["etiqueta"] == cual].sort_values("ds")
+y = g["y"].to_numpy()
+h = int((g["split"] == "prueba").sum())
+y_tr, y_te = y[:-h], y[-h:]
+
+X = np.array([y_tr[i - p:i] for i in range(p, len(y_tr))])
+objetivo = np.array([y_tr[i] for i in range(p, len(y_tr))])
+print(f"{cual}: {len(y_tr)} de entrenamiento, {h} de prueba, "
+      f"tabla de {len(X)}×{p}")
+
+
+def recursivo(modelo, serie, h):
+    historia, salida = list(serie), []
+    for _ in range(h):
+        salida.append(float(modelo.predict([historia[-p:]])[0]))
+        historia.append(salida[-1])
+    return np.array(salida)
+
+
+MODELOS = {
+    "Ridge": make_pipeline(StandardScaler(), Ridge(alpha=1.0)),
+    "kNN k=3": make_pipeline(StandardScaler(), KNeighborsRegressor(3)),
+    "bosque": RandomForestRegressor(n_estimators=60, random_state=0),
+    "extra trees": ExtraTreesRegressor(n_estimators=60, random_state=0),
+}
+
+filas = []
+for nombre, modelo in MODELOS.items():
+    pron = recursivo(modelo.fit(X, objetivo), y_tr, h)
+    filas.append({
+        "modelo": nombre,
+        "sMAPE": smape(y_te, pron),
+        "máx. pronosticado": pron.max(),
+    })
+
+tabla = pd.DataFrame(filas).set_index("modelo").round(2)
+print(tabla)
+print(f"\nmáximo del entrenamiento : {y_tr.max():.1f}")
+print(f"máximo real de la prueba : {y_te.max():.1f}")
+
+if y_te.max() > y_tr.max():
+    margen = 100 * (y_te.max() / y_tr.max() - 1)
+    print(f"\nEl techo ESTÁ activo: el futuro supera el máximo del pasado "
+          f"por {margen:.0f} %.")
+    print("Los modelos acotados se quedan pegados al máximo del entrenamiento.")
+    print("Ridge lo pasa, y con un margen del 217 % eso no le alcanza a nadie:")
+    print("los cuatro sMAPE son parecidos y todos malos. El techo explica una")
+    print("parte del error, no todo.")
+else:
+    print("\nEl techo NO está activo: el futuro no supera el máximo del pasado,")
+    print("así que la limitación de los modelos acotados no se nota acá.")
+```
+
+## Cómo queda la recomendación {#sec-recomendacion-modelos}
+
+| situación | qué usar | por qué |
+|---|---|---|
+| $n/h < 10$ | `snaive` o `naive`, o *extra trees* si hay que usar algo | ocho de nueve modelos pierden contra la referencia |
+| $n/h \geq 10$, sin tendencia sostenida | *extra trees* | 7,97 contra 11,42 de `snaive`, y cuesta 1,7 segundos |
+| tendencia sostenida | lineal regularizado | los modelos acotados tienen un techo que no baja con más datos |
+| muchas filas por serie | boosting, con `lightgbm` | es donde la literatura tabular lo respalda, y no es el caso de M4 |
+
+: Qué modelo usar según la situación, según lo medido en este capítulo. {#tbl-recomendacion-modelos}
+
+Y una observación sobre la sorpresa del capítulo. Que *extra trees* le gane al bosque aleatorio y
+al boosting en estas series no es un resultado que convenga generalizar: son 31 series y la
+diferencia con el bosque es de 0,76 puntos de sMAPE. Lo que sí conviene llevarse es el **mecanismo**,
+porque ese sí generaliza: con pocas filas, cualquier decisión que el modelo tome optimizando
+—el mejor corte, el mejor residuo a corregir— es una decisión de alta varianza, y renunciar a
+optimizarla es regularizar. El @sec-ensambles lleva esa idea hasta el final.
+
+## Ejercicios
+
+Las soluciones están en el @sec-soluciones-19.
+
+**1.** *Extra trees* gana en la media y en la mediana pero solo en una serie es el mejor. ¿Cómo se
+explica? Compáralo con el bosque aleatorio serie por serie y mira la distribución de las
+diferencias.
+
+**2.** Repite la @tbl-techo pero midiendo cuánto **subestima** cada modelo en las ocho series donde
+el techo se activa. ¿La subestimación es del tamaño de la distancia al máximo?
+
+**3.** Barre el número de vecinos $k$ de 1 a 20 en la @eq-knn. ¿Hay una U como la del
+@sec-cuantos-rezagos? ¿Dónde está el mínimo, y coincide con el $k$ que este capítulo usó?
+
+**4.** El boosting perdió con 120 iteraciones. Prueba `max_iter` de 5 a 500 en escala logarítmica
+sobre las series largas solamente. ¿Cuántas iteraciones aguantan?
+
+**5.** Con SVR, compara el núcleo radial contra el lineal sobre el nivel de la serie. ¿El lineal
+resuelve el problema del @sec-diferenciar sin necesidad de diferenciar?
+
+**6.** Toma las tres series del catálogo con tendencia más marcada y calcula, para cada modelo, el
+error en los primeros seis pasos y en los últimos seis. ¿La brecha entre lineales y acotados crece
+con el horizonte?
+
+## Referencias {.unnumbered}
+
+::: {#refs}
 :::

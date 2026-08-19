@@ -5435,3 +5435,406 @@ estructura reconocible. **Lasso sobre rezagos consecutivos no es un selector de 
 reductor de columnas con un empate resuelto al azar.** Si lo que se busca es identificar cuáles
 rezagos importan de verdad, el correlograma del @sec-cuales-rezagos lo hace mejor y más barato; y si
 lo que se busca es tener menos columnas, la @fig-curva-rezagos dice que alcanza con pedir doce.
+
+## Capítulo 19 · Modelos básicos {#sec-soluciones-19}
+
+```{python}
+#| echo: false
+from sklearn.ensemble import (ExtraTreesRegressor, HistGradientBoostingRegressor,
+                              RandomForestRegressor)
+from sklearn.neighbors import KNeighborsRegressor
+from sklearn.svm import SVR
+from sklearn.tree import DecisionTreeRegressor
+
+
+def vent19(y, p):
+    y = np.asarray(y, float)
+    return (np.array([y[i - p:i] for i in range(p, len(y))]),
+            np.array([y[i] for i in range(p, len(y))]))
+
+
+def rec19(modelo, y, p, h):
+    historia, salida = list(y), []
+    for _ in range(h):
+        salida.append(float(modelo.predict([historia[-p:]])[0]))
+        historia.append(salida[-1])
+    return np.array(salida)
+
+
+def naive19(y, h, m):
+    return np.repeat(y[-1], h)
+
+
+def snaive19(y, h, m):
+    if m <= 1:
+        return naive19(y, h, m)
+    return np.array([y[-m + (i % m)] for i in range(h)])
+
+
+LOS_NUEVE = {
+    "Ridge": lambda: make_pipeline(StandardScaler(), Ridge(alpha=1.0)),
+    "kNN, k = 3": lambda: make_pipeline(StandardScaler(), KNeighborsRegressor(3)),
+    "kNN, k = 10": lambda: make_pipeline(StandardScaler(), KNeighborsRegressor(10)),
+    "árbol, prof. 3": lambda: DecisionTreeRegressor(max_depth=3, random_state=0),
+    "árbol sin límite": lambda: DecisionTreeRegressor(random_state=0),
+    "bosque aleatorio": lambda: RandomForestRegressor(
+        n_estimators=60, random_state=0, n_jobs=1),
+    "extra trees": lambda: ExtraTreesRegressor(
+        n_estimators=60, random_state=0, n_jobs=1),
+    "boosting": lambda: HistGradientBoostingRegressor(max_iter=120, random_state=0),
+    "SVR rbf": lambda: make_pipeline(StandardScaler(), SVR(C=10.0)),
+}
+
+
+def ventana_de19(s):
+    return min(max(s.periodo_estacional, 4), 12)
+
+
+_f19 = []
+for _sid in catalogo()["serie"]:
+    _s = cargar(_sid)
+    _ytr, _yte = _s.entrenamiento.to_numpy(), _s.prueba.to_numpy()
+    _h, _p = _s.horizonte, ventana_de19(_s)
+    if len(_ytr) < _p + 20:
+        continue
+    _X, _o = vent19(_ytr, _p)
+    _r = {"serie": _sid, "n": len(_ytr), "h": _h, "p": _p,
+          "n / h": len(_ytr) / _h,
+          "naive": smape(_yte, naive19(_ytr, _h, _s.periodo_estacional)),
+          "snaive": smape(_yte, snaive19(_ytr, _h, _s.periodo_estacional)),
+          "máx entrenamiento": float(_ytr.max()),
+          "máx prueba": float(_yte.max())}
+    for _n, _mk in LOS_NUEVE.items():
+        _pr = rec19(_mk().fit(_X, _o), _ytr, _p, _h)
+        _r[_n] = smape(_yte, _pr)
+        _r[_n + " máx"] = float(_pr.max())
+    _f19.append(_r)
+
+C19 = pd.DataFrame(_f19)
+N19 = list(LOS_NUEVE)
+T19 = ["naive", "snaive"] + N19
+```
+
+### Ejercicio 1 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-19-1
+#| tbl-cap: "Extra trees contra el bosque aleatorio, serie por serie."
+C19 = C19.assign(diferencia=C19["extra trees"] - C19["bosque aleatorio"])
+
+pd.DataFrame([{
+    "series": len(C19),
+    "extra trees gana en": int((C19["diferencia"] < 0).sum()),
+    "gana en promedio": -C19.loc[C19["diferencia"] < 0, "diferencia"].mean(),
+    "pierde en promedio": C19.loc[C19["diferencia"] > 0, "diferencia"].mean(),
+    "suma de ganancias": -C19.loc[C19["diferencia"] < 0, "diferencia"].sum(),
+    "suma de pérdidas": C19.loc[C19["diferencia"] > 0, "diferencia"].sum(),
+}], index=["extra trees − bosque"]).round(2).T
+```
+
+```{python}
+#| label: fig-sol-19-1
+#| fig-cap: "Diferencia de sMAPE entre extra trees y el bosque aleatorio en cada serie. A la izquierda del cero gana extra trees."
+orden = C19.sort_values("diferencia")
+fig = go.Figure(go.Bar(
+    x=orden["diferencia"], y=orden["serie"], orientation="h",
+    marker_color=[COLORES["observado"] if v < 0 else COLORES["prueba"]
+                  for v in orden["diferencia"]],
+))
+fig.add_vline(x=0, line_width=1, line_color=COLORES["auxiliar"])
+fig.update_xaxes(title="extra trees − bosque aleatorio (sMAPE)")
+mostrar(fig, alto=560)
+```
+
+La contradicción aparente se resuelve mirando la **distribución** en vez del recuento.
+
+*Extra trees* gana en 17 de las 31 series, apenas más de la mitad. Pero **cuando gana, gana 3,11
+en promedio, y cuando pierde, pierde 2,09**: la suma de sus ganancias es 52,86 y la de sus pérdidas
+29,29. Una apuesta con esa asimetría gana en el promedio aunque acierte poco más de la mitad de las
+veces.
+
+Y ahí está la explicación de por qué es el mejor en una sola serie: **casi nunca es el
+especialista.** Queda entre los tres primeros en 10 series, con lo cual es sistemáticamente bueno
+sin ser nunca el óptimo. La @tbl-modelos reparte los primeros puestos entre once modelos —Ridge y
+`snaive` con 6 cada uno, árbol de profundidad 3 con 5— porque en cada serie hay un modelo que le
+calza perfecto.
+
+De ahí una lección sobre cómo leer una tabla comparativa, y vale para todo el libro: **la columna
+"gana en" mide especialización, no calidad.** Un modelo que gana en 6 de 31 y pierde catastróficamente
+en las otras 25 es peor que uno que nunca gana y siempre queda segundo. Para elegir un método por
+omisión —el caso de una cartera de miles de series— la media y la mediana son las columnas que
+importan; el recuento sirve para descubrir en qué series conviene mirar aparte.
+
+Los dos casos extremos ayudan a entender el mecanismo. En `M18514` *extra trees* gana por 17,32 y en
+`Y22425` pierde por 13,62; las dos son series cortas y difíciles, donde la diferencia entre elegir
+el mejor corte y elegirlo al azar es puro ruido y puede caer para cualquier lado.
+
+### Ejercicio 2 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-19-2
+#| tbl-cap: "En las series donde el futuro supera el máximo del entrenamiento: por cuánto lo supera, y cuánto le falta al máximo pronosticado de cada modelo."
+techo = C19[C19["máx prueba"] > C19["máx entrenamiento"]].copy()
+techo["supera el máximo por"] = 100 * (
+    techo["máx prueba"] / techo["máx entrenamiento"] - 1
+)
+for nombre in ("Ridge", "bosque aleatorio", "extra trees", "kNN, k = 3"):
+    techo[f"le falta: {nombre}"] = 100 * (
+        1 - techo[nombre + " máx"] / techo["máx prueba"]
+    )
+
+techo.set_index("serie")[
+    ["supera el máximo por"] + [f"le falta: {n}" for n in
+                                ("Ridge", "bosque aleatorio", "extra trees",
+                                 "kNN, k = 3")]
+].round(1)
+```
+
+```{python}
+#| echo: false
+print("correlación entre «supera el máximo por» y «le falta al bosque»: "
+      f"{techo['supera el máximo por'].corr(techo['le falta: bosque aleatorio']):.3f}")
+```
+
+**Sí: la subestimación es prácticamente igual a la distancia al máximo**, que es exactamente lo que
+predicen las ecuaciones @eq-knn y @eq-arbol.
+
+Se lee fila por fila. En `Q5932` la prueba supera el máximo del entrenamiento por 15,2 % y al bosque
+le falta 13,7 %. En `M39292`, 12,1 % contra 11,2 %. En `Q1915`, 4,5 % contra 4,7 %. En `H242`, 0,6 %
+contra 1,1 %. La correlación entre las dos columnas es **0,805**.
+
+El mecanismo es aritmético y no deja margen: el pronóstico de un modelo acotado se **satura** en el
+máximo que vio, así que le falta justo lo que el futuro se pasó de ese máximo. No es que el modelo
+se equivoque por poco o por mucho según la serie: se equivoca por la cantidad exacta que no puede
+representar.
+
+Dos filas se salen del patrón y las dos son informativas.
+
+`D2139` tiene un margen de solo 3,2 % y a **todos** los modelos les falta más del 43 %, incluido
+Ridge. Ahí el techo no es el problema: la serie es difícil por otro motivo y el pronóstico está lejos
+por todas partes.
+
+`M3007` tiene un margen de **217,5 %** —es el quiebre de nivel del @sec-soluciones-14— y a todos les
+falta un 68 %. Un modelo acotado no tiene ninguna chance, y Ridge tampoco, porque el quiebre no
+estaba anunciado en la pendiente.
+
+Y `H317` invierte los papeles: a Ridge le falta 12,8 % y a *extra trees* solo 2,8 %. Extrapolar no es
+gratis, y un modelo lineal puede extrapolar **en la dirección equivocada**.
+
+### Ejercicio 3 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-19-3
+#| tbl-cap: "Barrido del número de vecinos $k$ en la @eq-knn."
+filas = []
+for k in (1, 2, 3, 5, 7, 10, 15, 20):
+    errores = []
+    for _, r in C19.iterrows():
+        s = cargar(r["serie"])
+        y_tr, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+        p = int(r["p"])
+        X, objetivo = vent19(y_tr, p)
+        if len(X) <= k:
+            continue
+        modelo = make_pipeline(
+            StandardScaler(), KNeighborsRegressor(k)
+        ).fit(X, objetivo)
+        errores.append(smape(y_te, rec19(modelo, y_tr, p, s.horizonte)))
+    filas.append({"k": k, "series": len(errores),
+                  "sMAPE medio": np.mean(errores),
+                  "sMAPE mediano": np.median(errores)})
+
+pd.DataFrame(filas).set_index("k").round(2)
+```
+
+**Sí, hay una U, y el mínimo está en $k = 2$ —13,56— no en el $k = 3$ que usó el capítulo.**
+
+La curva es limpia en las dos columnas: 16,02 con un vecino, 13,56 con dos, y de ahí sube de manera
+monótona hasta 18,05 con veinte. El $k = 3$ del capítulo da 14,43, cerca del óptimo pero no en él.
+
+La forma es la del @sec-cuantos-rezagos y el mecanismo también, con los roles invertidos. Acá $k$ es
+un **regularizador**: $k = 1$ copia la respuesta del vecino más parecido, que es máxima capacidad y
+máxima varianza; $k$ grande promedia respuestas de filas cada vez menos parecidas, que es sesgo. El
+mínimo está donde el promedio suaviza el ruido sin traer vecinos irrelevantes.
+
+Que el óptimo esté en $k = 2$ dice algo sobre estas tablas: con doscientas filas y doce columnas, la
+segunda fila más parecida ya aporta información útil y la tercera empieza a ser un vecino lejano. En
+un espacio de doce dimensiones con doscientos puntos, **casi todo está lejos de casi todo**, y eso
+limita cuántos vecinos hay de verdad.
+
+### Ejercicio 4 {.unnumbered}
+
+```{python}
+#| label: fig-sol-19-4
+#| fig-cap: "sMAPE del boosting contra el número de iteraciones, solo en las series con $n/h \\geq 10$."
+largas = C19[C19["n / h"] >= 10]
+ITERACIONES = (5, 10, 25, 50, 120, 300, 500)
+
+medias, medianas = [], []
+for iteraciones in ITERACIONES:
+    errores = []
+    for _, r in largas.iterrows():
+        s = cargar(r["serie"])
+        y_tr, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+        p = int(r["p"])
+        X, objetivo = vent19(y_tr, p)
+        modelo = HistGradientBoostingRegressor(
+            max_iter=iteraciones, random_state=0
+        ).fit(X, objetivo)
+        errores.append(smape(y_te, rec19(modelo, y_tr, p, s.horizonte)))
+    medias.append(np.mean(errores))
+    medianas.append(np.median(errores))
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=ITERACIONES, y=medias, mode="lines+markers",
+                         name="media", line=dict(color=COLORES["prueba"], width=2)))
+fig.add_trace(go.Scatter(x=ITERACIONES, y=medianas, mode="lines+markers",
+                         name="mediana",
+                         line=dict(color=COLORES["observado"], width=2)))
+fig.update_xaxes(title="max_iter", type="log", tickvals=list(ITERACIONES),
+                 ticktext=[str(i) for i in ITERACIONES])
+mostrar(fig, alto=400, titulo_y="sMAPE de prueba")
+```
+
+```{python}
+#| label: tbl-sol-19-4
+#| tbl-cap: "Los mismos valores en tabla."
+pd.DataFrame({"max_iter": ITERACIONES, "sMAPE medio": medias,
+              "sMAPE mediano": medianas}).set_index("max_iter").round(2)
+```
+
+**Aguantan entre 50 y 300 iteraciones, con una meseta ancha y las dos ramas empinadas.**
+
+Con 5 iteraciones el error es 30,96: el modelo todavía no aprendió nada y es peor que `naive`. Con
+25 ya baja a 13,21, con 50 a **10,47** y con 120 a 9,99, que es el mínimo. Con 300 sigue en 10,27 y
+con 500 salta a 16,59.
+
+Las dos ramas son fenómenos distintos y conviene no confundirlos. La rama izquierda es **subajuste**:
+cada iteración del boosting corrige una parte del residuo, y con cinco árboles de profundidad
+limitada el modelo apenas capturó el nivel. La rama derecha es **sobreajuste** en el sentido exacto
+del @sec-sobreajuste: a partir de cierto punto, el residuo que queda por corregir es ruido, y
+corregirlo es memorizarlo.
+
+Lo que el ejercicio agrega al capítulo es que **el 120 del capítulo no era una mala elección**: está
+en el fondo de la meseta. El problema del boosting en la @tbl-modelos no era estar mal configurado,
+y esto lo confirma: en las series largas, bien configurado, da 9,99 y le gana a `snaive`. Su
+problema son las series cortas, y la @tbl-boosting-capacidad ya mostró que ahí no hay configuración
+que lo salve.
+
+### Ejercicio 5 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-19-5
+#| tbl-cap: "SVR con núcleo radial contra núcleo lineal, sobre el nivel de la serie y sin diferenciar."
+con_techo = set(C19[C19["máx prueba"] > C19["máx entrenamiento"]]["serie"])
+
+filas = []
+for etiqueta, construir in (
+    ("radial, C = 10", lambda: make_pipeline(StandardScaler(), SVR(C=10.0))),
+    ("lineal, C = 10", lambda: make_pipeline(StandardScaler(),
+                                            SVR(kernel="linear", C=10.0))),
+    ("lineal, C = 1000", lambda: make_pipeline(StandardScaler(),
+                                               SVR(kernel="linear", C=1000.0))),
+):
+    errores, rompe_techo = [], 0
+    for _, r in C19.iterrows():
+        s = cargar(r["serie"])
+        y_tr, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+        p = int(r["p"])
+        X, objetivo = vent19(y_tr, p)
+        pron = rec19(construir().fit(X, objetivo), y_tr, p, s.horizonte)
+        errores.append(smape(y_te, pron))
+        if r["serie"] in con_techo and pron.max() > y_tr.max() * 1.0001:
+            rompe_techo += 1
+    filas.append({"núcleo": etiqueta, "sMAPE medio": np.mean(errores),
+                  "sMAPE mediano": np.median(errores),
+                  f"supera el techo en (de {len(con_techo)})": rompe_techo})
+
+pd.DataFrame(filas).set_index("núcleo").round(2)
+```
+
+**Sí, y de manera contundente: el núcleo lineal resuelve el problema sin diferenciar nada.**
+
+El sMAPE medio baja de 36,71 con el núcleo radial a 23,78 con el lineal y a **16,06** con el lineal y
+$C = 1000$. Y la última columna es la que cierra el argumento: el núcleo radial supera el techo en
+**0 de 8** series y el lineal con $C = 1000$ lo supera en **6 de 8**.
+
+Eso confirma el diagnóstico del @sec-diferenciar y lo hace más preciso. El problema no era de la
+familia SVR ni del tamaño de la muestra: era del **núcleo**. Una función de base radial decae hacia
+cero al alejarse de los datos de entrenamiento, así que la predicción tiende a la constante del
+término independiente, que en la escala de una serie de nivel 1.000 es un número sin sentido. El
+núcleo lineal hace que SVR sea un modelo lineal con otra función de pérdida, y con eso recupera la
+capacidad de extrapolar.
+
+El papel de $C$ también es informativo: subirlo de 10 a 1.000 mejora 7,7 puntos. $C$ es el inverso
+de la regularización, así que un $C$ chico está aplastando los coeficientes hacia cero y con ellos
+la pendiente que hace falta para extrapolar. Es el mismo fenómeno del @sec-techo visto desde la
+regularización en vez de desde la forma del modelo.
+
+La moraleja general no es sobre SVR: **antes de concluir que un modelo no sirve para pronóstico,
+conviene revisar si lo que no sirve es una elección por omisión de la biblioteca.** `SVR()` usa
+núcleo radial por defecto, y ese defecto está pensado para clasificación en datos acotados, no para
+extrapolar series con tendencia.
+
+### Ejercicio 6 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-19-6
+#| tbl-cap: "Error en los primeros seis pasos y en los últimos seis, en las tres series del catálogo con tendencia más marcada."
+cat19 = catalogo().set_index("serie")
+candidatas = [i for i in C19["serie"]
+              if cat19.loc[i, "fenomeno"] in ("tendencia-limpia",
+                                              "tendencia-y-estacionalidad")]
+con_fuerza = sorted(
+    candidatas,
+    key=lambda i: -float(cat19.loc[i, "trend_strength"])
+    if pd.notna(cat19.loc[i, "trend_strength"]) else 0,
+)[:3]
+
+filas = []
+for identificador in con_fuerza:
+    s = cargar(identificador)
+    y_tr, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    h, p = s.horizonte, ventana_de19(s)
+    X, objetivo = vent19(y_tr, p)
+    for nombre in ("Ridge", "bosque aleatorio", "extra trees", "kNN, k = 3"):
+        pron = rec19(LOS_NUEVE[nombre]().fit(X, objetivo), y_tr, p, h)
+        error = 200 * np.abs(y_te - pron) / (np.abs(y_te) + np.abs(pron))
+        filas.append({
+            "serie": identificador, "modelo": nombre,
+            "primeros 6": error[:6].mean(),
+            "últimos 6": error[-6:].mean(),
+            "crecimiento": error[-6:].mean() - error[:6].mean(),
+        })
+
+brecha = pd.DataFrame(filas).set_index(["serie", "modelo"])
+brecha.round(2)
+```
+
+```{python}
+#| label: tbl-sol-19-6b
+#| tbl-cap: "Promedio del crecimiento del error, separando el modelo que extrapola de los que no."
+resumen = brecha.reset_index()
+resumen["familia"] = np.where(resumen["modelo"] == "Ridge",
+                              "extrapola (Ridge)", "acotado")
+resumen.groupby("familia")[["primeros 6", "últimos 6", "crecimiento"]].mean().round(2)
+```
+
+**Sí, la brecha crece con el horizonte, y es el resultado que uno esperaría de la @eq-arbol.**
+
+En los primeros seis pasos los dos grupos son **indistinguibles**: 19,70 los acotados y 19,74
+Ridge. En los últimos seis, los acotados se van a 26,30 y Ridge se queda en 22,27, así que el error
+crece 6,60 en un grupo y 2,53 en el otro: **dos veces y media más rápido**. El motivo es directo: en una serie con tendencia, cada paso del horizonte
+aleja más al valor real del máximo que el modelo vio, y el @sec-soluciones-19 —ejercicio 2— midió
+que lo que le falta al modelo acotado es exactamente esa distancia. Cuanto más largo el horizonte,
+más grande la distancia.
+
+La consecuencia práctica va más allá de la elección de modelo. **El horizonte al que un modelo
+acotado sirve es limitado por la tendencia de la serie**, y ese límite se puede calcular antes de
+pronosticar: si la serie sube un 1 % por período y está en su máximo, un modelo acotado va a
+subestimar un 1 % por paso, acumulativo. Con $h = 18$ eso son 18 puntos de sMAPE que no dependen de
+nada que el modelo pueda aprender.
+
+Vale cerrar con la reserva de siempre: son tres series y cuatro modelos, así que el número exacto
+del crecimiento no es para citar. El signo y el mecanismo sí, porque salen de la forma de las
+ecuaciones y no de la muestra.
