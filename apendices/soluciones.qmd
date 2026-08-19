@@ -5838,3 +5838,424 @@ nada que el modelo pueda aprender.
 Vale cerrar con la reserva de siempre: son tres series y cuatro modelos, así que el número exacto
 del crecimiento no es para citar. El signo y el mecanismo sí, porque salen de la forma de las
 ecuaciones y no de la muestra.
+
+## Capítulo 20 · Ensambles {#sec-soluciones-20}
+
+```{python}
+#| echo: false
+import itertools
+
+from statsmodels.tsa.holtwinters import SimpleExpSmoothing
+
+
+def _naive20(y, h, m):
+    return np.repeat(y[-1], h)
+
+
+def _snaive20(y, h, m):
+    if m <= 1:
+        return _naive20(y, h, m)
+    return np.array([y[-m + (i % m)] for i in range(h)])
+
+
+def _ses20(y, h, m):
+    return np.asarray(
+        SimpleExpSmoothing(y, initialization_method="estimated").fit().forecast(h))
+
+
+def _holt20(y, h, m):
+    return np.asarray(
+        ExponentialSmoothing(y, trend="add", initialization_method="estimated")
+        .fit().forecast(h))
+
+
+def _hw20(y, h, m):
+    if m <= 1 or len(y) < 2 * m + 4:
+        return _snaive20(y, h, m)
+    return np.asarray(
+        ExponentialSmoothing(y, trend="add", seasonal="add", seasonal_periods=m,
+                             initialization_method="estimated").fit().forecast(h))
+
+
+def _sup20(construir):
+    def metodo(y, h, m):
+        p = min(max(m, 4), 12)
+        if len(y) < p + 8:
+            return _naive20(y, h, m)
+        X, objetivo = vent19(y, p)
+        return rec19(construir().fit(X, objetivo), y, p, h)
+    return metodo
+
+
+LOS_NUEVE20 = {
+    "naive": _naive20, "snaive": _snaive20, "SES": _ses20, "Holt": _holt20,
+    "Holt-Winters": _hw20,
+    "Ridge": _sup20(lambda: make_pipeline(StandardScaler(), Ridge(alpha=1.0))),
+    "kNN": _sup20(lambda: make_pipeline(StandardScaler(), KNeighborsRegressor(3))),
+    "bosque": _sup20(lambda: RandomForestRegressor(n_estimators=60, random_state=0,
+                                                   n_jobs=1)),
+    "extra trees": _sup20(lambda: ExtraTreesRegressor(n_estimators=60,
+                                                      random_state=0, n_jobs=1)),
+}
+N20 = list(LOS_NUEVE20)
+EST20 = ["naive", "snaive", "SES", "Holt", "Holt-Winters"]
+APR20 = ["Ridge", "kNN", "bosque", "extra trees"]
+
+DATOS20, ERR20 = {}, {}
+for _sid in catalogo()["serie"]:
+    _s = cargar(_sid)
+    _ytr, _yte = _s.entrenamiento.to_numpy(), _s.prueba.to_numpy()
+    _h, _m = _s.horizonte, _s.periodo_estacional
+    if len(_ytr) < 2 * _h + 20:
+        continue
+    _yaj, _yval = _ytr[:-_h], _ytr[-_h:]
+    _P, _ev = {}, {}
+    for _n, _f in LOS_NUEVE20.items():
+        try:
+            _P[_n] = np.asarray(_f(_ytr, _h, _m), float)
+        except Exception:
+            _P[_n] = np.repeat(_ytr[-1], _h)
+        try:
+            _ev[_n] = smape(_yval, _f(_yaj, _h, _m))
+        except Exception:
+            _ev[_n] = np.inf
+    DATOS20[_sid] = (_yte, _P, _ev)
+    _escala = np.abs(_yte).mean()
+    ERR20[_sid] = pd.DataFrame({_n: (_yte - _P[_n]) / _escala for _n in N20})
+
+CORR20 = pd.concat(ERR20.values()).corr()
+
+
+def evaluar20(subconjunto, agregador=np.mean):
+    errores = [smape(yte, agregador(np.array([P[n] for n in subconjunto]), axis=0))
+               for yte, P, _ in DATOS20.values()]
+    return np.mean(errores), np.median(errores)
+```
+
+### Ejercicio 1 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-20-1
+#| tbl-cap: "La @tbl-combinaciones sin Holt entre los miembros."
+SIN_HOLT = [n for n in N20 if n != "Holt"]
+
+filas = []
+for etiqueta, sub, agregador in (
+    ("promedio de los 9", N20, np.mean),
+    ("promedio de los 8, sin Holt", SIN_HOLT, np.mean),
+    ("mediana de los 9", N20, np.median),
+    ("mediana de los 8, sin Holt", SIN_HOLT, np.median),
+    ("promedio de los 5 estadísticos", EST20, np.mean),
+    ("promedio de los 4 estadísticos sin Holt",
+     [n for n in EST20 if n != "Holt"], np.mean),
+):
+    medio, mediano = evaluar20(sub, agregador)
+    filas.append({"combinación": etiqueta, "sMAPE medio": medio,
+                  "sMAPE mediano": mediano})
+
+for k in (2, 3):
+    errores = [smape(yte, np.array([P[n] for n in
+                                    sorted(SIN_HOLT, key=lambda x: ev[x])[:k]]
+                                   ).mean(axis=0))
+               for yte, P, ev in DATOS20.values()]
+    filas.append({"combinación": f"promedio de los {k} mejores, sin Holt",
+                  "sMAPE medio": np.mean(errores),
+                  "sMAPE mediano": np.median(errores)})
+
+errores = [smape(yte, P[min(SIN_HOLT, key=lambda x: ev[x])])
+           for yte, P, ev in DATOS20.values()]
+filas.append({"combinación": "elegir uno por validación, sin Holt",
+              "sMAPE medio": np.mean(errores),
+              "sMAPE mediano": np.median(errores)})
+
+pd.DataFrame(filas).set_index("combinación").sort_values("sMAPE medio").round(2)
+```
+
+Sacar a Holt **mejora todo y no cambia el orden.**
+
+El promedio simple sube en el ranking de manera notable: de 18,53 con nueve miembros a **15,03 con
+ocho**. Un solo miembro representaba 3,5 puntos de sMAPE, con un peso de un noveno. En el promedio
+de los estadísticos el efecto es más brutal todavía: de 26,04 a 18,94, porque ahí Holt pesaba un
+quinto.
+
+Pero la respuesta a la segunda pregunta es **no**: el promedio simple sigue sin ganarle a elegir
+uno. Elegir uno por validación mejora de 12,61 a **12,24** al sacar a Holt del menú, y el promedio
+de los ocho queda en 15,03. La brecha se achicó de 5,9 puntos a 2,8 y no se cerró.
+
+Y aparece un detalle que refuerza la lectura del capítulo: **la mediana de los ocho, 12,63, es casi
+igual a la mediana de los nueve, 13,18.** La mediana ya estaba protegiendo del miembro
+catastrófico, así que sacarlo le aporta muy poco. Es la diferencia entre arreglar el ensamble y
+usar un agregador robusto: **el segundo funciona incluso cuando nadie revisó la lista de
+miembros.**
+
+### Ejercicio 2 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-20-2
+#| tbl-cap: "Reducción de la desviación del error al promediar, medida contra lo que predice la @eq-varianza-combinacion."
+def correlacion_media20(sub):
+    bloque = CORR20.loc[sub, sub].to_numpy()
+    k = len(sub)
+    return (bloque.sum() - k) / (k * k - k)
+
+
+filas = []
+for etiqueta, sub in (("los 4 de aprendizaje", APR20),
+                      ("los 9", N20),
+                      ("los 5 estadísticos", EST20)):
+    sd_miembros, sd_promedio = [], []
+    for yte, P, _ in DATOS20.values():
+        escala = np.abs(yte).mean()
+        E = np.array([(yte - P[n]) / escala for n in sub])
+        sd_miembros.append(np.mean([np.std(e) for e in E]))
+        sd_promedio.append(np.std(E.mean(axis=0)))
+    rho = correlacion_media20(sub)
+    filas.append({
+        "subconjunto": etiqueta, "K": len(sub), "ρ": rho,
+        "razón predicha": np.sqrt(rho + (1 - rho) / len(sub)),
+        "razón medida": np.mean(sd_promedio) / np.mean(sd_miembros),
+    })
+
+pd.DataFrame(filas).set_index("subconjunto").round(3)
+```
+
+**La @eq-varianza-combinacion acierta donde su supuesto se cumple y falla donde no.**
+
+En los cuatro modelos de aprendizaje automático la predicción es 0,898 y la medición 0,879: un
+error de dos centésimas. Y tiene sentido, porque ahí el supuesto de la ecuación —que todos los
+miembros tengan la misma varianza de error— es aproximadamente cierto: los cuatro sMAPE de la
+@tbl-miembros van de 12,62 a 14,88.
+
+En los cinco estadísticos la predicción es 0,740 y la medición 0,882. La ecuación promete una
+reducción del 26 % y la realidad da 12 %. La razón es la misma de todo el capítulo: con Holt
+adentro las varianzas son muy distintas, y una varianza grande en un miembro no se cancela por
+promediar, se transmite.
+
+De ahí una manera práctica de usar la @eq-varianza-combinacion que vale más que su valor numérico:
+**si la reducción medida es mucho peor que la predicha, es que los miembros no son comparables.** Es
+un diagnóstico de un renglón que dice si hay que revisar la lista antes de seguir ajustando pesos.
+
+### Ejercicio 3 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-20-3
+#| tbl-cap: "Tríos elegidos por diversidad contra tríos elegidos por calidad. La búsqueda recorre las 84 combinaciones posibles."
+todos_los_trios = []
+for trio in itertools.combinations(N20, 3):
+    sub = list(trio)
+    rho = correlacion_media20(sub)
+    medio, _ = evaluar20(sub)
+    todos_los_trios.append({"trío": " + ".join(sub), "ρ": rho,
+                            "sMAPE medio": medio})
+
+trios = pd.DataFrame(todos_los_trios)
+mas_diverso = trios.loc[trios["ρ"].idxmin()]
+mejor = trios.loc[trios["sMAPE medio"].idxmin()]
+peor = trios.loc[trios["sMAPE medio"].idxmax()]
+
+errores = [smape(yte, np.array([P[n] for n in
+                                sorted(N20, key=lambda x: ev[x])[:3]]).mean(axis=0))
+           for yte, P, ev in DATOS20.values()]
+
+pd.DataFrame([
+    {"criterio": "el más diverso (ρ mínima)", "trío": mas_diverso["trío"],
+     "ρ": mas_diverso["ρ"], "sMAPE medio": mas_diverso["sMAPE medio"]},
+    {"criterio": "los 3 mejores en validación", "trío": "según cada serie",
+     "ρ": np.nan, "sMAPE medio": np.mean(errores)},
+    {"criterio": "el mejor posible, con el futuro a la vista", "trío": mejor["trío"],
+     "ρ": mejor["ρ"], "sMAPE medio": mejor["sMAPE medio"]},
+    {"criterio": "el peor posible", "trío": peor["trío"], "ρ": peor["ρ"],
+     "sMAPE medio": peor["sMAPE medio"]},
+]).set_index("criterio").round(3)
+```
+
+**No le gana, y pierde por mucho: 17,73 contra 12,75.**
+
+El trío de menor correlación es `naive + Holt-Winters + kNN`, con $\rho = 0{,}191$: la diversidad
+más alta que se puede armar con estos nueve métodos. Y da un sMAPE peor que ocho de los nueve
+miembros por separado, porque incluye a `naive`, que da 21,83.
+
+El remate está en la tercera fila. El mejor trío posible —buscado exhaustivamente con el futuro a la
+vista, así que es un techo inalcanzable— es `Ridge + bosque + extra trees`, con $\rho = 0{,}86$: el
+trío **menos** diverso de todos los que se pueden formar con miembros buenos.
+
+La conclusión invierte la intuición que la @eq-varianza-combinacion sugiere si se la lee sola:
+**maximizar la diversidad es una mala estrategia de selección.** La ecuación dice que a igual
+calidad conviene la diversidad, y ese "a igual calidad" no es una cláusula menor: es la condición
+principal. Entre un miembro diverso y malo y un miembro parecido y bueno, gana el bueno.
+
+Vale además probar la versión matizada, que es la que uno esperaría que funcione: buscar el trío más
+diverso **entre la mitad mejor** de los métodos. Da `snaive + Holt-Winters + kNN` con 16,46: mejor
+que 17,73 y todavía muy lejos de 12,75. **Filtrar por calidad y después maximizar diversidad
+tampoco alcanza cuando hay solo nueve candidatos y los buenos son todos parecidos.**
+
+### Ejercicio 4 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-20-4
+#| tbl-cap: "Modelo global entrenado solo con series del mismo fenómeno, contra un modelo por serie."
+cat20 = catalogo().set_index("serie")
+P20 = 12
+
+
+def global_contra_local(identificadores):
+    X, objetivo = [], []
+    for identificador in identificadores:
+        y = cargar(identificador).entrenamiento.to_numpy().astype(float)
+        for i in range(P20, len(y)):
+            X.append(y[i - P20:i])
+            objetivo.append(y[i])
+    X, objetivo = np.array(X), np.array(objetivo)
+    global_ = ExtraTreesRegressor(n_estimators=100, random_state=0,
+                                  n_jobs=1).fit(X, objetivo)
+    e_global, e_local = [], []
+    for identificador in identificadores:
+        s = cargar(identificador)
+        y_tr = s.entrenamiento.to_numpy().astype(float)
+        y_te, h = s.prueba.to_numpy(), s.horizonte
+        historia, salida = list(y_tr), []
+        for _ in range(h):
+            salida.append(float(global_.predict([historia[-P20:]])[0]))
+            historia.append(salida[-1])
+        e_global.append(smape(y_te, np.array(salida)))
+        X_l, o_l = vent19(y_tr, P20)
+        local = ExtraTreesRegressor(n_estimators=100, random_state=0,
+                                    n_jobs=1).fit(X_l, o_l)
+        e_local.append(smape(y_te, rec19(local, y_tr, P20, h)))
+    return len(X), np.mean(e_global), np.mean(e_local)
+
+
+filas = []
+for fenomeno in ("cobertura-de-dificultad",):
+    ids = [i for i in cat20.index
+           if cat20.loc[i, "fenomeno"] == fenomeno
+           and cargar(i).periodo_estacional == 12
+           and len(cargar(i).entrenamiento) >= 40]
+    n_filas, g, l = global_contra_local(ids)
+    filas.append({"grupo": f"{fenomeno} ({len(ids)} series)",
+                  "filas apiladas": n_filas, "global": g, "un modelo por serie": l,
+                  "gana": "global" if g < l else "local"})
+
+ids = [i for i in cat20.index
+       if cargar(i).periodo_estacional == 12
+       and len(cargar(i).entrenamiento) >= 40]
+n_filas, g, l = global_contra_local(ids)
+filas.append({"grupo": f"todas las mensuales ({len(ids)} series)",
+              "filas apiladas": n_filas, "global": g, "un modelo por serie": l,
+              "gana": "global" if g < l else "local"})
+
+pd.DataFrame(filas).set_index("grupo").round(2)
+```
+
+**Sí, mejora, y el signo se da vuelta.** En el único grupo del catálogo que tiene más de una serie
+mensual del mismo fenómeno, el modelo global da **10,06 contra 10,71** del modelo por serie: gana.
+Con todas las mensuales juntas pierde 19,02 contra 15,90.
+
+El resultado apunta en la dirección que la hipótesis predice —**el enfoque global funciona cuando
+las series comparten estructura**— y hay que decir con la misma claridad que es un resultado de dos
+series y 340 filas. No sostiene nada por sí solo.
+
+Lo que sí sostiene es un diagnóstico sobre el diseño del experimento del @sec-modelo-global. El
+modelo global no perdió ahí por ser global: perdió porque se lo entrenó con once series elegidas
+**a propósito** para no parecerse. Es una condición del catálogo de este libro, y explica por qué el
+@sec-caso-m4 tiene que ir a buscar 4.773 series a otra parte.
+
+Y una advertencia sobre por qué el ejercicio no puede probar más: para agrupar por fenómeno hacen
+falta muchas series **de cada** fenómeno. El catálogo tiene una o dos, porque su objetivo es cubrir
+el espectro con 34 series. Es el mismo conjunto de datos, usado para un propósito para el que no fue
+armado.
+
+### Ejercicio 5 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-20-5
+#| tbl-cap: "Pesos que cambian con el paso del horizonte, combinando naive con extra trees."
+def combinar_variando(peso_naive):
+    errores = []
+    for yte, P, _ in DATOS20.values():
+        h = len(yte)
+        pron = np.array([
+            peso_naive(k, h) * P["naive"][k]
+            + (1 - peso_naive(k, h)) * P["extra trees"][k]
+            for k in range(h)
+        ])
+        errores.append(smape(yte, pron))
+    return np.mean(errores), np.median(errores)
+
+
+filas = []
+for etiqueta, peso in (
+    ("fijo: mitad y mitad", lambda k, h: 0.5),
+    ("el naive baja de 0,8 a 0,2", lambda k, h: 0.8 - 0.6 * k / max(h - 1, 1)),
+    ("el naive sube de 0,2 a 0,8", lambda k, h: 0.2 + 0.6 * k / max(h - 1, 1)),
+    ("solo naive", lambda k, h: 1.0),
+    ("solo extra trees", lambda k, h: 0.0),
+):
+    medio, mediano = combinar_variando(peso)
+    filas.append({"pesos": etiqueta, "sMAPE medio": medio,
+                  "sMAPE mediano": mediano})
+
+pd.DataFrame(filas).set_index("pesos").round(2)
+```
+
+**No ayuda, y el resultado es más informativo que un simple «no».**
+
+Las tres variantes de peso dan prácticamente lo mismo: 15,47 con pesos fijos, 15,71 bajando el naive
+y 15,45 subiéndolo. Un rango de 26 centésimas entre esquemas de ponderación opuestos.
+
+Y las dos últimas filas explican por qué. `extra trees` solo da **12,62** y cualquier combinación
+que incluya a `naive` con peso apreciable queda entre 15,4 y 15,7. **El daño no lo hace el esquema
+de pesos: lo hace el miembro.** Mover el peso de un miembro malo de 0,2 a 0,8 y de 0,8 a 0,2 no
+cambia el resultado porque el promedio de los dos extremos es el mismo, y ninguno de los dos
+extremos es cero.
+
+La intuición detrás del ejercicio —el naive debería servir en el horizonte corto y los modelos con
+estacionalidad en el largo— no es descabellada, y la @fig-por-paso mostró que
+el error de los métodos crece de manera distinta con el paso. Lo que falla es la magnitud: la
+diferencia entre `naive` y `extra trees` es de 9 puntos de sMAPE en promedio, y la variación con el
+horizonte es de menos de 1. **Ponderar por horizonte es afinar un detalle mientras el problema
+grande sigue en la lista de miembros.**
+
+### Ejercicio 6 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-20-6
+#| tbl-cap: "Cuántos miembros harían falta para reducir a la mitad la desviación del error, según la @eq-varianza-combinacion."
+filas = []
+for etiqueta, sub in (("los 5 estadísticos", EST20), ("los 9", N20),
+                      ("los 4 de aprendizaje", APR20)):
+    rho = correlacion_media20(sub)
+    piso = np.sqrt(rho)
+    # rho + (1-rho)/K = 0.25  =>  K = (1-rho)/(0.25-rho), solo si rho < 0.25
+    if rho < 0.25:
+        necesarios = (1 - rho) / (0.25 - rho)
+    else:
+        necesarios = np.inf
+    filas.append({"subconjunto": etiqueta, "ρ": rho,
+                  "piso de la reducción (√ρ)": piso,
+                  "K para reducir a la mitad": necesarios})
+
+pd.DataFrame(filas).set_index("subconjunto").round(3)
+```
+
+**Ninguno de los dos números es alcanzable: los dos son infinito.**
+
+La @eq-varianza-combinacion dice que la varianza del promedio tiende a $\rho\sigma^2$ cuando
+$K \to \infty$, así que la desviación no puede bajar de $\sqrt{\rho}$ veces la original **por
+muchos miembros que se agreguen**. Reducirla a la mitad exige $\sqrt{\rho} < 0{,}5$, o sea
+$\rho < 0{,}25$.
+
+Los tres subconjuntos están por encima de ese umbral. Los cuatro de aprendizaje tienen
+$\rho = 0{,}741$, con lo cual su piso es **0,861**: aun promediando mil modelos de aprendizaje
+automático sobre la misma tabla de rezagos, la desviación del error bajaría un 14 % y no más. Los
+nueve tienen piso 0,701 y los cinco estadísticos, los más diversos, 0,630.
+
+Esto pone un número a lo que el recuadro del @sec-diversidad decía en palabras, y es el resultado
+más útil del capítulo para decidir dónde poner el esfuerzo:
+
+> **Agregar miembros parecidos tiene un techo bajo y se alcanza rápido. La única manera de bajar el
+> piso es conseguir miembros que fallen en situaciones distintas.**
+
+Y eso no se logra probando un modelo más de la misma familia. Se logra cambiando de familia, de
+representación de los datos o de estrategia multipaso —las tres cosas que la Parte II fue
+midiendo—, que es exactamente lo que hicieron los dos primeros de M4.
