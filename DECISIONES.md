@@ -230,6 +230,42 @@ migración del sitio.
 
 ---
 
+## Aprendizaje profundo: sin PyTorch, con resultados precalculados
+
+El capítulo 22 trata redes neuronales y **no entrena ninguna red profunda al
+compilar**. La decisión tiene tres partes.
+
+**No se agrega PyTorch a `requisitos.txt`.** Pesa cientos de megabytes con sus
+dependencias, alargaría la instalación de CI de un minuto a varios, y sobre todo
+**no existe para Pyodide**, así que ninguna celda editable ni ningún widget podría
+usarlo. Un capítulo que entrena en la compilación y no en el navegador rompe la
+promesa de interactividad del resto del libro.
+
+**Lo que sí se entrena es un perceptrón multicapa con `MLPRegressor` de
+`scikit-learn`.** Es una red neuronal completa —capas densas, activaciones,
+descenso de gradiente con Adam— y corre tanto al compilar como en el navegador.
+Alcanza para mostrar los dos fenómenos que el capítulo necesita: que las redes
+necesitan más datos que los árboles, y la varianza por semilla.
+
+**Lo que no se puede entrenar se cita.** Las tablas de la tesis —rangos de
+Friedman de 27 modelos sobre 4.773 series, OWA, el OWA horario contra el global, y
+el experimento de 90 series × 5 semillas × 5 redes— viajan en el repositorio como
+parquet chicos en `libro/datos/tesis/`, se leen con `resultados_tesis()` y se
+regeneran con `make tesis` cuando el material de la tesis está a mano. Son
+resúmenes agregados, no las 4.773 series.
+
+El capítulo declara la limitación en un recuadro al principio, en vez de mostrar
+una LSTM y pedirle al lector que confíe en el número.
+
+**Validación cruzada del enfoque.** El experimento de semillas hecho con el
+perceptrón de `scikit-learn` da que el ruido de inicialización supera la brecha
+entre arquitecturas en el 68 % de las series: el mismo número que la tesis obtuvo
+con cinco arquitecturas distintas, otro conjunto de series y otra biblioteca. Dos
+implementaciones sin nada en común coincidiendo es el mejor respaldo que el
+capítulo podía tener sin entrenar una LSTM.
+
+---
+
 ## Boosting: `scikit-learn` en vez de `xgboost` o `lightgbm`
 
 El capítulo 19 necesita gradient boosting, y en la práctica eso se hace con

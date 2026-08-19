@@ -6696,3 +6696,385 @@ combinar. Las tres apuntan en la misma dirección —robustez— y el ejercicio 
 Es una buena muestra de por qué reproducir un método publicado es más difícil de lo que parece:
 **lo que hace que funcione suele estar en los detalles que en el resumen del artículo parecen
 accesorios.**
+
+## Capítulo 22 · Aprendizaje profundo {#sec-soluciones-22}
+
+```{python}
+#| echo: false
+import itertools
+
+from sklearn.compose import TransformedTargetRegressor
+from sklearn.neural_network import MLPRegressor
+
+from libro.datos import resultados_tesis
+
+
+def perceptron22(capas, semilla, escalar_objetivo=True, iteraciones=1500, **kw):
+    red = make_pipeline(
+        StandardScaler(),
+        MLPRegressor(hidden_layer_sizes=capas, max_iter=iteraciones,
+                     random_state=semilla, learning_rate_init=0.01, **kw),
+    )
+    if not escalar_objetivo:
+        return red
+    return TransformedTargetRegressor(regressor=red, transformer=StandardScaler())
+
+
+ARQ22 = {"perceptrón (8,)": (8,), "perceptrón (32,)": (32,),
+         "perceptrón (64, 32)": (64, 32)}
+
+APTAS22 = []
+for _sid in catalogo()["serie"]:
+    _s = cargar(_sid)
+    if len(_s.entrenamiento) >= ventana_de19(_s) + 20:
+        APTAS22.append(_sid)
+
+_reg22 = []
+for _sid in APTAS22:
+    _s = cargar(_sid)
+    _ytr = _s.entrenamiento.to_numpy().astype(float)
+    _yte = _s.prueba.to_numpy().astype(float)
+    _h, _p = _s.horizonte, ventana_de19(_s)
+    _X, _o = vent19(_ytr, _p)
+    for _nom, _capas in ARQ22.items():
+        _prons = [rec19(perceptron22(_capas, _sem).fit(_X, _o), _ytr, _p, _h)
+                  for _sem in range(5)]
+        _errores = [smape(_yte, _pr) for _pr in _prons]
+        _reg22.append({
+            "serie": _sid, "arquitectura": _nom, "n / h": len(_ytr) / _h,
+            "mejor corrida": min(_errores),
+            "peor corrida": max(_errores),
+            "media de las corridas": float(np.mean(_errores)),
+            "desvío entre semillas": float(np.std(_errores)),
+            "ensamble de 5 semillas": smape(_yte, np.mean(_prons, axis=0)),
+        })
+
+SEM22 = pd.DataFrame(_reg22)
+```
+
+### Ejercicio 1 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-22-1
+#| tbl-cap: "Qué pronostica el perceptrón sobre M35927 con y sin escalar el objetivo, contra el nivel real de la serie."
+s = cargar("M35927")
+y_tr = s.entrenamiento.to_numpy().astype(float)
+y_te = s.prueba.to_numpy().astype(float)
+h, p = s.horizonte, 12
+X, objetivo = vent19(y_tr, p)
+
+sin_escalar = rec19(perceptron22((32,), 0, escalar_objetivo=False).fit(X, objetivo),
+                    y_tr, p, h)
+con_escalar = rec19(perceptron22((32,), 0).fit(X, objetivo), y_tr, p, h)
+
+pd.DataFrame([
+    {"qué": "media del entrenamiento", "valor": y_tr.mean(), "sMAPE": np.nan},
+    {"qué": "media real de la prueba", "valor": y_te.mean(), "sMAPE": np.nan},
+    {"qué": "perceptrón sin escalar el objetivo", "valor": sin_escalar.mean(),
+     "sMAPE": smape(y_te, sin_escalar)},
+    {"qué": "perceptrón con el objetivo escalado", "valor": con_escalar.mean(),
+     "sMAPE": smape(y_te, con_escalar)},
+]).set_index("qué").round(2)
+```
+
+**En esta serie no se rompe**, y eso es más informativo que si se hubiera roto.
+
+La media pronosticada sin escalar es 990,6 contra un nivel real de 996: la salida está donde
+corresponde y el sMAPE es de 1,0. `M35927` es una serie de nivel cercano a 1.000, y el descenso de
+gradiente con 1.500 iteraciones alcanza para que los pesos de la capa de salida crezcan hasta la
+escala necesaria.
+
+Entonces, ¿de dónde salían los 57,60 de la @tbl-perceptron? De las **otras** series. El sMAPE medio
+promedia sobre las 31, y ahí hay series de nivel 20.000 y series de nivel 10:
+
+```{python}
+#| label: tbl-sol-22-1b
+#| tbl-cap: "Las cinco series donde escalar el objetivo cambia más el resultado, con el nivel de cada una."
+filas = []
+for identificador in APTAS22:
+    s_i = cargar(identificador)
+    y_tr_i = s_i.entrenamiento.to_numpy().astype(float)
+    y_te_i = s_i.prueba.to_numpy().astype(float)
+    h_i, p_i = s_i.horizonte, ventana_de19(s_i)
+    X_i, o_i = vent19(y_tr_i, p_i)
+    sin_i = smape(y_te_i, rec19(
+        perceptron22((32,), 0, escalar_objetivo=False).fit(X_i, o_i),
+        y_tr_i, p_i, h_i))
+    con_i = smape(y_te_i, rec19(
+        perceptron22((32,), 0).fit(X_i, o_i), y_tr_i, p_i, h_i))
+    filas.append({"serie": identificador, "nivel medio": y_tr_i.mean(),
+                  "sin escalar": sin_i, "escalado": con_i,
+                  "cuánto cuesta no escalar": sin_i - con_i})
+
+ESCALA = pd.DataFrame(filas)
+ESCALA.nlargest(5, "cuánto cuesta no escalar").set_index("serie").round(1)
+```
+
+```{python}
+#| echo: false
+print("correlación entre el nivel de la serie y cuánto cuesta no escalar: "
+      f"{ESCALA['nivel medio'].corr(ESCALA['cuánto cuesta no escalar']):.3f}")
+print("correlación con el logaritmo del nivel: "
+      f"{np.log10(ESCALA['nivel medio']).corr(ESCALA['cuánto cuesta no escalar']):.3f}")
+```
+
+El mecanismo queda claro con la tabla al lado. **El daño de no escalar el objetivo depende del nivel
+de la serie**, y no es una constante: en las series de nivel alto la red arranca con pesos cerca de
+cero y necesitaría muchísimas iteraciones para llegar a producir salidas de ese orden, así que el
+optimizador se detiene antes con un modelo que subestima sistemáticamente.
+
+La lección práctica: **la @tbl-perceptron no dice que el perceptrón sea malo sin escalar, dice que es
+malo en las series donde el nivel es grande.** Y como una biblioteca no sabe el nivel de tu serie, el
+escalado del objetivo hay que ponerlo a mano siempre.
+
+### Ejercicio 2 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-22-2
+#| tbl-cap: "Ensamble de las cinco semillas contra la mejor corrida, la media de las corridas y la peor."
+resumen = SEM22.groupby("arquitectura")[
+    ["mejor corrida", "media de las corridas", "ensamble de 5 semillas",
+     "peor corrida"]
+].mean()
+resumen.loc["promedio"] = resumen.mean()
+resumen.round(2)
+```
+
+```{python}
+#| label: tbl-sol-22-2b
+#| tbl-cap: "Cuántas veces el ensamble le gana a cada referencia, sobre los 93 pares serie-arquitectura."
+pd.DataFrame([{
+    "le gana a la media de las corridas":
+        int((SEM22["ensamble de 5 semillas"] < SEM22["media de las corridas"]).sum()),
+    "le gana a la mejor corrida":
+        int((SEM22["ensamble de 5 semillas"] < SEM22["mejor corrida"]).sum()),
+    "de": len(SEM22),
+    "qué fracción del hueco media→mejor recupera (%)":
+        100 * (SEM22["media de las corridas"].mean()
+               - SEM22["ensamble de 5 semillas"].mean())
+        / (SEM22["media de las corridas"].mean() - SEM22["mejor corrida"].mean()),
+}], index=["ensamble de semillas"]).round(1).T
+```
+
+**El ensamble le gana a la media de las corridas en 80 de 93 casos, y recupera solo el 1,5 % del
+hueco que la separa de la mejor corrida.**
+
+Los dos números juntos dicen algo preciso y hay que leerlos así. El ensamble **es** mejor que una
+corrida cualquiera —80 de 93 es una mayoría clara— y está muy lejos de la mejor corrida: 26,3 contra
+16,8 en promedio.
+
+Y eso es exactamente lo que corresponde esperar, aunque el recuadro del @sec-varianza-semilla sugiera
+más. La mejor de cinco corridas es un **oráculo**: para elegirla hay que conocer el error de prueba.
+Es el mismo optimismo de la @eq-optimismo del @sec-particiones, con las semillas en el papel de
+candidatos. Comparar el ensamble contra la mejor corrida es comparar contra algo inalcanzable.
+
+La comparación honesta es contra lo que uno tendría sin el ensamble, que es **una corrida al azar**,
+o sea la media de las corridas. Ahí el ensamble gana. Lo que no hace es convertir un perceptrón malo
+en un buen modelo: 26,3 sigue estando al doble del 12,55 de *extra trees* del @sec-modelos-basicos.
+
+**El ensamble de semillas elimina la varianza de inicialización y no arregla el sesgo del modelo.**
+Son dos problemas distintos y solo uno se resuelve promediando.
+
+### Ejercicio 3 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-22-3
+#| tbl-cap: "Ruido entre semillas y brecha entre arquitecturas, separando por cuántos horizontes de historia tiene la serie."
+filas = []
+for etiqueta, corto in (("n / h < 10", True), ("n / h ≥ 10", False)):
+    sub = SEM22[(SEM22["n / h"] < 10) == corto]
+    comparaciones = []
+    for _, grupo in sub.groupby("serie"):
+        ordenado = grupo.sort_values("media de las corridas")
+        comparaciones.append({
+            "brecha": (ordenado["media de las corridas"].iloc[1]
+                       - ordenado["media de las corridas"].iloc[0]),
+            "ruido": ordenado["desvío entre semillas"].iloc[0],
+        })
+    c = pd.DataFrame(comparaciones)
+    filas.append({
+        "series": f"{etiqueta} ({len(c)})",
+        "desvío mediano entre semillas": sub["desvío entre semillas"].median(),
+        "brecha mediana entre arquitecturas": c["brecha"].median(),
+        "razón ruido / brecha": c["ruido"].median() / c["brecha"].median(),
+    })
+
+pd.DataFrame(filas).set_index("series").round(2)
+```
+
+**Se verifica a medias, y la mitad que falla es informativa.**
+
+La primera parte sí se cumple: **el desvío entre semillas baja con más datos**, de 4,16 a 2,94. Cada
+arquitectura se estabiliza individualmente, tal como la tesis observó al pasar de anual a mensual.
+
+La segunda parte no. La brecha entre arquitecturas baja apenas, de 2,58 a 2,36, y como el ruido baja
+más, la razón ruido/brecha **mejora** de 1,09 a 0,76 en vez de empeorar. La tesis encontraba lo
+contrario: de 2,6 a 4,0.
+
+Vale entender la diferencia en vez de esconderla. La tesis compara **cinco arquitecturas
+genuinamente distintas** —Transformer, LSTM, ConvNet, perceptrón, híbrido— que con muchos datos
+convergen a soluciones parecidas porque todas terminan aprendiendo la misma estructura. Este
+ejercicio compara **tres tamaños del mismo perceptrón**, y ahí más datos permiten que la arquitectura
+grande aproveche su capacidad y se separe de la chica, así que la brecha no colapsa.
+
+Dicho de otra manera: el fenómeno de la tesis es sobre **familias** que convergen, y acá hay una sola
+familia con tres tamaños. **El experimento del capítulo no es el mismo experimento**, y no
+contradecirlo requiere decir en qué se diferencia.
+
+### Ejercicio 4 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-22-4
+#| tbl-cap: "Subir `max_iter` de 1500 a 5000 en las series largas del catálogo."
+largas = sorted({s for s in SEM22.loc[SEM22["n / h"] >= 10, "serie"]})
+
+filas = []
+for iteraciones in (1500, 5000):
+    errores, desvios = [], []
+    for identificador in largas:
+        s_i = cargar(identificador)
+        y_tr_i = s_i.entrenamiento.to_numpy().astype(float)
+        y_te_i = s_i.prueba.to_numpy().astype(float)
+        h_i, p_i = s_i.horizonte, ventana_de19(s_i)
+        X_i, o_i = vent19(y_tr_i, p_i)
+        por_semilla = [
+            smape(y_te_i, rec19(
+                perceptron22((32,), sem, iteraciones=iteraciones).fit(X_i, o_i),
+                y_tr_i, p_i, h_i))
+            for sem in range(5)
+        ]
+        errores.append(np.mean(por_semilla))
+        desvios.append(np.std(por_semilla))
+    filas.append({"max_iter": iteraciones, "series": len(largas),
+                  "sMAPE medio": np.mean(errores),
+                  "desvío medio entre semillas": np.mean(desvios)})
+
+pd.DataFrame(filas).set_index("max_iter").round(2)
+```
+
+**Ninguna de las dos: los números son idénticos hasta el segundo decimal.**
+
+Y el motivo es que `MLPRegressor` **ya había convergido**. `max_iter` es un techo, no una cantidad de
+iteraciones a ejecutar: el optimizador Adam se detiene solo cuando la pérdida deja de mejorar durante
+`n_iter_no_change` épocas consecutivas. Con 1.500 disponibles, en estas series usa muchas menos.
+
+El resultado es útil por lo que descarta. La varianza entre semillas de 2,94 puntos **no es falta de
+entrenamiento**: cada corrida llegó a su óptimo local y los óptimos locales son distintos. Eso es
+información sobre el paisaje de la función de pérdida, no sobre el presupuesto de cómputo, y explica
+por qué el ensamble de semillas es la única salida:
+
+**Entrenar más no acerca dos inicializaciones distintas. Las lleva más rápido a dos mínimos
+distintos.**
+
+Vale notar que hay una manera de que este ejercicio dé otro resultado: pasar `solver="sgd"` con una
+tasa de aprendizaje chica, donde `max_iter` sí manda. El ejercicio 4 tal como está planteado mide la
+convergencia de Adam, y no la del descenso de gradiente en general.
+
+### Ejercicio 5 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-22-5
+#| tbl-cap: "Un `MLPRegressor` sin capas ocultas y con activación identidad, contra mínimos cuadrados y Ridge."
+filas = []
+for identificador in ("M35927", "Q1915", "M39292"):
+    s_i = cargar(identificador)
+    y_tr_i = s_i.entrenamiento.to_numpy().astype(float)
+    y_te_i = s_i.prueba.to_numpy().astype(float)
+    h_i, p_i = s_i.horizonte, ventana_de19(s_i)
+    X_i, o_i = vent19(y_tr_i, p_i)
+
+    lineal_red = TransformedTargetRegressor(
+        regressor=make_pipeline(
+            StandardScaler(),
+            MLPRegressor(hidden_layer_sizes=(), activation="identity",
+                         solver="lbfgs", max_iter=8000, random_state=0)),
+        transformer=StandardScaler())
+
+    fila = {
+        "serie": identificador,
+        "MLP identidad, sin capas": smape(y_te_i, rec19(
+            lineal_red.fit(X_i, o_i), y_tr_i, p_i, h_i)),
+        "mínimos cuadrados": smape(y_te_i, rec19(
+            make_pipeline(StandardScaler(), LinearRegression()).fit(X_i, o_i),
+            y_tr_i, p_i, h_i)),
+        "Ridge λ = 1": smape(y_te_i, rec19(
+            make_pipeline(StandardScaler(), Ridge(alpha=1.0)).fit(X_i, o_i),
+            y_tr_i, p_i, h_i)),
+    }
+    fila["|MLP − mínimos cuadrados|"] = abs(
+        fila["MLP identidad, sin capas"] - fila["mínimos cuadrados"])
+    filas.append(fila)
+
+pd.DataFrame(filas).set_index("serie").round(4)
+```
+
+**Coinciden casi, no exactamente, y el "casi" tiene tres causas que vale separar.**
+
+En `M35927` la diferencia es de 0,003 puntos de sMAPE: coinciden a todos los efectos prácticos. En
+`M39292` la diferencia es de 1,60, que no es despreciable.
+
+La @eq-mlp con $\sigma$ identidad y sin capas ocultas **es** algebraicamente $W\mathbf{x} + b$, o sea
+mínimos cuadrados. Que los números no sean idénticos se explica por:
+
+**El optimizador es iterativo.** `LinearRegression` resuelve las ecuaciones normales de forma exacta;
+`MLPRegressor` con `lbfgs` se detiene por tolerancia. Sobre 8.000 iteraciones la diferencia es
+pequeña y no es cero.
+
+**`MLPRegressor` regulariza por omisión.** Trae `alpha=0.0001`, que es una penalización $\ell_2$
+chica. Es decir que el equivalente exacto no es mínimos cuadrados sino un Ridge con $\lambda$ muy
+chico — y el @sec-regularizacion ya midió que en estas tablas el efecto de $\lambda$ depende del
+escalado.
+
+**El pronóstico es recursivo.** Una diferencia mínima en el primer paso se realimenta durante $h$
+pasos, y el @sec-varianza-medida midió cómo eso amplifica. En `M39292`, con $h = 18$, una diferencia
+de coeficientes en el cuarto decimal se convierte en 1,6 puntos de sMAPE.
+
+La conclusión es la del enunciado con una precisión que el enunciado no pedía: **la equivalencia es
+del modelo, no del cómputo.** Es el mismo tipo de distinción que el @sec-posicion-estacional hizo
+entre Fourier e indicadoras: dos formulaciones del mismo objeto matemático pueden dar números
+distintos por cómo se las calcula.
+
+### Ejercicio 6 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-22-6
+#| tbl-cap: "Cuántos pares de los 27 modelos no se distinguen entre sí con la distancia crítica de Nemenyi que implica la @tbl-friedman."
+ranking = (resultados_tesis("friedman")
+           .query("metrica == 'sMAPE'")
+           .sort_values("puesto"))
+
+# La distancia crítica se lee de la tabla: es la diferencia de rango más chica
+# que la prueba ya marca como significativa.
+distancia_critica = ranking.loc[ranking["significativo"], "dif_vs_mejor"].min()
+
+rangos = ranking.set_index("modelo")["rango_promedio"]
+pares = list(itertools.combinations(rangos.index, 2))
+indistinguibles = [(a, b) for a, b in pares
+                   if abs(rangos[a] - rangos[b]) < distancia_critica]
+
+pd.DataFrame([{
+    "modelos": len(rangos),
+    "pares posibles": len(pares),
+    "distancia crítica implícita": distancia_critica,
+    "pares indistinguibles": len(indistinguibles),
+    "% del ranking que es ruido": 100 * len(indistinguibles) / len(pares),
+    "no distinguibles del primero": int((~ranking["significativo"]).sum()),
+}], index=["Nemenyi sobre 27 modelos"]).round(2).T
+```
+
+**El 21 % de los pares no se distingue: 72 de 351.**
+
+Y el número es más elocuente al mirar dónde están esos pares. Los tres primeros —ARIMA, SARIMA,
+ETS— son indistinguibles entre sí, con diferencias de rango de 0,026 y 0,118 contra una distancia
+crítica de 0,695. Lo mismo pasa en el pelotón del medio, donde catorce modelos se reparten rangos de
+12,1 a 14,4.
+
+Eso obliga a leer la @tbl-friedman de otra manera. **No es un ranking de 27 posiciones: son unos
+pocos grupos.** Con esta evidencia se puede decir que ARIMA, SARIMA y ETS están arriba, que las cinco
+redes están abajo, y que el orden dentro de cada grupo no está sostenido.
+
+Es la misma lección del @sec-varianza-semilla vista desde la estadística en vez de desde las
+semillas, y las dos apuntan a la misma práctica: **reportar grupos y no puestos.** Un artículo que
+titula "el modelo X es el mejor" cuando X está a 0,03 de rango del segundo está reportando ruido con
+formato de resultado, y @demsar2006 propuso precisamente el diagrama de diferencias críticas para
+evitarlo.
