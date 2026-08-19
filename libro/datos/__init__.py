@@ -49,12 +49,14 @@ from libro.datos.rutas import (
     descargas_permitidas,
     directorio_cache,
     directorio_curado,
+    directorio_tesis,
     frecuencia_de_id,
     normalizar_frecuencia,
     origenes_posibles,
 )
 
-__all__ = ["cargar", "catalogo", "metadatos", "SerieM4", "fenomenos"]
+__all__ = ["cargar", "catalogo", "metadatos", "SerieM4", "fenomenos",
+           "resultados_tesis"]
 
 SEMILLA = 42
 
@@ -142,6 +144,33 @@ def catalogo() -> pd.DataFrame:
         raise FileNotFoundError(
             f"No encuentro {ruta}. Se genera con:\n"
             "  python -m libro._construir_catalogo"
+        )
+    return pd.read_parquet(ruta)
+
+
+TABLAS_DE_TESIS = {
+    "friedman": "Rangos de Friedman de los 27 modelos, con la prueba de Nemenyi",
+    "owa": "OWA de los modelos que superan a Naive2",
+    "horaria": "OWA en la frecuencia horaria contra el global",
+    "semillas": "sMAPE y variabilidad de cinco redes sobre cinco semillas",
+    "semillas_por_frecuencia": "Cuántas veces cambia el ganador según la frecuencia",
+}
+
+
+def resultados_tesis(nombre: str) -> pd.DataFrame:
+    """Una tabla de resultados de la tesis. Ver TABLAS_DE_TESIS para los nombres.
+
+    Son resúmenes ya agregados sobre 4.773 series, no las series en sí. El
+    capítulo 22 los cita porque el libro no puede entrenar redes al compilar.
+    """
+    if nombre not in TABLAS_DE_TESIS:
+        disponibles = ", ".join(sorted(TABLAS_DE_TESIS))
+        raise KeyError(f"No conozco la tabla {nombre!r}. Hay: {disponibles}")
+    ruta = directorio_tesis() / f"{nombre}.parquet"
+    if not ruta.exists():
+        raise FileNotFoundError(
+            f"No encuentro {ruta}. Se genera con:\n"
+            "  python -m libro._construir_tesis"
         )
     return pd.read_parquet(ruta)
 

@@ -15,7 +15,7 @@ export PATH := $(VENV)/bin:$(PATH)
 # sys.path: Quarto ejecuta cada capítulo con el directorio del .qmd como cwd.
 export PYTHONPATH := $(CURDIR)
 
-.PHONY: ayuda entorno kernel libro html pdf ver limpiar limpiar-todo prueba prueba-sin-conexion referencias datos catalogo datos-widgets
+.PHONY: ayuda entorno kernel libro html pdf ver limpiar limpiar-todo prueba prueba-sin-conexion referencias datos catalogo datos-widgets tesis
 
 ayuda:
 	@echo "make entorno   crea el entorno virtual e instala las dependencias"
@@ -94,3 +94,8 @@ limpiar:
 
 limpiar-todo: limpiar
 	rm -rf _freeze .quarto .jupyter_cache
+
+# Trae al repositorio las tablas de resultados de la tesis que cita el capítulo 22.
+# Necesita el material de la tesis a mano; una vez generadas, viajan en el repo.
+tesis:
+	$(PY) -m libro._construir_tesis

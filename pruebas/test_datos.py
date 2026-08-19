@@ -183,3 +183,34 @@ def test_a_frame_usa_las_columnas_de_statsforecast():
 def test_a_frame_puede_dejar_afuera_la_prueba():
     df = cargar("M3007").a_frame(incluir_prueba=False)
     assert set(df["split"]) == {"entrenamiento"}
+
+
+# ---------------------------------------------------------------------------
+# Las tablas de resultados de la tesis que cita el capítulo 22
+# ---------------------------------------------------------------------------
+
+
+def test_las_tablas_de_tesis_viajan_en_el_repositorio():
+    """El capítulo 22 no puede entrenar redes: cita resultados ya calculados."""
+    from libro.datos import TABLAS_DE_TESIS, resultados_tesis
+
+    for nombre in TABLAS_DE_TESIS:
+        tabla = resultados_tesis(nombre)
+        assert len(tabla) > 0, f"la tabla {nombre} está vacía"
+
+
+def test_el_ranking_de_friedman_tiene_los_27_modelos():
+    from libro.datos import resultados_tesis
+
+    friedman = resultados_tesis("friedman")
+    for metrica in ("sMAPE", "MASE"):
+        sub = friedman[friedman["metrica"] == metrica]
+        assert len(sub) == 27, f"{metrica} tiene {len(sub)} modelos y no 27"
+        assert sorted(sub["puesto"]) == list(range(1, 28))
+
+
+def test_resultados_tesis_rechaza_un_nombre_desconocido():
+    from libro.datos import resultados_tesis
+
+    with pytest.raises(KeyError, match="No conozco la tabla"):
+        resultados_tesis("no-existe")

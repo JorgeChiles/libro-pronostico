@@ -1,7 +1,478 @@
 # Aprendizaje profundo {#sec-aprendizaje-profundo}
 
-Perceptrón, ConvNet 1D, LSTM y Transformer; cuándo conviene y cuándo no. Acá entra la evidencia sobre varianza por semilla.
+```{python}
+#| echo: false
+import warnings
 
-::: {.callout-note appearance="simple"}
-Capítulo en preparación.
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+from sklearn.compose import TransformedTargetRegressor
+from sklearn.ensemble import ExtraTreesRegressor
+from sklearn.linear_model import Ridge
+from sklearn.neural_network import MLPRegressor
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+
+from libro.datos import cargar, catalogo, resultados_tesis
+from libro.graficos import COLORES, mostrar
+
+warnings.simplefilter("ignore")
+
+
+def smape(real, pron):
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    den = np.abs(real) + np.abs(pron)
+    den[den == 0] = 1e-9
+    return 200 * np.mean(np.abs(real - pron) / den)
+```
+
+El @sec-intro-ml abrió la Parte II con una advertencia y una tabla: en la evaluación de 26 modelos
+sobre 4.773 series de M4 que sostiene este libro, los tres modelos de aprendizaje profundo quedaron
+entre un 42 % y un 61 % peor que el benchmark. Este capítulo cierra la Parte II volviendo a esa
+tabla con todo lo que los diez capítulos anteriores construyeron para leerla.
+
+Y arranca con una limitación del libro que hay que declarar antes de nada.
+
+::: {.callout-important}
+## Este capítulo no entrena una red profunda
+
+`PyTorch` y `TensorFlow` no están entre las dependencias de este libro, y tampoco existen para
+Pyodide, así que **ninguna celda de esta página puede entrenar una LSTM ni un Transformer**. La
+restricción es la misma que el @sec-intro-ml documentó para `statsforecast`, y acá pesa más.
+
+Lo que sí se puede hacer, y es lo que hace el capítulo:
+
+1. **Entrenar un perceptrón multicapa de verdad**, con `MLPRegressor` de `scikit-learn`, que es una
+   red neuronal completa —capas densas, activaciones, descenso de gradiente— aunque no sea
+   profunda. Todo lo que aparece medido acá se ejecuta al compilar la página.
+2. **Citar los resultados de la tesis** sobre las arquitecturas que no se pueden entrenar. Las
+   tablas viajan en el repositorio, y se leen con `resultados_tesis()`.
+3. **Reproducir el hallazgo central** —la varianza por semilla— con el perceptrón que sí se puede
+   entrenar, para ver si aparece también con otra implementación.
+
+Lo que **no** se puede hacer es mostrarte una LSTM funcionando y pedirte que confíes en el número.
+Si quieres eso, el @sec-produccion explica cómo montar el entorno.
+:::
+
+## Las arquitecturas, en una página {#sec-arquitecturas}
+
+Todas parten de la misma tabla supervisada de la @eq-ventana y difieren en qué función ajustan.
+
+**Perceptrón multicapa.** Capas de transformaciones afines con una no linealidad entre ellas:
+
+$$
+\hat{f}(\mathbf{x}) = W_L \,\sigma\!\left( \cdots \sigma\!\left( W_1 \mathbf{x} + b_1 \right)
+                     \cdots \right) + b_L
+$$ {#eq-mlp}
+
+Con una sola capa oculta y $\sigma$ lineal, la @eq-mlp **es** la regresión del @sec-sobreajuste. Lo
+que agrega es la no linealidad, y con ella la capacidad de representar interacciones entre rezagos
+que un modelo lineal no puede.
+
+**Redes recurrentes.** En vez de recibir los $p$ rezagos de golpe, procesan la serie un paso a la
+vez manteniendo un estado:
+
+$$
+\mathbf{s}_t = g\!\left( \mathbf{s}_{t-1},\, y_t \right),
+\qquad
+\hat{y}_{t+1} = W \mathbf{s}_t + b
+$$ {#eq-rnn}
+
+La LSTM [@hochreiter1997] es la versión de $g$ que resolvió el problema del gradiente que se
+desvanece, y fue la arquitectura dominante en pronóstico durante una década
+[@hewamalage2021]. La @eq-rnn no necesita elegir $p$: en principio la ventana es toda la
+historia.
+
+**Convolucionales en una dimensión.** Aplican filtros que se deslizan sobre la serie, con lo cual
+aprenden patrones locales invariantes a la posición. Son la versión de aprendizaje profundo de los
+estadísticos de ventana móvil del @sec-trampa-ventana.
+
+**Transformers y N-BEATS.** El Transformer reemplaza la recurrencia por atención, y N-BEATS
+[@oreshkin2020] propone bloques que descomponen la serie en tendencia y estacionalidad de forma
+aprendida —una versión entrenable del @sec-descomposicion— y superó a los ganadores de M4 en una
+reevaluación posterior.
+
+## Lo que la tesis midió {#sec-lo-que-midio}
+
+```{python}
+#| label: tbl-friedman
+#| tbl-cap: "Rangos de Friedman de 27 modelos sobre 4.773 series de M4, con la prueba de Nemenyi. Rango más bajo es mejor. La columna de la derecha dice si la diferencia con el primero es significativa."
+friedman = resultados_tesis("friedman")
+smape_ranking = (friedman[friedman["metrica"] == "sMAPE"]
+                 .sort_values("puesto")
+                 .set_index("puesto")[["modelo", "rango_promedio",
+                                       "dif_vs_mejor", "significativo"]])
+smape_ranking.round(3)
+```
+
+Los cinco últimos puestos son los cinco modelos de aprendizaje profundo, y el 22.º es LightGBM. Los
+tres primeros son ARIMA, SARIMA y ETS, **y la prueba de Nemenyi no distingue entre ellos**: la
+columna `significativo` dice `False` en los tres, con diferencias de rango de 0,026 y 0,118.
+
+Vale detenerse en la magnitud. El rango promedio de LSTM-ConvNet es 18,93 contra 10,55 de ARIMA:
+ocho puestos y medio de distancia sobre 27 modelos, con significancia estadística.
+
+```{python}
+#| label: tbl-owa
+#| tbl-cap: "OWA de los modelos que superan a Naive2 en el mismo experimento. El ganador de M4 —el híbrido de @smyl2020— obtuvo 0,821."
+resultados_tesis("owa").set_index("modelo").round(3)
+```
+
+Solo **seis modelos de 26 le ganan a `Naive2`**, y ninguno es una red. El mejor, ARIMA con OWA
+0,936, queda lejos del 0,821 del ganador de M4, que sí era una arquitectura neuronal: el híbrido
+ES-RNN de @smyl2020.
+
+Esa tensión es el capítulo entero y conviene formularla con precisión antes de resolverla:
+**la misma familia de modelos ganó M4 y quedó última en este experimento.**
+
+## Donde las redes sí funcionan {#sec-donde-si}
+
+```{python}
+#| label: tbl-horaria
+#| tbl-cap: "OWA en la frecuencia horaria contra el OWA global, para cinco métodos. Las 414 series horarias de M4 tienen 700 observaciones o más y $m = 24$."
+horaria = resultados_tesis("horaria").set_index("modelo")
+horaria["razón global / horaria"] = (horaria["OWA global"]
+                                     / horaria["OWA horaria"])
+horaria.round(3)
+```
+
+Acá está la primera mitad de la respuesta, y es el resultado más contraintuitivo del material de
+tesis.
+
+**En las series horarias las redes funcionan.** ConvNet 1D da OWA 0,762 y el perceptrón 0,768,
+contra 0,724 de ARIMA: pierden por poco. Y las tres redes de la tabla tienen OWA **por debajo de
+1**, o sea que le ganan a `Naive2`.
+
+**Globalmente son un desastre.** Las mismas tres arquitecturas dan 1,609, 1,543 y 1,419: entre un
+42 % y un 61 % peor que el benchmark, que es la cifra que el @sec-intro-ml anticipó. La razón
+global/horaria es de 2,1 para ConvNet y 2,0 para el perceptrón.
+
+La explicación es la que todo el resto de la Parte II fue construyendo. Las 414 series horarias son
+las únicas de M4 con **700 observaciones o más** y con $m = 24$, así que hay suficientes ciclos para
+aprender el patrón diario. En el resto de las frecuencias no: el @sec-los-datos midió que la mediana
+mensual son 202 observaciones y la anual 29.
+
+::: {.callout-tip}
+## La regla que ordena todo el capítulo
+
+Las redes profundas no son peores que ARIMA. **Son peores con cien observaciones**, que es la
+situación del 51 % de M4 según el @sec-intro-ml.
+
+Y esto no es una peculiaridad de esta tesis. El ganador de M4 [@smyl2020] no entrenó una red por
+serie: entrenó **un modelo global sobre las 100.000 series a la vez**, con una componente de
+suavizado exponencial por serie para manejar el nivel y la estacionalidad. La red aprendió lo que
+las series tienen en común, con cien mil series de datos.
+
+Es exactamente el enfoque global que el @sec-modelo-global midió y no pudo demostrar: con once
+series heterogéneas del catálogo pierde, y con cien mil gana la competencia. **La arquitectura no
+es lo que separa a los dos resultados: es la cantidad de series.**
+:::
+
+## El perceptrón, medido acá {#sec-perceptron-medido}
+
+Hasta acá todo es cita. Esta sección entrena de verdad, con la única red que el libro puede
+compilar.
+
+```{python}
+#| echo: false
+def ventana(y, p):
+    y = np.asarray(y, float)
+    return (np.array([y[i - p:i] for i in range(p, len(y))]),
+            np.array([y[i] for i in range(p, len(y))]))
+
+
+def recursivo(modelo, y, p, h):
+    historia, salida = list(y), []
+    for _ in range(h):
+        salida.append(float(modelo.predict([historia[-p:]])[0]))
+        historia.append(salida[-1])
+    return np.array(salida)
+
+
+def snaive(y, h, m):
+    if m <= 1:
+        return np.repeat(y[-1], h)
+    return np.array([y[-m + (i % m)] for i in range(h)])
+
+
+def perceptron(capas, semilla, escalar_objetivo=True, iteraciones=1500):
+    red = make_pipeline(
+        StandardScaler(),
+        MLPRegressor(hidden_layer_sizes=capas, max_iter=iteraciones,
+                     random_state=semilla, learning_rate_init=0.01),
+    )
+    if not escalar_objetivo:
+        return red
+    return TransformedTargetRegressor(regressor=red, transformer=StandardScaler())
+
+
+_filas = []
+for _sid in catalogo()["serie"]:
+    _s = cargar(_sid)
+    _ytr = _s.entrenamiento.to_numpy().astype(float)
+    _yte = _s.prueba.to_numpy().astype(float)
+    _h, _m = _s.horizonte, _s.periodo_estacional
+    _p = min(max(_m, 4), 12)
+    if len(_ytr) < _p + 20:
+        continue
+    _X, _o = ventana(_ytr, _p)
+    _filas.append({
+        "serie": _sid, "n": len(_ytr), "n / h": len(_ytr) / _h,
+        "snaive": smape(_yte, snaive(_ytr, _h, _m)),
+        "Ridge": smape(_yte, recursivo(
+            make_pipeline(StandardScaler(), Ridge(alpha=1.0)).fit(_X, _o),
+            _ytr, _p, _h)),
+        "extra trees": smape(_yte, recursivo(
+            ExtraTreesRegressor(n_estimators=60, random_state=0,
+                                n_jobs=1).fit(_X, _o), _ytr, _p, _h)),
+        "perceptrón sin escalar el objetivo": smape(_yte, recursivo(
+            perceptron((32,), 0, escalar_objetivo=False).fit(_X, _o),
+            _ytr, _p, _h)),
+        "perceptrón (8,)": smape(_yte, recursivo(
+            perceptron((8,), 0).fit(_X, _o), _ytr, _p, _h)),
+        "perceptrón (32,)": smape(_yte, recursivo(
+            perceptron((32,), 0).fit(_X, _o), _ytr, _p, _h)),
+        "perceptrón (64, 32)": smape(_yte, recursivo(
+            perceptron((64, 32), 0).fit(_X, _o), _ytr, _p, _h)),
+    })
+
+MLP = pd.DataFrame(_filas)
+COLUMNAS = ["snaive", "Ridge", "extra trees", "perceptrón sin escalar el objetivo",
+            "perceptrón (8,)", "perceptrón (32,)", "perceptrón (64, 32)"]
+```
+
+```{python}
+#| label: tbl-perceptron
+#| tbl-cap: "Un perceptrón multicapa sobre la tabla supervisada del catálogo, contra las referencias del libro."
+pd.DataFrame({
+    "sMAPE medio": [MLP[c].mean() for c in COLUMNAS],
+    "sMAPE mediano": [MLP[c].median() for c in COLUMNAS],
+    f"gana en (de {len(MLP)})": MLP[COLUMNAS].idxmin(axis=1).value_counts().reindex(
+        COLUMNAS, fill_value=0),
+}, index=COLUMNAS).round(2)
+```
+
+Dos cosas, y la primera es un error de implementación que vale más que el resultado.
+
+**Escalar el objetivo cambia el sMAPE de 57,60 a 29,30: casi la mitad del error.** El
+`StandardScaler` del `Pipeline` escala las **columnas** y no la respuesta, y una red con activaciones
+acotadas no puede producir salidas del orden de 5.000 partiendo de pesos inicializados cerca de cero.
+`TransformedTargetRegressor` con otro `StandardScaler` lo arregla en una línea.
+
+Es la tercera vez que el libro tropieza con lo mismo: el @sec-regularizacion midió que sin
+estandarizar $\lambda$ no significa nada, y el @sec-diferenciar que `SVR()` con núcleo radial es
+inaplicable a series de nivel. **Los valores por omisión de `scikit-learn` están pensados para
+clasificación en datos acotados**, y una serie de tiempo no es eso.
+
+**Y aun bien implementado, el perceptrón pierde.** 25,93 en el mejor caso contra 12,55 de *extra
+trees* y 15,31 de `snaive`. Gana en 3 series de 31 contra las 8 de *extra trees*.
+
+```{python}
+#| label: tbl-perceptron-largo
+#| tbl-cap: "El mismo perceptrón separado por cuántos horizontes de historia tiene la serie."
+filas = []
+for etiqueta, seleccion in (("n / h < 10", MLP[MLP["n / h"] < 10]),
+                            ("n / h ≥ 10", MLP[MLP["n / h"] >= 10])):
+    fila = {"series": f"{etiqueta} ({len(seleccion)})"}
+    fila.update(seleccion[COLUMNAS].mean().to_dict())
+    filas.append(fila)
+
+pd.DataFrame(filas).set_index("series").T.round(2)
+```
+
+La separación por largo confirma la regla del @sec-donde-si en pequeño. En las series largas el
+perceptrón mejora mucho —de 43,43 a 16,30 con la arquitectura más grande— y sigue estando al doble
+del error de *extra trees*, que da 7,97. **El perceptrón necesita más datos que los árboles para
+llegar al mismo lugar, y con 200 observaciones no los tiene.**
+
+## El hallazgo que invalida los rankings finos {#sec-varianza-semilla}
+
+Queda el resultado metodológicamente más fuerte del material de tesis, y el que este capítulo puede
+reproducir con su propia red.
+
+```{python}
+#| label: tbl-semillas-tesis
+#| tbl-cap: "Cinco arquitecturas sobre 90 series y 5 semillas: 2.250 mediciones donde lo único que cambia entre corridas es la inicialización de los pesos."
+resultados_tesis("semillas").set_index("modelo").round(2)
+```
+
+El Transformer es el mejor en media —13,15— y el **menos confiable**: su coeficiente de variación
+entre semillas es del 16,8 % contra el 5,5 % del perceptrón. Con una sola corrida por serie, el
+perceptrón pierde 1,9 puntos y tiene un tercio de la variabilidad.
+
+```{python}
+#| label: tbl-semillas-frecuencia
+#| tbl-cap: "Cuántas veces cambia el ganador al cambiar solo la semilla, y cómo se compara ese ruido con la brecha entre el primero y el segundo."
+resultados_tesis("semillas_por_frecuencia").set_index("frecuencia").round(2)
+```
+
+**El ganador cambia con la semilla en el 68 % de las series**, y en el 76 % el ruido de
+inicialización supera la diferencia entre el mejor y el segundo modelo. Pero lo que hay que mirar es
+la última columna, porque contradice la intuición:
+
+**El problema empeora con más datos.** En las anuales el ganador cambia el 50 % de las veces; en las
+mensuales, el **83 %**. Las series largas estabilizan cada red por separado —el ruido baja de 5,00 a
+2,57— y a la vez las hacen **converger entre sí**: la brecha entre el primero y el segundo cae de
+1,90 a 0,64. La razón ruido/brecha pasa de 2,6 a 4,0.
+
+Dicho de otra manera: con más datos, elegir un ganador entre redes se vuelve **más** arbitrario, no
+menos.
+
+### Reproducido con el perceptrón {#sec-semilla-reproducida}
+
+```{python}
+#| echo: false
+ARQUITECTURAS = {"perceptrón (8,)": (8,), "perceptrón (32,)": (32,),
+                 "perceptrón (64, 32)": (64, 32)}
+SEMILLAS = range(5)
+
+_reg = []
+for _sid in MLP["serie"]:
+    _s = cargar(_sid)
+    _ytr = _s.entrenamiento.to_numpy().astype(float)
+    _yte = _s.prueba.to_numpy().astype(float)
+    _h, _m = _s.horizonte, _s.periodo_estacional
+    _p = min(max(_m, 4), 12)
+    _X, _o = ventana(_ytr, _p)
+    for _nom, _capas in ARQUITECTURAS.items():
+        for _sem in SEMILLAS:
+            _reg.append({
+                "serie": _sid, "arquitectura": _nom, "semilla": _sem,
+                "sMAPE": smape(_yte, recursivo(
+                    perceptron(_capas, _sem).fit(_X, _o), _ytr, _p, _h)),
+            })
+
+SEM = pd.DataFrame(_reg)
+_piv = SEM.pivot_table(index=["serie", "semilla"], columns="arquitectura",
+                       values="sMAPE")
+_ganador = _piv.idxmin(axis=1).unstack()
+CAMBIA = int((_ganador.nunique(axis=1) > 1).sum())
+
+_por_serie = (SEM.groupby(["serie", "arquitectura"])["sMAPE"]
+              .agg(["mean", "std"]).reset_index())
+_comp = []
+for _sid, _sub in _por_serie.groupby("serie"):
+    _sub = _sub.sort_values("mean")
+    _comp.append({"brecha": _sub["mean"].iloc[1] - _sub["mean"].iloc[0],
+                  "ruido": _sub["std"].iloc[0]})
+COMP = pd.DataFrame(_comp)
+```
+
+```{python}
+#| label: tbl-semillas-propias
+#| tbl-cap: "El mismo experimento con el perceptrón de este capítulo: 31 series del catálogo, 3 arquitecturas y 5 semillas."
+pd.DataFrame([{
+    "mediciones": len(SEM),
+    "el ganador cambia con la semilla": f"{CAMBIA} de {len(_ganador)} series",
+    "porcentaje": 100 * CAMBIA / len(_ganador),
+    "el ruido supera la brecha 1º-2º":
+        f"{int((COMP['ruido'] > COMP['brecha']).sum())} de {len(COMP)} series",
+    "porcentaje ": 100 * (COMP["ruido"] > COMP["brecha"]).mean(),
+    "desvío mediano entre semillas": _por_serie["std"].median(),
+    "desvío máximo entre semillas": _por_serie["std"].max(),
+}], index=["perceptrón, catálogo del libro"]).round(1).T
+```
+
+```{python}
+#| label: fig-semillas
+#| fig-cap: "sMAPE de cada arquitectura en cada serie, con las cinco semillas superpuestas. Cuando los puntos de una serie se separan verticalmente, la elección de semilla decide."
+orden = SEM.groupby("serie")["sMAPE"].median().sort_values().index
+colores = {n: c for n, c in zip(ARQUITECTURAS,
+                               [COLORES["observado"], COLORES["prueba"], "#d18b2c"])}
+fig = go.Figure()
+for arquitectura in ARQUITECTURAS:
+    sub = SEM[SEM["arquitectura"] == arquitectura]
+    fig.add_trace(go.Scatter(
+        x=[list(orden).index(s) for s in sub["serie"]], y=sub["sMAPE"],
+        mode="markers", name=arquitectura,
+        marker=dict(color=colores[arquitectura], size=6, opacity=0.65),
+    ))
+fig.update_yaxes(type="log")
+fig.update_xaxes(title="series del catálogo, ordenadas por sMAPE mediano",
+                 showticklabels=False)
+mostrar(fig, alto=430, titulo_y="sMAPE (escala logarítmica)")
+```
+
+**El ganador cambia con la semilla en las 31 series: el 100 %.** Y el ruido de inicialización supera
+la brecha entre la primera y la segunda arquitectura en **21 de 31 series, el 68 %** — el mismo
+número que la tesis obtuvo con cinco arquitecturas distintas, en otro conjunto de series y con otra
+biblioteca.
+
+Que dos implementaciones sin nada en común lleguen al mismo 68 % no prueba que el número sea
+universal, y sí refuerza mucho la conclusión que sostiene:
+
+::: {.callout-warning}
+## Tres afirmaciones que esta evidencia sostiene
+
+**Una diferencia de menos de tres puntos de sMAPE entre dos redes no se distingue del azar de
+inicialización.** Con una sola corrida por serie, ordenarlas por décimas es ordenar ruido. El
+desvío mediano entre semillas de una misma arquitectura y una misma serie es de 3,40 puntos, con
+un máximo de 75,52.
+
+**Un resultado publicado de redes neuronales que no reporta varianza entre semillas no es
+interpretable.** No es que esté mal: es que no se sabe si la diferencia que reporta es del modelo o
+de la corrida. @demsar2008 hacía este argumento para el aprendizaje automático en general y sigue
+sin aplicarse.
+
+**La solución práctica es el ensamble de semillas.** Promediar 3 a 5 inicializaciones elimina la
+mayor parte de esta varianza, y es la decisión que la aplicación de pronóstico de este proyecto ya
+tiene tomada. Cuesta multiplicar el cómputo por cinco, y el @sec-ensambles explicó por qué funciona:
+las semillas son la fuente de diversidad más barata que existe, porque los errores de dos
+inicializaciones del mismo modelo están menos correlacionados de lo que uno esperaría.
+:::
+
+## Cómo cierra la Parte II {#sec-cierre-parte-ii}
+
+| lo que dice el eslogan | lo que midió este libro |
+|---|---|
+| el aprendizaje profundo es el estado del arte en series de tiempo | quedó en los cinco últimos puestos de 27 sobre 4.773 series |
+| ...pero ganó M4 | con un modelo global sobre 100.000 series y una componente de suavizado por serie |
+| las redes aprenden la estructura sola | solo con 700 observaciones o más: en horaria dan OWA 0,76 y globalmente 1,6 |
+| más datos, mejores comparaciones | con más datos las redes convergen entre sí y elegir un ganador es más arbitrario |
+| basta con ajustar hiperparámetros | el desvío por semilla es de 3,4 puntos de sMAPE, más grande que la mayoría de las brechas |
+
+: El aprendizaje profundo en pronóstico, contrastado con lo medido. {#tbl-cierre}
+
+La Parte II empezó preguntando si el aprendizaje automático sirve para pronosticar series de tiempo.
+La respuesta que sale de once capítulos de mediciones es incómoda de resumir en una frase, y se puede
+intentar así: **sirve cuando hay datos, y la mayoría de las series no los tiene.**
+
+Lo que sí queda, y es más útil que un ranking de modelos, es un conjunto de procedimientos:
+particiones que no filtran información, validación que no se autoengaña, estrategias multipaso
+elegidas por la cantidad de datos por horizonte, características contadas en vez de acumuladas,
+combinaciones que descartan antes de promediar e intervalos cuya etiqueta se verifica. Nada de eso
+depende de qué modelo esté de moda.
+
+La Parte III lleva todo eso a escala: el @sec-caso-m4 con las 4.773 series de la tesis, el
+@sec-seleccion-escala con la pregunta de cómo elegir sin mirar cada serie, y el @sec-produccion con
+lo que hace falta para que un pronóstico salga de un notebook.
+
+## Ejercicios
+
+Las soluciones están en el @sec-soluciones-22.
+
+**1.** El perceptrón sin escalar el objetivo da 57,60 de sMAPE medio. Mira qué pronostica en una
+serie concreta y explica el mecanismo: ¿el valor queda cerca de cero, cerca de la media, o en otro
+lado? Y después busca en qué series el daño es mayor.
+
+**2.** Arma el ensamble de semillas del recuadro: promedia las cinco corridas de cada arquitectura y
+compáralo con la mejor corrida individual y con la media de las corridas. ¿Cuánto recupera?
+
+**3.** La @tbl-semillas-frecuencia dice que el problema empeora con más datos. Verifícalo en el
+catálogo: separa las series por $n/h$ y mira si el desvío entre semillas baja y la brecha entre
+arquitecturas baja más.
+
+**4.** Sube `max_iter` del perceptrón de 1500 a 5000 en las series largas. ¿Baja el error, baja la
+varianza entre semillas, o ninguna de las dos?
+
+**5.** La @eq-mlp con activación lineal es una regresión lineal. Verifícalo: ajusta un
+`MLPRegressor` con `activation="identity"` y sin capas ocultas y compáralo con `Ridge`. ¿Coinciden?
+
+**6.** Con la @tbl-friedman, cuenta cuántos pares de modelos **no** son distinguibles entre sí según
+la prueba de Nemenyi. ¿Qué proporción del ranking es ruido?
+
+## Referencias {.unnumbered}
+
+::: {#refs}
 :::

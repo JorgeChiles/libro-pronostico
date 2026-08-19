@@ -109,6 +109,16 @@ def directorio_curado() -> Path:
     return directorio_paquete() / "curado"
 
 
+def directorio_tesis() -> Path:
+    """Tablas de resultados de la tesis que el capítulo 22 cita.
+
+    Son resúmenes ya agregados —rangos de Friedman, OWA, varianza por semilla—,
+    no las 4.773 series originales. Viajan con el repositorio para que el
+    capítulo compile sin acceso al material de la tesis.
+    """
+    return directorio_paquete() / "tesis"
+
+
 def directorio_cache() -> Path:
     """Caché local, fuera del repositorio."""
     if ruta := os.environ.get("LIBRO_CACHE"):
