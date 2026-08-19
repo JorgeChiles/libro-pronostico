@@ -6259,3 +6259,440 @@ más útil del capítulo para decidir dónde poner el esfuerzo:
 Y eso no se logra probando un modelo más de la misma familia. Se logra cambiando de familia, de
 representación de los datos o de estrategia multipaso —las tres cosas que la Parte II fue
 midiendo—, que es exactamente lo que hicieron los dos primeros de M4.
+
+## Capítulo 21 · Bootstrapping {#sec-soluciones-21}
+
+```{python}
+#| echo: false
+from statsmodels.stats.diagnostic import acorr_ljungbox
+from statsmodels.tsa.seasonal import STL
+
+Z21 = {0.80: 1.2816, 0.90: 1.6449, 0.95: 1.9600}
+
+
+def snaive21(y, h, m):
+    if m <= 1:
+        return np.repeat(y[-1], h)
+    return np.array([y[-m + (i % m)] for i in range(h)])
+
+
+def residuos21(y, m):
+    if m <= 1:
+        ajustado = np.concatenate([[np.nan], y[:-1]])
+    else:
+        ajustado = np.concatenate([np.full(m, np.nan), y[:-m]])
+    r = y - ajustado
+    return r[~np.isnan(r)]
+
+
+def boot21(y, h, m, nivel=0.95, B=1000, semilla=0, bloques=False, normal=False):
+    rng = np.random.default_rng(semilla)
+    r = residuos21(y, m)
+    if len(r) < 3:
+        ancho = Z21[nivel] * np.std(y, ddof=1) * np.ones(h)
+        centro = snaive21(y, h, m)
+        return centro - ancho, centro + ancho
+    L = max(2, min(len(r) // 4, m if m > 1 else 4))
+    sd = r.std(ddof=1)
+    sims = np.empty((B, h))
+    for b in range(B):
+        if bloques:
+            secuencia = []
+            while len(secuencia) < h:
+                i = rng.integers(0, max(1, len(r) - L + 1))
+                secuencia.extend(r[i:i + L])
+            pasos = np.array(secuencia[:h])
+        elif normal:
+            pasos = rng.normal(0.0, sd, h)
+        else:
+            pasos = rng.choice(r, h)
+        historia = list(y)
+        for k in range(h):
+            historia.append(snaive21(np.array(historia), 1, m)[0] + pasos[k])
+        sims[b] = historia[-h:]
+    a = (1 - nivel) / 2
+    return np.quantile(sims, a, axis=0), np.quantile(sims, 1 - a, axis=0)
+
+
+APTAS21 = []
+for _sid in catalogo()["serie"]:
+    _s = cargar(_sid)
+    if len(_s.entrenamiento) >= max(2 * _s.periodo_estacional + 8, 20):
+        APTAS21.append(_sid)
+```
+
+### Ejercicio 1 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-21-1
+#| tbl-cap: "Prueba de Ljung-Box sobre los residuos de snaive, y cobertura al 95 % de los dos bootstraps según si se rechaza la independencia."
+filas = []
+for identificador in APTAS21:
+    s = cargar(identificador)
+    y_tr = s.entrenamiento.to_numpy().astype(float)
+    y_te = s.prueba.to_numpy().astype(float)
+    h, m = s.horizonte, s.periodo_estacional
+    r = residuos21(y_tr, m)
+    p_valor = float(acorr_ljungbox(r, lags=[min(10, max(1, len(r) // 4))],
+                                   return_df=True)["lb_pvalue"].iloc[0])
+    lo, hi = boot21(y_tr, h, m, 0.95)
+    simple = ((y_te >= lo) & (y_te <= hi)).mean()
+    lo, hi = boot21(y_tr, h, m, 0.95, bloques=True)
+    bloques = ((y_te >= lo) & (y_te <= hi)).mean()
+    filas.append({"serie": identificador, "p de Ljung-Box": p_valor,
+                  "independiente": p_valor > 0.05,
+                  "bootstrap simple": simple, "por bloques": bloques})
+
+LB = pd.DataFrame(filas)
+pd.DataFrame([
+    {"grupo": "se rechaza la independencia", "series": int((~LB["independiente"]).sum()),
+     "bootstrap simple": 100 * LB.loc[~LB["independiente"], "bootstrap simple"].mean(),
+     "por bloques": 100 * LB.loc[~LB["independiente"], "por bloques"].mean()},
+    {"grupo": "no se rechaza", "series": int(LB["independiente"].sum()),
+     "bootstrap simple": 100 * LB.loc[LB["independiente"], "bootstrap simple"].mean(),
+     "por bloques": 100 * LB.loc[LB["independiente"], "por bloques"].mean()},
+]).set_index("grupo").round(1)
+```
+
+**Se rechaza la independencia en 26 de las 31 series**, y el bootstrap por bloques **no** cubre
+mejor donde debería: da 81,1 % contra 81,7 % del simple en las series con residuos dependientes, y
+78,6 % contra 76,7 % en las cinco donde no se rechaza. El resultado está al revés de la motivación
+del método: la diferencia es de menos de un punto en las dos direcciones y el signo favorece a los
+bloques justamente donde no hacían falta.
+
+Que la independencia se rechace en el 84 % de las series no es una sorpresa y conviene entender por
+qué. El residuo de `snaive` es $y_t - y_{t-m}$, o sea una **diferencia estacional**, y una diferencia
+de una serie autocorrelacionada queda autocorrelacionada salvo que el modelo haya capturado toda la
+estructura. `snaive` es un modelo de una sola regla: nunca la captura.
+
+Y que los bloques no ayuden tiene una explicación mecánica. Con bloques de largo $L \approx m$ y
+residuos que son diferencias estacionales, cada bloque arrastra el patrón local de la serie, así que
+las trayectorias simuladas se parecen más entre sí que con el remuestreo independiente. La
+autocorrelación queda preservada **y la diversidad del remuestreo baja**, y las dos cosas se
+compensan.
+
+La lección práctica es la de siempre en este libro: **la prueba diagnóstica dice que un supuesto se
+viola, y no dice que la corrección de ese supuesto vaya a mejorar el resultado.** Hay que medir las
+dos cosas por separado.
+
+### Ejercicio 2 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-21-2
+#| tbl-cap: "Cuánto se mueven los extremos del intervalo del 95 % según cuántas trayectorias se simulen, sobre M35927. La referencia son 20.000 trayectorias."
+s = cargar("M35927")
+y_tr = s.entrenamiento.to_numpy().astype(float)
+h, m = s.horizonte, s.periodo_estacional
+
+ref_lo, ref_hi = boot21(y_tr, h, m, 0.95, B=20_000, semilla=99)
+ancho_ref = np.mean(ref_hi - ref_lo)
+
+filas = []
+for B in (10, 25, 50, 100, 250, 500, 1000, 2000):
+    desvios = []
+    for semilla in range(5):
+        lo, hi = boot21(y_tr, h, m, 0.95, B=B, semilla=semilla)
+        desvios.append(np.mean(np.abs(lo - ref_lo) + np.abs(hi - ref_hi)) / 2)
+    filas.append({"B": B,
+                  "desvío de los extremos (% del ancho)":
+                      100 * np.mean(desvios) / ancho_ref})
+
+pd.DataFrame(filas).set_index("B").round(2)
+```
+
+**Para bajar del 1 % hacen falta más de 2.000 trayectorias**, y con 100 el desvío ya es del 3,7 %.
+
+La curva baja como $1/\sqrt{B}$, que es lo esperable: de 10 a 100 trayectorias el desvío cae de
+15,4 % a 3,7 % —un factor de 4 al multiplicar $B$ por 10, o sea $\sqrt{10} \approx 3{,}2$ más el
+ruido de las cinco semillas— y de 100 a 1.000 cae de 3,7 % a 1,3 %.
+
+De ahí sale una respuesta práctica que no es la del enunciado. **La pregunta correcta no es cuántas
+trayectorias hacen falta para que el intervalo sea estable, sino si vale la pena estabilizarlo.** La
+@fig-cobertura mostró que el intervalo del 95 % cubre el 80 %: una brecha de quince puntos. Reducir
+el ruido de simulación del 3,7 % al 1 % —cuadruplicando el cómputo— está afinando un error de
+tercer orden.
+
+Los mil del capítulo son una elección razonable por otro motivo: **los cuantiles del 2,5 % y del
+97,5 % se estiman con 25 trayectorias cada uno cuando $B = 1000$.** Bajar de ahí deja los extremos
+apoyados en un puñado de simulaciones, y eso sí importa para la forma del intervalo, no solo para su
+estabilidad.
+
+### Ejercicio 3 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-21-3
+#| tbl-cap: "Los mismos intervalos con `naive` en vez de `snaive`, donde la fórmula de la raíz de $h$ es la correcta."
+def residuos_naive(y):
+    return (y - np.concatenate([[np.nan], y[:-1]]))[1:]
+
+
+def naive_analitico(y, h, nivel):
+    r = residuos_naive(y)
+    ancho = Z21[nivel] * r.std(ddof=1) * np.sqrt(np.arange(1, h + 1))
+    return np.repeat(y[-1], h) - ancho, np.repeat(y[-1], h) + ancho
+
+
+def naive_bootstrap(y, h, nivel, B=1000, semilla=0):
+    rng = np.random.default_rng(semilla)
+    r = residuos_naive(y)
+    sims = np.empty((B, h))
+    for b in range(B):
+        historia = [y[-1]]
+        for _ in range(h):
+            historia.append(historia[-1] + rng.choice(r))
+        sims[b] = historia[1:]
+    a = (1 - nivel) / 2
+    return np.quantile(sims, a, axis=0), np.quantile(sims, 1 - a, axis=0)
+
+
+filas = []
+for identificador in APTAS21:
+    s = cargar(identificador)
+    y_tr = s.entrenamiento.to_numpy().astype(float)
+    y_te = s.prueba.to_numpy().astype(float)
+    h = s.horizonte
+    escala = np.abs(np.diff(y_tr)).mean()
+    for nivel in (0.80, 0.95):
+        for nombre, funcion in (("analítico, raíz de h", naive_analitico),
+                                ("bootstrap", naive_bootstrap)):
+            lo, hi = funcion(y_tr, h, nivel)
+            filas.append({"método": nombre, "nivel": nivel,
+                          "cobertura": ((y_te >= lo) & (y_te <= hi)).mean(),
+                          "ancho": np.mean(hi - lo) / escala})
+
+NAIVE = pd.DataFrame(filas)
+pd.DataFrame({
+    "cobertura al 80 %": 100 * NAIVE[NAIVE["nivel"] == 0.80].groupby("método")["cobertura"].mean(),
+    "cobertura al 95 %": 100 * NAIVE[NAIVE["nivel"] == 0.95].groupby("método")["cobertura"].mean(),
+    "ancho al 95 %": NAIVE[NAIVE["nivel"] == 0.95].groupby("método")["ancho"].mean(),
+}).round(1)
+```
+
+**Sí, ahora la fórmula es la correcta para todas las series** —con `naive` no hay período estacional
+que complique la @eq-varianza-snaive, y $\sqrt{h}$ es exactamente el ancho del paseo aleatorio—.
+
+**Y no, la cobertura no mejora: empeora.** El analítico da 84,0 % al 95 % nominal y el bootstrap
+85,2 %, contra los 88,2 % que daba la fórmula de la raíz aplicada a `snaive`. Y al 80 % nominal la
+cobertura es 74,0 % y 69,6 %.
+
+Es un resultado que ordena todo el capítulo. Con `snaive`, la fórmula de la raíz cubría mejor
+**porque estaba mal**: aplicaba a un método con ciclos una varianza que crece nueve veces más
+rápido de lo que corresponde, y el exceso de ancho tapaba la brecha de cobertura. Con `naive` esa
+sobrecompensación desaparece, la fórmula es correcta, el ancho baja de 40,5 a 23,6 y la cobertura
+queda donde de verdad está.
+
+Que las dos vías —fórmula correcta y bootstrap— coincidan en 84,0 % y 85,2 % es la confirmación de
+que **la brecha no es un error de cálculo**. Los dos métodos, hechos bien, dicen lo mismo: un
+intervalo de residuos al 95 % cubre alrededor del 85 %.
+
+### Ejercicio 4 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-21-4
+#| tbl-cap: "Calibrar el nivel nominal en el período de validación y aplicarlo al de prueba."
+filas = []
+for identificador in APTAS21:
+    s = cargar(identificador)
+    y_tr = s.entrenamiento.to_numpy().astype(float)
+    y_te = s.prueba.to_numpy().astype(float)
+    h, m = s.horizonte, s.periodo_estacional
+    if len(y_tr) < max(2 * m + 8 + h, 2 * h + 20):
+        continue
+    y_aj, y_val = y_tr[:-h], y_tr[-h:]
+
+    # Buscar en validación el nivel nominal que alcanza el 95 % de cobertura.
+    calibrado = 0.999
+    for nivel in np.arange(0.95, 0.9991, 0.005):
+        lo, hi = boot21(y_aj, h, m, float(nivel), B=600, semilla=1)
+        if ((y_val >= lo) & (y_val <= hi)).mean() >= 0.95:
+            calibrado = float(nivel)
+            break
+
+    lo, hi = boot21(y_tr, h, m, 0.95, B=1000, semilla=2)
+    nominal = ((y_te >= lo) & (y_te <= hi)).mean()
+    ancho_nominal = np.mean(hi - lo)
+
+    lo, hi = boot21(y_tr, h, m, calibrado, B=1000, semilla=2)
+    con_calibracion = ((y_te >= lo) & (y_te <= hi)).mean()
+
+    filas.append({"serie": identificador, "nivel calibrado": calibrado,
+                  "cobertura con 95 % nominal": nominal,
+                  "cobertura con el nivel calibrado": con_calibracion,
+                  "cuánto se ensancha": np.mean(hi - lo) / ancho_nominal})
+
+CAL = pd.DataFrame(filas)
+pd.DataFrame([{
+    "series": len(CAL),
+    "nivel calibrado mediano": CAL["nivel calibrado"].median(),
+    "cobertura en prueba, 95 % nominal": 100 * CAL["cobertura con 95 % nominal"].mean(),
+    "cobertura en prueba, calibrado": 100 * CAL["cobertura con el nivel calibrado"].mean(),
+    "series que llegan al 95 %, nominal": int((CAL["cobertura con 95 % nominal"] >= 0.95).sum()),
+    "series que llegan al 95 %, calibrado": int((CAL["cobertura con el nivel calibrado"] >= 0.95).sum()),
+    "ensanchamiento medio": CAL["cuánto se ensancha"].mean(),
+}], index=["calibración"]).round(1).T
+```
+
+**Sí se transfiere, y bastante: la cobertura en prueba pasa del 81,2 % al 89,3 %.**
+
+Es el resultado más útil del capítulo, porque es el único que reduce la brecha de verdad. Y viene
+con tres reservas que hay que decir junto con el número.
+
+**La calibración no llega al 95 %.** Sube 8,1 puntos y se queda 5,7 por debajo del nominal. Las
+series que alcanzan el 95 % real en prueba pasan de 15 a 18 sobre 30: mejora, no resuelve.
+
+**El nivel calibrado mediano es 0,950**, o sea que en la mitad de las series el 95 % ya alcanzaba en
+validación y no hizo falta corregir nada. La mejora viene de la otra mitad, donde el nivel se subió
+hasta 0,999. Eso significa que **la calibración es muy desigual entre series**, y un valor global
+—"usá siempre 0,99"— no habría funcionado.
+
+**Y el intervalo se ensancha.** No hay magia: cubrir más exige ser más ancho, y un intervalo más
+ancho es menos informativo. La calibración cambia una etiqueta falsa por una etiqueta honesta a
+cambio de precisión, que es un intercambio razonable, y no es una mejora gratis.
+
+### Ejercicio 5 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-21-5
+#| tbl-cap: "Remuestrear residuos contra simular residuos normales con la misma desviación, separando por la asimetría de los residuos."
+filas = []
+for identificador in APTAS21:
+    s = cargar(identificador)
+    y_tr = s.entrenamiento.to_numpy().astype(float)
+    y_te = s.prueba.to_numpy().astype(float)
+    h, m = s.horizonte, s.periodo_estacional
+    r = residuos21(y_tr, m)
+    lo, hi = boot21(y_tr, h, m, 0.95)
+    remuestreo = ((y_te >= lo) & (y_te <= hi)).mean()
+    ancho_r = np.mean(hi - lo)
+    lo, hi = boot21(y_tr, h, m, 0.95, normal=True)
+    normal = ((y_te >= lo) & (y_te <= hi)).mean()
+    ancho_n = np.mean(hi - lo)
+    filas.append({"serie": identificador,
+                  "asimetría": float(pd.Series(r).skew()),
+                  "remuestreo": remuestreo, "normal": normal,
+                  "ancho normal / remuestreo": ancho_n / ancho_r})
+
+ASIM = pd.DataFrame(filas)
+ASIM["|asimetría|"] = ASIM["asimetría"].abs()
+corte = ASIM["|asimetría|"].median()
+
+pd.DataFrame([
+    {"grupo": "todas", "series": len(ASIM),
+     "remuestreo": 100 * ASIM["remuestreo"].mean(),
+     "normal": 100 * ASIM["normal"].mean(),
+     "ancho normal / remuestreo": ASIM["ancho normal / remuestreo"].mean()},
+    {"grupo": f"|asimetría| > {corte:.2f}",
+     "series": int((ASIM["|asimetría|"] > corte).sum()),
+     "remuestreo": 100 * ASIM.loc[ASIM["|asimetría|"] > corte, "remuestreo"].mean(),
+     "normal": 100 * ASIM.loc[ASIM["|asimetría|"] > corte, "normal"].mean(),
+     "ancho normal / remuestreo":
+         ASIM.loc[ASIM["|asimetría|"] > corte, "ancho normal / remuestreo"].mean()},
+    {"grupo": f"|asimetría| ≤ {corte:.2f}",
+     "series": int((ASIM["|asimetría|"] <= corte).sum()),
+     "remuestreo": 100 * ASIM.loc[ASIM["|asimetría|"] <= corte, "remuestreo"].mean(),
+     "normal": 100 * ASIM.loc[ASIM["|asimetría|"] <= corte, "normal"].mean(),
+     "ancho normal / remuestreo":
+         ASIM.loc[ASIM["|asimetría|"] <= corte, "ancho normal / remuestreo"].mean()},
+]).set_index("grupo").round(1)
+```
+
+En promedio casi no cambia —80,9 % remuestreando y 79,8 % con residuos normales— pero **al separar
+por asimetría aparece un cruce que va en contra de la intuición.**
+
+Con residuos **poco asimétricos**, el remuestreo cubre el 85,9 % y el normal el 78,5 %: el
+remuestreo gana por siete puntos, que es lo esperable.
+
+Con residuos **muy asimétricos**, se da vuelta: el remuestreo cubre el 75,5 % y el normal el 81,1 %.
+El método que respeta la forma de la distribución cubre **peor** justamente donde esa forma es más
+distinta de una normal.
+
+La explicación está en cuántas observaciones sostienen cada cuantil. El intervalo del 95 % usa los
+percentiles 2,5 y 97,5, y esos percentiles de la distribución de residuos se estiman con los pocos
+residuos más extremos: en una serie con 100 observaciones y $m = 12$, hay 88 residuos y el percentil
+2,5 se apoya en dos. **Con residuos asimétricos, esos dos o tres valores extremos son justamente los
+menos representativos**, y el intervalo empírico hereda su ruido. La normal, en cambio, usa los 88
+residuos para estimar un solo número —la desviación— y sale un intervalo 60 % más ancho en ese grupo
+y mucho más estable.
+
+De ahí una regla que no aparece en los manuales del bootstrap: **el remuestreo de residuos necesita
+suficientes residuos en la cola que interesa.** Con menos de un par de cientos, para el 95 % conviene
+la normal o un nivel menos exigente; el 80 % del bootstrap sí está bien sostenido.
+
+### Ejercicio 6 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-21-6
+#| tbl-cap: "El ensamble de @bergmeir2016 en pequeño: diez series sintéticas por bootstrap de bloques sobre el residuo de STL, un Holt-Winters en cada una, y el promedio."
+def holt_winters21(y, h, m):
+    if m <= 1 or len(y) < 2 * m + 4:
+        return snaive21(y, h, m)
+    return np.asarray(
+        ExponentialSmoothing(y, trend="add", seasonal="add", seasonal_periods=m,
+                             initialization_method="estimated").fit().forecast(h))
+
+
+filas = []
+for identificador in APTAS21:
+    s = cargar(identificador)
+    y_tr = s.entrenamiento.to_numpy().astype(float)
+    y_te = s.prueba.to_numpy().astype(float)
+    h, m = s.horizonte, s.periodo_estacional
+    if m <= 1 or len(y_tr) < 3 * m + 10:
+        continue
+
+    base = smape(y_te, holt_winters21(y_tr, h, m))
+
+    descomposicion = STL(pd.Series(y_tr), period=m, robust=True).fit()
+    resto = descomposicion.resid.to_numpy()
+    suave = (descomposicion.trend + descomposicion.seasonal).to_numpy()
+
+    rng = np.random.default_rng(3)
+    L = max(2, m // 2)
+    pronosticos = []
+    for _ in range(10):
+        secuencia = []
+        while len(secuencia) < len(resto):
+            i = rng.integers(0, len(resto) - L + 1)
+            secuencia.extend(resto[i:i + L])
+        sintetica = suave + np.array(secuencia[:len(resto)])
+        try:
+            pronosticos.append(holt_winters21(sintetica, h, m))
+        except Exception:
+            pass
+    if not pronosticos:
+        continue
+
+    ensamble = smape(y_te, np.mean(pronosticos, axis=0))
+    filas.append({"serie": identificador, "Holt-Winters": base,
+                  "ensamble por bootstrap": ensamble, "mejora": base - ensamble})
+
+BAG = pd.DataFrame(filas)
+pd.DataFrame([{
+    "series estacionales": len(BAG),
+    "Holt-Winters, sMAPE medio": BAG["Holt-Winters"].mean(),
+    "ensamble, sMAPE medio": BAG["ensamble por bootstrap"].mean(),
+    "Holt-Winters, mediano": BAG["Holt-Winters"].median(),
+    "ensamble, mediano": BAG["ensamble por bootstrap"].median(),
+    "mejora en": int((BAG["mejora"] > 0).sum()),
+}], index=["bagging por bootstrap"]).round(2).T
+```
+
+**Le gana en la media y le pierde en la mediana**, que a esta altura del libro ya no debería
+sorprender: 20,61 contra 17,78 en la media y 8,77 contra 12,09 en la mediana, mejorando en solo 8 de
+23 series.
+
+El patrón es el mismo que el @sec-ensambles midió en la @tbl-combinaciones y por el mismo motivo:
+**el promedio de trayectorias amortigua los desastres y estropea los casos buenos.** Cuando
+Holt-Winters se dispara en una serie —el @sec-saturacion documentó que llega a valores negativos—,
+promediar diez versiones ajustadas a series sintéticas lo tira hacia el centro y salva la situación.
+Cuando Holt-Winters ya andaba bien, las diez series sintéticas son diez perturbaciones del original y
+el promedio se aleja del ajuste que servía.
+
+Vale además señalar la distancia con el resultado original. @bergmeir2016 encuentran una mejora
+consistente, y su procedimiento tiene tres cosas que este ejercicio no: la transformación de Box-Cox
+antes de descomponer, cien series sintéticas en vez de diez, y la **mediana** en vez de la media para
+combinar. Las tres apuntan en la misma dirección —robustez— y el ejercicio deja las tres afuera.
+
+Es una buena muestra de por qué reproducir un método publicado es más difícil de lo que parece:
+**lo que hace que funcione suele estar en los detalles que en el resumen del artículo parecen
+accesorios.**
