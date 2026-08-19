@@ -1,7 +1,520 @@
+---
+resources:
+  - datos/cap04_estacionales.csv
+---
+
 # Bootstrapping {#sec-bootstrapping}
 
-Remuestreo, incertidumbre e intervalos empíricos.
+```{python}
+#| echo: false
+import warnings
 
-::: {.callout-note appearance="simple"}
-Capítulo en preparación.
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+
+from libro.datos import cargar, catalogo
+from libro.graficos import COLORES, mostrar
+
+warnings.simplefilter("ignore")
+```
+
+El @sec-intervalos construyó intervalos de predicción con una fórmula: el pronóstico más o menos
+$z$ veces la desviación de los residuos, ensanchándose con la raíz del horizonte. Este capítulo
+reemplaza la fórmula por una simulación, y después mide algo que el libro todavía no había medido:
+**si un intervalo del 95 % contiene el valor real el 95 % de las veces.**
+
+La respuesta es no, por ningún método, y la brecha es grande.
+
+## Remuestrear en vez de suponer {#sec-remuestrear}
+
+Un intervalo analítico necesita tres supuestos: que los residuos son independientes, que tienen
+varianza constante y que su distribución es normal. El **bootstrap** [@efron1979] reemplaza el
+tercero por una simulación: en vez de suponer de qué forma es la distribución de los errores, usa
+la distribución empírica de los residuos observados.
+
+Sea $\hat{f}$ el método, $\{r_1, \dots, r_n\}$ sus residuos dentro de la muestra, y
+$r^{*}$ un residuo tomado al azar de ese conjunto con reemplazo. Una **trayectoria simulada** se
+construye hacia adelante:
+
+$$
+y^{*}_{t+k} = \hat{f}\!\left( y_1, \dots, y_t, y^{*}_{t+1}, \dots, y^{*}_{t+k-1} \right)
+              + r^{*}_k,
+\qquad k = 1, \dots, h
+$$ {#eq-trayectoria}
+
+Repitiendo la @eq-trayectoria $B$ veces quedan $B$ futuros posibles, y el intervalo del
+$100(1-\alpha)\,\%$ son los cuantiles empíricos de esas trayectorias en cada paso:
+
+$$
+\left[\; \hat{q}_{\alpha/2}(k),\;\; \hat{q}_{1 - \alpha/2}(k) \;\right],
+\qquad k = 1, \dots, h
+$$ {#eq-cuantiles}
+
+Dos propiedades de la @eq-trayectoria valen la pena antes de medir nada.
+
+**No hace falta ninguna fórmula para el ancho.** El intervalo se ensancha con el horizonte porque la
+simulación lo hace: el residuo del paso 1 entra en la entrada del paso 2. Eso importa más de lo que
+parece, y la sección siguiente muestra por qué.
+
+**La distribución del intervalo puede ser asimétrica.** Si los residuos tienen cola larga hacia
+arriba, los cuantiles de la @eq-cuantiles lo reflejan. Una fórmula con $\pm z\sigma$ nunca puede.
+
+```{python}
+#| echo: false
+def snaive(y, h, m):
+    if m <= 1:
+        return np.repeat(y[-1], h)
+    return np.array([y[-m + (i % m)] for i in range(h)])
+
+
+def residuos_snaive(y, m):
+    """Residuos dentro de la muestra del naive estacional."""
+    if m <= 1:
+        ajustado = np.concatenate([[np.nan], y[:-1]])
+    else:
+        ajustado = np.concatenate([np.full(m, np.nan), y[:-m]])
+    r = y - ajustado
+    return r[~np.isnan(r)]
+
+
+Z = {0.80: 1.2816, 0.90: 1.6449, 0.95: 1.9600}
+
+
+def analitico_raiz(y, h, m, nivel=0.95):
+    """La fórmula del @sec-intervalos: el ancho crece con la raíz de h."""
+    r = residuos_snaive(y, m)
+    ancho = Z[nivel] * np.std(r, ddof=1) * np.sqrt(np.arange(1, h + 1))
+    centro = snaive(y, h, m)
+    return centro - ancho, centro + ancho
+
+
+def analitico_snaive(y, h, m, nivel=0.95):
+    """La fórmula correcta para snaive: la varianza crece por ciclos completos."""
+    r = residuos_snaive(y, m)
+    ciclos = np.floor((np.arange(1, h + 1) - 1) / max(m, 1))
+    ancho = Z[nivel] * np.std(r, ddof=1) * np.sqrt(ciclos + 1)
+    centro = snaive(y, h, m)
+    return centro - ancho, centro + ancho
+
+
+def bootstrap(y, h, m, nivel=0.95, B=1000, semilla=0):
+    rng = np.random.default_rng(semilla)
+    r = residuos_snaive(y, m)
+    if len(r) < 3:
+        return analitico_snaive(y, h, m, nivel)
+    sims = np.empty((B, h))
+    for b in range(B):
+        historia = list(y)
+        for _ in range(h):
+            base = snaive(np.array(historia), 1, m)[0]
+            historia.append(base + rng.choice(r))
+        sims[b] = historia[-h:]
+    a = (1 - nivel) / 2
+    return np.quantile(sims, a, axis=0), np.quantile(sims, 1 - a, axis=0)
+
+
+def bootstrap_bloques(y, h, m, nivel=0.95, B=1000, semilla=0):
+    """Pega bloques de residuos consecutivos para preservar su autocorrelación."""
+    rng = np.random.default_rng(semilla)
+    r = residuos_snaive(y, m)
+    if len(r) < 6:
+        return analitico_snaive(y, h, m, nivel)
+    L = max(2, min(len(r) // 4, m if m > 1 else 4))
+    sims = np.empty((B, h))
+    for b in range(B):
+        secuencia = []
+        while len(secuencia) < h:
+            i = rng.integers(0, len(r) - L + 1)
+            secuencia.extend(r[i:i + L])
+        secuencia = np.array(secuencia[:h])
+        historia = list(y)
+        for k in range(h):
+            base = snaive(np.array(historia), 1, m)[0]
+            historia.append(base + secuencia[k])
+        sims[b] = historia[-h:]
+    a = (1 - nivel) / 2
+    return np.quantile(sims, a, axis=0), np.quantile(sims, 1 - a, axis=0)
+
+
+METODOS = {
+    "analítico, raíz de h": analitico_raiz,
+    "analítico, fórmula de snaive": analitico_snaive,
+    "bootstrap": bootstrap,
+    "bootstrap por bloques": bootstrap_bloques,
+}
+NIVELES = (0.80, 0.95)
+
+_filas, _por_paso = [], {n: {} for n in METODOS}
+for _sid in catalogo()["serie"]:
+    _s = cargar(_sid)
+    _ytr = _s.entrenamiento.to_numpy().astype(float)
+    _yte = _s.prueba.to_numpy().astype(float)
+    _h, _m = _s.horizonte, _s.periodo_estacional
+    if len(_ytr) < max(2 * _m + 8, 20):
+        continue
+    _escala = np.abs(np.diff(_ytr)).mean()
+    for _niv in NIVELES:
+        for _n, _f in METODOS.items():
+            _lo, _hi = _f(_ytr, _h, _m, _niv)
+            _dentro = (_yte >= _lo) & (_yte <= _hi)
+            _filas.append({
+                "serie": _sid, "n": len(_ytr), "h": _h, "m": _m,
+                "nivel": _niv, "método": _n,
+                "cobertura": _dentro.mean(),
+                "ancho relativo": np.mean(_hi - _lo) / _escala,
+            })
+            if _niv == 0.95:
+                _por_paso[_n][_sid] = _dentro
+
+COB = pd.DataFrame(_filas)
+```
+
+## Una trayectoria a la vez {#sec-widget-21}
+
+El widget arma las trayectorias de la @eq-trayectoria una por una. Sube $B$ y mira cómo el conjunto
+de futuros posibles se llena y cómo los cuantiles de la @eq-cuantiles se estabilizan.
+
+Tres cosas que vale la pena buscar:
+
+- **Con $B$ chico el intervalo es ruidoso**; a partir de unas cien trayectorias casi no se mueve.
+  Los cuantiles extremos —el 2,5 % y el 97,5 %— necesitan más trayectorias que los centrales.
+- **El intervalo se ensancha con el horizonte sin que nadie le pida que lo haga.** Sale de que cada
+  residuo simulado entra como dato en el paso siguiente.
+- Cambia a **residuos normales** en vez de remuestreados y mira la diferencia. Si los residuos
+  reales tienen cola, el intervalo bootstrap es asimétrico y el normal no.
+
+```{shinylive-python}
+#| standalone: true
+#| viewerHeight: 860
+#| components: [viewer]
+
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from shiny import App, reactive, render, ui
+
+AQUI = Path(__file__).parent
+datos = pd.read_csv(AQUI / "cap04_estacionales.csv", parse_dates=["ds"])
+ETIQUETAS = list(dict.fromkeys(datos["etiqueta"]))
+
+app_ui = ui.page_fluid(
+    ui.layout_columns(
+        ui.input_select("serie", "Serie", ETIQUETAS, selected=ETIQUETAS[0]),
+        ui.input_slider("B", "Trayectorias", 1, 500, 1, animate=True),
+        ui.input_select("nivel", "Nivel", ["80 %", "95 %"], selected="95 %"),
+        ui.input_checkbox("normal", "Residuos normales", False),
+        col_widths=[3, 4, 2, 3],
+    ),
+    ui.output_ui("resumen"),
+    ui.output_plot("grafico", height="640px"),
+)
+
+
+def servidor(input, output, session):
+
+    @reactive.calc
+    def serie():
+        g = datos[datos["etiqueta"] == input.serie()].sort_values("ds")
+        m = int(g["m"].iloc[0])
+        h = int((g["split"] == "prueba").sum())
+        y = g[g["split"] == "entrenamiento"]["y"].to_numpy()
+        y_prueba = g[g["split"] == "prueba"]["y"].to_numpy()
+        return y, y_prueba, m, h
+
+    @reactive.calc
+    def simulaciones():
+        """Las 500 trayectorias, calculadas una vez; el deslizador solo elige cuántas usar."""
+        y, _, m, h = serie()
+        ajustado = np.concatenate([np.full(m, np.nan), y[:-m]])
+        r = (y - ajustado)
+        r = r[~np.isnan(r)]
+        rng = np.random.default_rng(0)
+        sims = np.empty((500, h))
+        for b in range(500):
+            historia = list(y)
+            for _ in range(h):
+                base = historia[-m]
+                paso = (rng.normal(0.0, r.std(ddof=1)) if input.normal()
+                        else rng.choice(r))
+                historia.append(base + paso)
+            sims[b] = historia[-h:]
+        return sims, r
+
+    @render.ui
+    def resumen():
+        sims, r = simulaciones()
+        _, y_prueba, _, h = serie()
+        B = int(input.B())
+        alfa = 0.10 if input.nivel() == "80 %" else 0.025
+        lo = np.quantile(sims[:B], alfa, axis=0)
+        hi = np.quantile(sims[:B], 1 - alfa, axis=0)
+        dentro = ((y_prueba >= lo) & (y_prueba <= hi)).mean()
+        return ui.markdown(
+            f"**{B}** trayectorias · ancho medio **{np.mean(hi - lo):,.1f}** · "
+            f"cubre **{100 * dentro:.0f} %** de los {h} valores reales · "
+            f"asimetría de los residuos **{float(pd.Series(r).skew()):+.2f}**"
+        )
+
+    @render.plot
+    def grafico():
+        y, y_prueba, m, h = serie()
+        sims, r = simulaciones()
+        B = int(input.B())
+        alfa = 0.10 if input.nivel() == "80 %" else 0.025
+
+        n = len(y)
+        eje = np.arange(n, n + h)
+        lo = np.quantile(sims[:B], alfa, axis=0)
+        hi = np.quantile(sims[:B], 1 - alfa, axis=0)
+        centro = np.array([y[-m + (i % m)] for i in range(h)])
+
+        fig, (arriba, abajo) = plt.subplots(
+            2, 1, figsize=(9, 6.6), gridspec_kw={"height_ratios": [2.2, 1]})
+
+        cola = max(0, n - 4 * h)
+        arriba.plot(np.arange(cola, n), y[cola:], lw=1.6, color="#1f4e79",
+                    label="entrenamiento")
+        for b in range(min(B, 120)):
+            arriba.plot(eje, sims[b], lw=0.5, color="#999999", alpha=0.35)
+        arriba.fill_between(eje, lo, hi, color="#2e8b57", alpha=0.20,
+                            label=f"intervalo {input.nivel()}")
+        arriba.plot(eje, centro, lw=2, ls="--", color="#2e8b57",
+                    label="pronóstico")
+        arriba.plot(eje, y_prueba, lw=2, color="#c0504d", label="real")
+        arriba.legend(loc="upper left", fontsize=8)
+        arriba.set_title(f"{B} trayectorias simuladas y el intervalo que definen",
+                         fontsize=9)
+
+        abajo.hist(r, bins=min(20, max(5, len(r) // 4)), color="#1f4e79",
+                   alpha=0.75)
+        abajo.axvline(0, color="gray", lw=1)
+        abajo.set_title("distribución de los residuos que se remuestrean",
+                        fontsize=9)
+
+        fig.tight_layout()
+        return fig
+
+
+app = App(app_ui, servidor)
+
+## file: cap04_estacionales.csv
+{{< include datos/cap04_estacionales.csv >}}
+```
+
+## La fórmula depende del método {#sec-formula-depende}
+
+Antes de comparar el bootstrap con la fórmula hay que corregir una cosa, y es un error fácil de
+cometer.
+
+El ancho $\propto \sqrt{h}$ del @sec-intervalos es el del **paseo aleatorio**: cada paso hacia
+adelante acumula una varianza $\sigma^2$ más, así que a $h$ pasos la varianza es $h\sigma^2$. Para el
+naive eso es correcto. Para el **naive estacional** no lo es, porque el pronóstico del paso $k$ no
+se apoya en el paso $k-1$ sino en el valor de hace $m$ períodos. La varianza crece por **ciclos
+completos**:
+
+$$
+\operatorname{Var}\!\left( \hat{y}_{t+k} \right)
+= \sigma^2 \left( 1 + \left\lfloor \frac{k-1}{m} \right\rfloor \right)
+$$ {#eq-varianza-snaive}
+
+Con $m = 12$ y $h = 18$, la @eq-varianza-snaive da varianza $\sigma^2$ en los primeros doce pasos y
+$2\sigma^2$ en los seis últimos. La fórmula de la raíz daría $18\sigma^2$ en el último paso: **nueve
+veces más.**
+
+```{python}
+#| label: tbl-formulas
+#| tbl-cap: "Las dos fórmulas y los dos bootstraps, sobre las series del catálogo, separando estacionales de no estacionales. Cobertura en porcentaje."
+cobertura = 100 * COB.pivot_table(index="método", columns="nivel",
+                                  values="cobertura")
+ancho = COB.pivot_table(index="método", columns="nivel",
+                        values="ancho relativo")
+
+tabla = pd.DataFrame({
+    "cobertura al 80 %": cobertura[0.80],
+    "cobertura al 95 %": cobertura[0.95],
+    "ancho al 95 %": ancho[0.95],
+})
+tabla.loc[:, "estacionales, al 95 %"] = 100 * (
+    COB[(COB["m"] > 1) & (COB["nivel"] == 0.95)]
+    .groupby("método")["cobertura"].mean())
+tabla.loc[:, "no estacionales, al 95 %"] = 100 * (
+    COB[(COB["m"] == 1) & (COB["nivel"] == 0.95)]
+    .groupby("método")["cobertura"].mean())
+tabla.round(1)
+```
+
+La tabla tiene una comprobación adentro que conviene mirar primero. **En las series no estacionales
+las dos fórmulas dan exactamente lo mismo: 85,7 %.** Es lo que tiene que pasar, porque con $m = 1$
+el naive estacional *es* el naive y la @eq-varianza-snaive se reduce a $k\sigma^2$. Que coincidan
+confirma que las dos están bien implementadas.
+
+En las estacionales se separan, y mucho. La fórmula de la raíz cubre el 89,1 % y la correcta el
+77,5 %, **con la mitad del ancho**: 20,2 contra 40,5. La fórmula equivocada no cubre mejor por ser
+mejor: cubre mejor por ser el doble de ancha.
+
+Y el bootstrap coincide con la fórmula correcta —79,9 % contra 77,5 % en las estacionales, con
+anchos de 18,6 y 20,2— sin que nadie le haya dicho nada sobre ciclos ni sobre $\lfloor (k-1)/m
+\rfloor$. Eso es lo que hace valioso al método:
+
+::: {.callout-tip}
+## El bootstrap no se equivoca de fórmula
+
+La @eq-trayectoria simula el método tal como es. Si el método se apoya en el valor de hace $m$
+períodos, la simulación acumula varianza cada $m$ pasos, y el ancho sale bien **sin que haya que
+derivar nada.**
+
+Para `snaive` la derivación es fácil y está en la @eq-varianza-snaive. Para Holt-Winters con
+tendencia amortiguada, para un bosque aleatorio o para el pronóstico recursivo del
+@sec-prediccion, **no existe fórmula cerrada**. Ahí el bootstrap no es una alternativa elegante: es
+la única opción.
+
+Y por eso `statsforecast` y `statsmodels` construyen los intervalos de los modelos ETS por
+simulación [@hyndman2002], no por fórmula.
+:::
+
+## Lo que ningún método logra {#sec-cobertura}
+
+Corregida la fórmula, queda el resultado incómodo del capítulo.
+
+```{python}
+#| label: fig-cobertura
+#| fig-cap: "Cobertura empírica contra la nominal. La diagonal es dónde debería estar cada punto."
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=[70, 100], y=[70, 100], mode="lines",
+                         name="cobertura correcta",
+                         line=dict(color=COLORES["auxiliar"], dash="dash",
+                                   width=1)))
+paleta = [COLORES["prueba"], COLORES["observado"], "#2e8b57", "#d18b2c"]
+for color, metodo in zip(paleta, METODOS):
+    sub = COB[COB["método"] == metodo].groupby("nivel")["cobertura"].mean()
+    fig.add_trace(go.Scatter(
+        x=[100 * n for n in sub.index], y=[100 * v for v in sub.values],
+        mode="lines+markers", name=metodo,
+        line=dict(color=color, width=2), marker=dict(size=9),
+    ))
+fig.update_xaxes(title="nivel nominal (%)", range=[75, 100])
+fig.update_yaxes(range=[55, 100])
+mostrar(fig, alto=430, titulo_y="cobertura empírica (%)")
+```
+
+**Todos los puntos están por debajo de la diagonal.** Un intervalo declarado del 95 % contiene el
+valor real entre el 79,6 % y el 88,2 % de las veces según el método, y uno declarado del 80 % lo
+contiene entre el 62,1 % y el 82,0 %.
+
+La brecha es peor en el nivel del 80 % que en el del 95 %, lo que descarta la explicación más
+cómoda —"las colas son más gordas que la normal"—: si fuera solo eso, el 80 % andaría bien y el
+95 % fallaría. Falla el de más adentro también.
+
+```{python}
+#| label: tbl-cobertura-paso
+#| tbl-cap: "Cobertura al 95 % en cada uno de los ocho primeros pasos del horizonte."
+filas = []
+for metodo in METODOS:
+    serie_dentro = [v[:8] for v in _por_paso[metodo].values() if len(v) >= 8]
+    promedio = 100 * np.mean(serie_dentro, axis=0)
+    fila = {"método": metodo}
+    fila.update({f"paso {k + 1}": promedio[k] for k in range(8)})
+    filas.append(fila)
+
+pd.DataFrame(filas).set_index("método").round(1)
+```
+
+Y acá está el dato que descarta la otra explicación cómoda —"el intervalo se queda corto en los
+horizontes largos"—. **En el paso 1 los cuatro métodos cubren el 85,7 %**, y ahí no hay ninguna
+acumulación de nada: es un pronóstico a un paso con un intervalo construido con los residuos a un
+paso. Nueve puntos de brecha antes de que el horizonte empiece.
+
+Después sí hay degradación, y desigual: la fórmula de la raíz se mantiene entre 85 y 89 por ser cada
+vez más ancha, la fórmula correcta cae a 75,0 y el bootstrap a 82,1. Pero eso es lo de menos frente
+a la brecha que ya existe en el primer paso.
+
+::: {.callout-warning}
+## Las tres cosas que un intervalo de residuos no cuenta
+
+**La incertidumbre de los parámetros.** La @eq-trayectoria remuestrea residuos de un modelo cuyos
+parámetros se estimaron con los mismos datos. Si el modelo se hubiera ajustado con otra muestra,
+sus residuos serían otros, y esa variabilidad no aparece en el intervalo. Con las series cortas del
+@sec-los-datos esa variabilidad es grande.
+
+**La incertidumbre del modelo.** El intervalo supone que el método elegido es el correcto. El
+@sec-particiones midió que en 30 series el mejor método cambia todo el tiempo y que elegirlo tiene
+un optimismo de 3,45 puntos de sMAPE: nada de eso está en el ancho.
+
+**Que el futuro se parezca al pasado.** Es el supuesto más fuerte y el que más se rompe. El
+@sec-los-datos mostró `M3007`, donde el nivel se multiplica por 2,3 dentro del período de prueba.
+Ningún residuo del pasado tiene ese tamaño, así que ningún remuestreo de residuos puede producir
+esa trayectoria. **El intervalo no falla por estar mal calculado: falla porque el futuro trajo algo
+que no estaba en la muestra.**
+
+@chatfield1993 ya argumentaba esto en 1993 y sigue siendo la explicación estándar de por qué los
+intervalos publicados son demasiado angostos. M4 midió lo mismo a gran escala
+[@makridakis2020].
+:::
+
+## Qué hacer con esto {#sec-que-hacer-intervalos}
+
+No hay una técnica que arregle la brecha, y prometer una sería peor que el problema. Lo que sí hay
+son cuatro respuestas honestas, en orden de cuánto cuestan.
+
+**Reportar la cobertura empírica junto al nivel nominal.** Si el intervalo del 95 % cubre el 80 %
+en validación, eso es un número que se puede medir y publicar. Un intervalo con la etiqueta
+corregida es útil; uno con la etiqueta equivocada es peor que ninguno.
+
+**Calibrar el nivel.** Si al 95 % nominal la cobertura empírica es del 80 %, se puede buscar en
+validación el nivel nominal que da el 95 % real. Es un ajuste crudo y funciona mientras el futuro
+se parezca a la validación. El ejercicio 4 lo mide.
+
+**Ensanchar por regla.** Multiplicar el ancho por una constante estimada en validación. Es lo mismo
+que calibrar visto desde el otro lado y tiene la misma limitación.
+
+**Poner una cota de sensatez.** Es la decisión que la aplicación de pronóstico de este proyecto ya
+tiene tomada, y sale de haber medido una serie con MASE de 127.000: antes de mostrar un intervalo,
+verificar que sus extremos sean valores posibles para la cantidad que se está pronosticando. No
+mejora la cobertura y evita el ridículo, que a veces es lo que importa. El @sec-produccion lo
+desarrolla.
+
+::: {.callout-note}
+## El bootstrap sirve para más que intervalos
+
+Este capítulo lo usa para cuantificar incertidumbre, y hay otro uso que la literatura de pronóstico
+explotó bien: **generar series parecidas para entrenar con más datos.** @bergmeir2016 descomponen la
+serie con STL, remuestrean el residuo por bloques, reconstruyen muchas series sintéticas y ajustan
+un modelo a cada una, promediando los pronósticos.
+
+Es un ensamble del @sec-ensambles cuyos miembros difieren en los **datos** en vez de en el método,
+y por eso sus errores son más diversos que los de la @tbl-diversidad. El ejercicio 6 lo arma en
+pequeño.
+:::
+
+## Ejercicios
+
+Las soluciones están en el @sec-soluciones-21.
+
+**1.** El bootstrap del capítulo remuestrea residuos de forma independiente. Verifica si los
+residuos de `snaive` están autocorrelacionados con el Ljung-Box del @sec-arima. ¿En cuántas series
+del catálogo se rechaza la independencia, y ahí el bootstrap por bloques cubre mejor?
+
+**2.** Mide cuántas trayectorias hacen falta. Calcula el intervalo del 95 % con $B$ de 10 a 2000 y
+mira cuánto se mueven sus extremos. ¿A partir de qué $B$ la diferencia es menor que el 1 % del
+ancho?
+
+**3.** Repite la @tbl-formulas usando `naive` en vez de `snaive`. ¿Las dos fórmulas coinciden ahora
+en todas las series? ¿Y la cobertura mejora?
+
+**4.** Calibra el nivel: busca en el período de validación el nivel nominal que da una cobertura
+empírica del 95 %, y evalúa esa calibración en el período de prueba. ¿Se transfiere?
+
+**5.** Reemplaza el remuestreo de residuos por residuos normales con la misma desviación. ¿Cambia
+la cobertura? Relaciona el resultado con la asimetría de los residuos de cada serie.
+
+**6.** Arma el ensamble de @bergmeir2016 en pequeño: descompón una serie con STL, remuestrea el
+residuo por bloques para generar diez series sintéticas, ajusta Holt-Winters a cada una y promedia.
+¿Le gana a Holt-Winters sobre la serie original?
+
+## Referencias {.unnumbered}
+
+::: {#refs}
 :::
