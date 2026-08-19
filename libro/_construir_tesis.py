@@ -63,5 +63,42 @@ por_frecuencia["razón"] = (por_frecuencia["ruido de semilla"]
 por_frecuencia.to_parquet(DESTINO / "semillas_por_frecuencia.parquet", index=False)
 print("semillas_por_frecuencia.parquet", por_frecuencia.shape)
 
+# --- 6. Validación externa: Naive2 contra los valores publicados de M4 (6.1)
+naive2 = pd.DataFrame([
+    {"frecuencia": "anual",      "calculado": 16.342, "publicado en M4": 16.342},
+    {"frecuencia": "trimestral", "calculado": 11.024, "publicado en M4": 11.012},
+    {"frecuencia": "mensual",    "calculado": 14.385, "publicado en M4": 14.427},
+    {"frecuencia": "semanal",    "calculado":  9.161, "publicado en M4":  9.161},
+    {"frecuencia": "diaria",     "calculado":  3.045, "publicado en M4":  3.045},
+    {"frecuencia": "horaria",    "calculado": 18.616, "publicado en M4": 18.383},
+    {"frecuencia": "todas",      "calculado": 13.548, "publicado en M4": 13.564},
+])
+naive2["diferencia"] = (naive2["calculado"] - naive2["publicado en M4"]).round(3)
+naive2.to_parquet(DESTINO / "naive2_validacion.parquet", index=False)
+print("naive2_validacion.parquet", naive2.shape)
+
+# --- 7. Costo computacional de reejecutar el pipeline completo (7.6)
+costo = pd.DataFrame([
+    {"etapa": "PCA e índice de complejidad", "minutos": 0.8},
+    {"etapa": "clustering", "minutos": 2.0},
+    {"etapa": "entropías", "minutos": 994.0},
+    {"etapa": "errores de pronóstico de la muestra", "minutos": 203.0},
+    {"etapa": "validación del índice", "minutos": 0.1},
+])
+costo["% del total"] = (100 * costo["minutos"] / costo["minutos"].sum()).round(1)
+costo.to_parquet(DESTINO / "costo.parquet", index=False)
+print("costo.parquet", costo.shape)
+
+# --- 8. Composición de la muestra contra la población de M4 (5.5)
+muestra = pd.DataFrame([
+    {"frecuencia": "diaria",  "en la muestra %": 21.0, "en M4 %": 4.2},
+    {"frecuencia": "horaria", "en la muestra %":  8.7, "en M4 %": 0.4},
+    {"frecuencia": "mensual", "en la muestra %": 21.0, "en M4 %": 48.0},
+])
+muestra["sobre-representación"] = (muestra["en la muestra %"]
+                                   / muestra["en M4 %"]).round(1)
+muestra.to_parquet(DESTINO / "muestra.parquet", index=False)
+print("muestra.parquet", muestra.shape)
+
 for p in sorted(DESTINO.glob("*.parquet")):
     print(f"  {p.name}: {p.stat().st_size / 1024:.1f} KB")

@@ -1,7 +1,510 @@
 # Caso de estudio: la competencia M4 {#sec-caso-m4}
 
-La competencia completa: métricas oficiales, benchmarks y los 26 modelos evaluados.
+```{python}
+#| echo: false
+import warnings
 
-::: {.callout-note appearance="simple"}
-Capítulo en preparación.
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+from sklearn.linear_model import LinearRegression
+
+from libro.datos import metadatos, resultados_tesis
+from libro.graficos import COLORES, mostrar
+
+warnings.simplefilter("ignore")
+```
+
+La Parte II terminó con una deuda. El @sec-modelo-global no pudo demostrar el enfoque global
+porque el catálogo tiene 34 series elegidas para ser distintas entre sí; el @sec-ensambles no pudo
+mostrar una combinación que le gane al mejor miembro porque sus nueve métodos no eran ni diversos ni
+parejos; y el @sec-aprendizaje-profundo tuvo que citar resultados en vez de entrenar redes.
+
+Este capítulo paga esa deuda con el material que la sostiene: **las 99.935 series de M4 con su índice
+de complejidad, y la evaluación de 26 modelos sobre una muestra de 4.773.** Es el único capítulo del
+libro donde los números vienen de una escala que el catálogo no puede alcanzar.
+
+## Qué fue M4 {#sec-que-fue-m4}
+
+La cuarta competencia Makridakis se corrió en 2018 con 100.000 series de tiempo, seis frecuencias y
+un procedimiento cerrado [@makridakis2018; @makridakis2020]. Tres reglas la hacen útil como caso de
+estudio.
+
+**Los datos y el corte estaban dados.** Cada serie venía partida en entrenamiento y prueba, con el
+horizonte fijado por frecuencia. Nadie eligió dónde cortar, así que la comparación entre 61
+participantes no depende de esa decisión. Es la partición del @sec-particion, impuesta por el
+organizador.
+
+**El benchmark estaba definido.** `Naive2` —naive sobre la serie desestacionalizada— es el
+denominador de la métrica oficial, y el @sec-caja-de-herramientas lo implementó con su particularidad
+de código incluida.
+
+**La métrica era una sola.** El OWA de la @eq-owa promedia el sMAPE y el MASE, cada uno relativo al
+de `Naive2`:
+
+$$
+\text{OWA} = \frac{1}{2}\left(
+  \frac{\overline{\text{sMAPE}}}{\overline{\text{sMAPE}}_{\text{Naive2}}} +
+  \frac{\overline{\text{MASE}}}{\overline{\text{MASE}}_{\text{Naive2}}}
+\right)
+$$ {#eq-owa-m4}
+
+Un OWA de 1 empata con el benchmark y menos de 1 le gana. El ganador de la competencia
+[@smyl2020] obtuvo **0,821**.
+
+::: {.callout-note}
+## Las dos trampas de la @eq-owa-m4, otra vez
+
+El @sec-agregacion midió las dos y conviene recordarlas antes de leer cualquier tabla de este
+capítulo.
+
+**Los promedios van arriba y abajo, no la razón.** La @eq-owa-m4 divide el sMAPE **promedio** por el
+del benchmark, no promedia razones serie por serie. Las dos cuentas dan números distintos y solo la
+primera es la oficial.
+
+**El denominador tiene que ser el de las mismas series.** Si un modelo no pudo ajustarse en 200
+series, su OWA se calcula contra el `Naive2` de las series que sí pudo, no contra el global. El
+@sec-denominador midió cuánto se distorsiona si no.
+:::
+
+## Reproducir el benchmark {#sec-reproducir-benchmark}
+
+Antes de comparar 26 modelos hay que poder reproducir el punto de referencia. Es la validación más
+importante de todo el pipeline y la que casi nadie publica.
+
+```{python}
+#| label: tbl-naive2
+#| tbl-cap: "sMAPE de `Naive2` calculado por el pipeline de la tesis contra los valores publicados por los organizadores de M4."
+resultados_tesis("naive2_validacion").set_index("frecuencia").round(3)
+```
+
+**Las tres frecuencias con $m = 1$ dan exactas hasta el tercer decimal.** Anual, semanal y diaria
+coinciden con 0,000 de diferencia, y ahí `Naive2` degenera en el naive simple porque no hay
+estacionalidad que quitar: es el caso donde no queda ningún grado de libertad de implementación.
+
+Las tres estacionales difieren en décimas: +0,012 en trimestral, −0,042 en mensual y +0,233 en
+horaria. La causa es concreta y vale nombrarla: `seasonal_decompose` de `statsmodels` no es idéntica
+al código original de la competencia, y la desestacionalización previa cambia unas milésimas.
+
+El total da 13,548 contra 13,564 publicado: **una diferencia de 0,016 sobre un valor de 13,5**, o el
+0,1 %.
+
+::: {.callout-tip}
+## Por qué esta tabla va primera
+
+Un pipeline que no reproduce el benchmark publicado no puede sostener ninguna comparación, porque
+cualquier diferencia entre modelos puede ser un error de la implementación. La @tbl-naive2 es lo que
+autoriza a leer el resto del capítulo.
+
+Y también es la razón por la que el @sec-caja-de-herramientas reprodujo la particularidad del código
+oficial de M4 en su prueba de estacionalidad —donde el primer término de la suma no va al cuadrado—
+en vez de usar la fórmula de libro. **Reproducir un resultado exige reproducir sus errores.**
+:::
+
+## Los 26 modelos {#sec-los-26}
+
+```{python}
+#| label: tbl-owa-m4
+#| tbl-cap: "Los modelos que superan a `Naive2` en la muestra de 4.773 series, con el OWA reponderado a la población real de M4."
+owa = resultados_tesis("owa").set_index("modelo")
+owa["le gana a Naive2"] = owa["OWA"] < 1.0
+owa.round(3)
+```
+
+Seis modelos de 26 le ganan al benchmark, y el mejor —ARIMA con OWA 0,936— queda a 0,115 del ganador
+de la competencia.
+
+Vale poner ese resultado en contexto en vez de leerlo como un fracaso. La lista de seis está
+compuesta por **ARIMA, SARIMA, LassoLars, regresión lineal, Holt-Winters y ETS**: cuatro métodos
+estadísticos clásicos y dos regresiones lineales regularizadas. Ninguna red, ningún ensamble de
+árboles, ningún boosting. Es la misma conclusión que la Parte II fue construyendo capítulo a
+capítulo, ahora sobre 4.773 series en vez de 30.
+
+```{python}
+#| label: fig-ranking
+#| fig-cap: "Rangos promedio de Friedman de los 27 modelos. Rango más bajo es mejor. La banda gris marca la distancia crítica de Nemenyi respecto del primero: los modelos dentro de la banda no se distinguen de ARIMA."
+friedman = (resultados_tesis("friedman")
+            .query("metrica == 'sMAPE'")
+            .sort_values("rango_promedio"))
+critica = friedman.loc[friedman["significativo"], "dif_vs_mejor"].min()
+mejor = friedman["rango_promedio"].min()
+
+fig = go.Figure()
+fig.add_vrect(x0=mejor, x1=mejor + critica, fillcolor=COLORES["auxiliar"],
+              opacity=0.18, line_width=0,
+              annotation_text="no se distingue del primero")
+fig.add_trace(go.Bar(
+    x=friedman["rango_promedio"], y=friedman["modelo"], orientation="h",
+    marker_color=[COLORES["observado"] if s else COLORES["pronostico"]
+                  for s in friedman["significativo"]],
+    showlegend=False,
+))
+fig.update_xaxes(title="rango promedio de Friedman", range=[9.5, 19.5])
+fig.update_yaxes(autorange="reversed")
+mostrar(fig, alto=620)
+```
+
+La figura es la manera correcta de mirar un ranking de modelos, y no la lista ordenada. **Los tres
+primeros están dentro de la banda**: ARIMA, SARIMA y ETS no se distinguen entre sí con esta
+evidencia, y decir que ARIMA "ganó" sería reportar 0,026 de diferencia de rango como si fuera un
+resultado.
+
+Al otro extremo, los cinco últimos puestos son los cinco modelos de aprendizaje profundo, con rangos
+de 17,3 a 18,9 contra los 10,6 del primero. Esa diferencia sí es significativa, y el
+@sec-aprendizaje-profundo explicó por qué: con series de cien observaciones, las redes no tienen con
+qué.
+
+::: {.callout-warning}
+## Un ranking de 27 puestos es en realidad unos pocos grupos
+
+El @sec-soluciones-22 contó cuántos pares de los 27 modelos **no** se distinguen con esta distancia
+crítica: **72 de 351, el 21 %**. Y no están repartidos al azar: se concentran en el pelotón del medio,
+donde catorce modelos comparten rangos entre 12,1 y 14,4.
+
+Lo que esta evidencia sostiene es un agrupamiento, no un orden: arriba los estadísticos clásicos,
+abajo las redes, y en el medio un grupo indistinguible. @demsar2006 propuso el diagrama de
+diferencias críticas precisamente para que un ranking no se lea como si cada puesto significara algo.
+:::
+
+## El índice de complejidad {#sec-indice-complejidad}
+
+El @sec-caracteristicas presentó el índice de complejidad estructural: un resumen por componentes
+principales de 29 descriptores, con el signo elegido para que más índice signifique más difícil. Acá
+se mide si cumple la promesa.
+
+La ventaja de este capítulo es que **no hace falta citar nada**: los metadatos que viajan en el
+repositorio traen el índice y el error del naive para las 99.935 series, así que la cuenta se puede
+hacer en la página.
+
+```{python}
+#| label: tbl-correlacion-global
+#| tbl-cap: "Correlación de cada medida de complejidad contra el sMAPE del naive, sobre las series de M4 donde la medida está definida."
+md = metadatos()
+MEDIDAS = ["complexity_index", "lz_complexity", "sample_entropy", "perm_entropy"]
+
+filas = []
+for medida in MEDIDAS:
+    sub = md.dropna(subset=[medida, "error_naive_smape"])
+    filas.append({
+        "medida": medida,
+        "series": len(sub),
+        "Pearson": sub[medida].corr(sub["error_naive_smape"]),
+        "Spearman": sub[medida].corr(sub["error_naive_smape"], method="spearman"),
+    })
+
+pd.DataFrame(filas).set_index("medida").round(3)
+```
+
+**El índice tiene la correlación lineal más alta: +0,405.** Y `lz_complexity` tiene la correlación de
+rangos más alta: +0,423 contra +0,399. Las dos cosas son ciertas a la vez y conviene decirlas juntas,
+porque no ordenan igual.
+
+La lectura correcta es que **Lempel-Ziv ordena las series algo mejor y el índice modela mejor la
+magnitud del error.** Y hay una razón para preferir el índice más allá del número: se construye por
+componentes principales, así que sus pesos dicen de qué está hecho. Un escalar de compresión no
+ofrece eso.
+
+```{python}
+#| label: tbl-r2-anidado
+#| tbl-cap: "Regresiones anidadas del sMAPE del naive sobre las medidas de complejidad, en las 96.891 series donde las cuatro están definidas."
+completas = md.dropna(subset=MEDIDAS + ["error_naive_smape"])
+y = completas["error_naive_smape"].to_numpy()
+
+filas = []
+for etiqueta, columnas in (
+    ("solo el índice", ["complexity_index"]),
+    ("solo las tres entropías clásicas",
+     ["lz_complexity", "sample_entropy", "perm_entropy"]),
+    ("las cuatro juntas", MEDIDAS),
+):
+    X = completas[columnas].to_numpy()
+    filas.append({"regresores": etiqueta, "cuántos": len(columnas),
+                  "R²": LinearRegression().fit(X, y).score(X, y)})
+
+r2 = pd.DataFrame(filas).set_index("regresores")
+r2["aporte de agregar el resto"] = r2["R²"].iloc[-1] - r2["R²"]
+r2.round(4)
+```
+
+Esta tabla es el argumento más fuerte a favor del índice y no es el que uno esperaría.
+
+**El índice solo explica más varianza que las tres entropías clásicas juntas**: R² de 0,169 contra
+0,132. Y el aporte incremental es asimétrico: agregarle las entropías al índice sube el R² un 8 %
+—de 0,169 a 0,183— mientras que agregarle el índice a las entropías lo sube un 38 %, de 0,132 a
+0,183.
+
+Dicho de otra manera: **el índice no es un resumen redundante de las entropías.** Contiene
+información que ellas no tienen.
+
+```{python}
+#| label: tbl-cuartiles
+#| tbl-cap: "sMAPE del naive por cuartil del índice de complejidad, sobre las 99.935 series."
+por_cuartil = (md.assign(cuartil=pd.qcut(md["complexity_index"], 4,
+                                         labels=["Q1, la más simple", "Q2", "Q3",
+                                                 "Q4, la más compleja"]))
+               .groupby("cuartil", observed=True)["error_naive_smape"]
+               .agg(series="size", **{"sMAPE medio": "mean",
+                                      "sMAPE mediano": "median"}))
+por_cuartil.round(4)
+```
+
+El cociente entre el cuartil más complejo y el más simple es **3,27**: 0,2373 contra 0,0726 de sMAPE
+medio. Un índice calculado **sin mirar ningún error de pronóstico** separa las series en grupos cuyo
+error difiere por un factor de tres.
+
+## Donde el índice no sirve, nada sirve {#sec-donde-no-sirve}
+
+```{python}
+#| label: fig-correlacion-frecuencia
+#| fig-cap: "Correlación entre el índice de complejidad y el sMAPE del naive, por frecuencia. El área de cada punto es proporcional a la cantidad de series."
+por_frecuencia = []
+for frecuencia, grupo in md.dropna(subset=["error_naive_smape"]).groupby("frecuencia"):
+    por_frecuencia.append({
+        "frecuencia": frecuencia, "series": len(grupo),
+        "Pearson": grupo["complexity_index"].corr(grupo["error_naive_smape"]),
+        "Spearman": grupo["complexity_index"].corr(grupo["error_naive_smape"],
+                                                  method="spearman"),
+    })
+FREQ = pd.DataFrame(por_frecuencia).sort_values("Pearson", ascending=False)
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(
+    x=FREQ["Pearson"], y=FREQ["frecuencia"], mode="markers+text",
+    text=[f"{v:+.3f}" for v in FREQ["Pearson"]], textposition="middle right",
+    marker=dict(size=8 + 22 * np.sqrt(FREQ["series"] / FREQ["series"].max()),
+                color=COLORES["observado"]),
+    showlegend=False,
+))
+fig.update_xaxes(title="correlación de Pearson con el sMAPE del naive",
+                 range=[-0.05, 0.92])
+mostrar(fig, alto=380)
+```
+
+```{python}
+#| label: tbl-correlacion-frecuencia
+#| tbl-cap: "Los mismos valores en tabla, con la correlación de rangos."
+FREQ.set_index("frecuencia").round(3)
+```
+
+**La correlación va de +0,736 en horaria a +0,019 en diaria**, y reportar solo la global de +0,405
+sería engañoso: mezcla seis poblaciones con horizontes y dinámicas distintas.
+
+El caso diario merece atención porque parece un fracaso y no lo es. La correlación es cero, y el
+motivo es que **las series diarias de M4 son prácticamente caminatas aleatorias**: no hay estructura
+que el índice pueda medir. Y eso se confirma por dos vías que no dependen del índice: ARIMA sobre
+diaria da OWA 1,001 —empata con el naive hasta el tercer decimal— y **ninguno de los 26 modelos baja
+de 0,979 en esa frecuencia**.
+
+::: {.callout-tip}
+## Un cero que confirma en vez de refutar
+
+Donde el índice no discrimina, ningún método discrimina. Un índice de dificultad que asignara
+dificultades distintas a series que todos los modelos pronostican igual de mal **estaría midiendo
+ruido**, y este no lo hace.
+
+Es el mismo razonamiento que el @sec-que-es-pronosticar usó para el piso irreducible del error: hay
+series donde no hay nada que aprender, y un buen diagnóstico tiene que poder decirlo.
+:::
+
+```{python}
+#| label: tbl-clusters
+#| tbl-cap: "Proporción de series asignadas al grupo complejo por el clustering sobre los descriptores, por frecuencia."
+clusters = md.groupby("frecuencia").agg(
+    series=("cluster", "size"),
+    **{"% en el grupo complejo": ("cluster", lambda c: 100 * c.mean())},
+)
+clusters.sort_values("% en el grupo complejo", ascending=False).round(1)
+```
+
+La tabla cierra el argumento por un tercer camino. **Diaria tiene el 1,7 % de sus series en el grupo
+complejo y horaria el 39,1 %.** El clustering, que es un procedimiento distinto de la correlación y
+del PCA, ordena las frecuencias igual: donde el índice no correlaciona, el clustering tampoco separa.
+
+## Lo que salió mal {#sec-incidentes}
+
+Un caso de estudio que solo reporta los resultados no sirve como caso de estudio. Esta sección
+recoge cuatro incidentes del pipeline, elegidos porque cada uno tiene una implicación que sobrevive
+al incidente.
+
+### El multihilo que hace todo más lento {#sec-blas}
+
+`SARIMAX` con $m = 52$ sobre series semanales largas abre un hilo por núcleo. Sobre las matrices
+chicas que genera ese problema, los hilos pasan más tiempo sincronizándose que calculando:
+
+| | por serie semanal |
+|---|---|
+| hilos sin limitar | **más de 39 minutos** |
+| `OMP_NUM_THREADS=1` | **unos 37 segundos** |
+
+: El costo de no limitar los hilos de BLAS. {#tbl-blas}
+
+**Sesenta y tres veces más rápido con un hilo que con todos.** Sobre las 294 series semanales que
+admiten SARIMA, eso es tres horas contra ocho días, y probablemente explica por qué la corrida
+original quedó trunca justo antes de las semanales.
+
+La implicación para cualquier proyecto que paralelice: **fijar los hilos de BLAS en 1 antes de
+importar numpy.** Si no, cada proceso abre su propio abanico de hilos y el conjunto rinde peor que el
+cálculo secuencial.
+
+### La sustitución silenciosa {#sec-sustitucion}
+
+Once clases de modelo, al no converger, devolvían un pronóstico naive **sin registrarlo como fallo**.
+Esos casos entraban en las tablas como si el modelo hubiera ajustado.
+
+El efecto es de una dirección conocida: **cualquier tabla generada antes de la corrección
+sobreestima el desempeño de los modelos afectados**, porque les acredita el error del naive en las
+series donde fracasaron. Y el error del naive no es malo: el @sec-caja-de-herramientas midió que es
+difícil de superar.
+
+Es el tipo de defecto que no se detecta mirando los resultados, porque no produce números absurdos:
+produce números **plausibles**. Se detecta contando cuántas veces cada modelo devolvió exactamente lo
+mismo que el benchmark.
+
+### El sMAPE que disimula y el MASE que no {#sec-h366}
+
+El @sec-saturacion lo midió con el catálogo; acá está el caso que lo originó.
+
+La serie `H366` con SARIMA(1,1,1)(1,1,1,24) da **sMAPE 199,99 —saturado— y MASE 127.224**. Una sola
+serie explica el 100 % del MASE promedio de la frecuencia horaria.
+
+Los dos números describen el mismo pronóstico. El sMAPE está acotado en 200 por construcción, así que
+un modelo que diverge queda indistinguible de uno que se equivoca mucho; el MASE no tiene cota y
+arrastra el promedio sin límite.
+
+**Al reportar un MASE promedio hay que acompañarlo de la mediana y del conteo de casos extremos.** Y
+para distinguir las dos causas posibles de un MASE alto —el modelo divergió, o la serie tiene
+denominador casi nulo— alcanza con mirar si el naive también se dispara: el naive no puede divergir.
+
+### El marco muestral truncado {#sec-truncamiento}
+
+Este es el más incómodo porque contaminó un resultado ya escrito.
+
+El archivo de series mensuales quedó truncado en 16.384 filas —exactamente $2^{14}$— de las 48.000. Y
+como M4 ordena las series por categoría, ese bloque contenía **solo Macro y Micro**. La muestra
+"aleatoria" de 1.000 series resultó 62,4 % Macro y 37,6 % Micro, **sin una sola serie de Finance,
+Industry, Demographic ni Other**.
+
+El muestreo era correcto. La población de la que muestreaba estaba truncada.
+
+```{python}
+#| label: tbl-truncamiento
+#| tbl-cap: "El resultado publicado sobre el bloque truncado contra el recalculado sobre las 48.000 series mensuales reales."
+pd.DataFrame([
+    {"medida": "Silhouette", "sobre las 16.384 truncadas": 0.567,
+     "sobre las 48.000 reales": 0.385},
+    {"medida": "Davies-Bouldin", "sobre las 16.384 truncadas": 1.086,
+     "sobre las 48.000 reales": 1.291},
+    {"medida": "% en el grupo regular", "sobre las 16.384 truncadas": 97.7,
+     "sobre las 48.000 reales": 79.4},
+    {"medida": "% en el grupo irregular", "sobre las 16.384 truncadas": 2.3,
+     "sobre las 48.000 reales": 20.6},
+]).set_index("medida")
+```
+
+El artículo enviado afirmaba, sobre el bloque truncado, que en el subconjunto mensual "la separación
+binaria es más pronunciada". Recalculado sobre las 48.000 reales, **la conclusión correcta es la
+contraria**: el mensual no se distingue del patrón general, con un reparto de 79,4 % y 20,6 % igual
+al del conjunto completo.
+
+::: {.callout-important}
+## La lección que vale más que el incidente
+
+**Verificar que el marco muestral cubra la población antes de muestrear.** Un sorteo impecable sobre
+un marco truncado produce una muestra sesgada sin ninguna señal de alarma: los estadísticos de la
+muestra son consistentes, la semilla es reproducible, el código no falla.
+
+Lo único que lo detecta es contar las categorías de la muestra y compararlas con las de la
+población. Es una línea de código que casi nadie escribe, y en este caso habría ahorrado un resultado
+publicado que había que corregir.
+
+Y hay una segunda lección sobre el número 16.384. Que sea exactamente $2^{14}$ es la firma de un
+límite técnico —una versión de Excel, un buffer, un formato— y no de una decisión. **Cuando el tamaño
+de un conjunto de datos es una potencia de dos redonda, conviene sospechar.**
+:::
+
+## Cuánto cuesta {#sec-costo}
+
+```{python}
+#| label: tbl-costo
+#| tbl-cap: "Costo de reejecutar el pipeline completo de la tesis, por etapa."
+costo = resultados_tesis("costo").set_index("etapa")
+costo["horas"] = costo["minutos"] / 60
+costo[["minutos", "horas", "% del total"]].round(2)
+```
+
+Veinte horas en total, y **el 83 % se las lleva el cálculo de entropías**. Dentro de ese 83 %, casi
+todo es `sample_entropy`: con bucles de Python y complejidad $O(n^2)$, una serie de 4.000 puntos
+tarda 19,7 segundos contra 0,003 de la entropía de permutación.
+
+La distribución no es uniforme entre frecuencias. Las 4.227 series diarias, con 2.357 puntos de
+promedio, se llevan 12,5 de esas 16,6 horas.
+
+Eso tiene una consecuencia directa para la fase siguiente de este proyecto: **si el índice va a
+calcularse en línea, cuando alguien sube una serie a una aplicación web, ese cálculo hay que
+vectorizarlo o precomputarlo.** Diecinueve segundos de espera por una característica de diagnóstico
+no es aceptable en una interfaz, y el @sec-produccion lo trata.
+
+::: {.callout-note}
+## Sobre estimar costos de cómputo
+
+La primera estimación de este pipeline dio 5 horas contra las 16,5 reales, y el error tiene una causa
+instructiva: se midió el tiempo sobre **las tres primeras series de cada archivo** en vez de una
+muestra aleatoria.
+
+Con complejidad $O(n^2)$, el costo promedio lo dominan las series largas, y las primeras de la
+frecuencia diaria tenían menos de la mitad del largo típico. Recalculado sobre las longitudes de las
+100.000 series, el modelo dio 13,9 horas contra 16,5 reales: un 19 % de error, atribuible a
+entrada y salida.
+
+**Para estimar el costo de un proceso cuya complejidad crece con el tamaño, hay que muestrear la
+distribución de tamaños, no las primeras filas.**
+:::
+
+## Lo que este capítulo cierra {#sec-cierre-m4}
+
+| deuda de la Parte II | qué muestra este capítulo |
+|---|---|
+| el enfoque global no se pudo demostrar con 34 series | el ganador de M4 lo aplicó a 100.000 y obtuvo OWA 0,821 contra el 0,936 del mejor método por serie |
+| las combinaciones no le ganaron al mejor miembro | los dos primeros puestos de M4 fueron combinaciones |
+| el aprendizaje profundo se citó sin entrenar | 4.773 series y 26 modelos ponen a las cinco redes en los cinco últimos puestos |
+| las conclusiones se apoyaban en 30 series | el índice de complejidad separa 99.935 series en grupos con error 3,27 veces distinto |
+
+: Las deudas de la Parte II y lo que este capítulo aporta. {#tbl-cierre-m4}
+
+Y queda una conclusión que ninguno de los capítulos anteriores podía sacar. **La diferencia entre el
+0,936 del mejor método de esta evaluación y el 0,821 del ganador de la competencia no es una
+diferencia de modelo: es una diferencia de escala.** ARIMA ajustado serie por serie contra una red
+entrenada sobre las cien mil a la vez. Los dos capítulos que siguen tratan justamente eso: cómo
+elegir sin mirar cada serie, y qué hace falta para que eso funcione en producción.
+
+## Ejercicios
+
+Las soluciones están en el @sec-soluciones-23.
+
+**1.** La @tbl-correlacion-global usa el sMAPE del naive. Repítela con el del `snaive` y con el de
+ARIMA, que también están en `metadatos()`. ¿El índice correlaciona mejor con el error de un método
+mejor o peor?
+
+**2.** El cociente entre cuartiles de la @tbl-cuartiles es 3,27 con la media y otro valor con la
+mediana. Calcula los dos y explica la diferencia con lo que el @sec-agregacion dice sobre promediar
+razones.
+
+**3.** La @fig-correlacion-frecuencia ordena las frecuencias por correlación. Comprueba si ese orden
+coincide con el de la proporción de series en el grupo complejo de la @tbl-clusters, y calcula la
+correlación de rangos entre las dos columnas.
+
+**4.** Con `metadatos()`, ajusta una regresión del sMAPE del naive sobre el índice **dentro de cada
+frecuencia** y compara los $R^2$. ¿La frecuencia explica más que el índice?
+
+**5.** La @tbl-naive2 muestra que las frecuencias con $m = 1$ reproducen exactamente. Verifica la
+afirmación calculando el `Naive2` del @sec-caja-de-herramientas sobre las series anuales del catálogo
+y comparándolo con el naive simple.
+
+**6.** El @sec-truncamiento cuenta que 16.384 es $2^{14}$. Busca en `metadatos()` si algún conteo del
+conjunto completo es una potencia de dos o un número redondo sospechoso, y decide si hay que
+investigarlo.
+
+## Referencias {.unnumbered}
+
+::: {#refs}
 :::
