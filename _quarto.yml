@@ -82,6 +82,7 @@ live:
     - pandas
     - matplotlib
     - statsmodels
+    - scikit-learn
   show-solutions: true
 
 filters:

@@ -230,6 +230,50 @@ migración del sitio.
 
 ---
 
+## Boosting: `scikit-learn` en vez de `xgboost` o `lightgbm`
+
+El capítulo 19 necesita gradient boosting, y en la práctica eso se hace con
+`xgboost` o `lightgbm`. El libro usa `HistGradientBoostingRegressor` de
+`scikit-learn`, que es la implementación inspirada en LightGBM.
+
+**Por qué.** Son dos dependencias fijas menos en `requisitos.txt`, dos wheels
+menos que CI tiene que instalar, y ninguna de las conclusiones del capítulo
+depende de la implementación: lo que el capítulo mide es cuánta capacidad
+soportan series de cien a trescientas observaciones, y la respuesta —poca— es de
+los datos, no del optimizador.
+
+**Qué se pierde.** Velocidad en tablas grandes, y las opciones específicas de
+cada biblioteca. Nada de eso importa a esta escala.
+
+**Cuándo revisarlo.** Si la aplicación de fase 2 va a servir boosting en
+producción, ahí sí conviene `lightgbm`, y el capítulo lo dice explícitamente en
+un recuadro para que nadie lea el libro como una recomendación de biblioteca.
+
+---
+
+## `scikit-learn` en el entorno del navegador
+
+El capítulo 19 tiene una celda editable que ajusta cuatro modelos de
+`scikit-learn`, así que hay que agregarlo a `live: packages` en `_quarto.yml`.
+
+**Lo que cuesta.** Pyodide descarga `scikit-learn`, `joblib`, `threadpoolctl` y
+`scipy` además de lo que ya bajaba. En una conexión rápida la primera carga de
+una página con celda editable pasa de unos 20 segundos a cerca de un minuto. El
+navegador lo cachea, así que solo lo paga la primera visita.
+
+**Verificado.** La celda corre en Chrome: ajusta Ridge, kNN, bosque y extra trees
+sobre una serie de 102 observaciones y devuelve la tabla de sMAPE y de máximos.
+
+**Nota sobre cómo verificar esto.** Al comprobarlo me equivoqué dos veces
+consultando el DOM con el selector `.exercise-editor`, que dio 0 mientras la
+celda estaba perfectamente montada y con el cartel «Downloading Pyodide» a la
+vista. Es el mismo error que en la primera semana del proyecto. **La verificación
+confiable de la capa interactiva es una captura de pantalla**, no una consulta al
+DOM: el editor tarda minutos en estar listo y los nombres de clase cambian entre
+versiones de quarto-live.
+
+---
+
 ## El tiempo de compilación
 
 Con los capítulos 12 a 17 escritos, una compilación en frío pasó de 2,5 a **8
