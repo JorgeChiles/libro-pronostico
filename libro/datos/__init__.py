@@ -154,6 +154,9 @@ TABLAS_DE_TESIS = {
     "horaria": "OWA en la frecuencia horaria contra el global",
     "semillas": "sMAPE y variabilidad de cinco redes sobre cinco semillas",
     "semillas_por_frecuencia": "Cuántas veces cambia el ganador según la frecuencia",
+    "naive2_validacion": "Naive2 calculado contra los valores publicados de M4",
+    "costo": "Costo computacional de reejecutar el pipeline de la tesis",
+    "muestra": "Composición de la muestra de la tesis contra la población de M4",
 }
 
 

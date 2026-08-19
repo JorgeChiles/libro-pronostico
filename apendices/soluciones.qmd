@@ -7078,3 +7078,316 @@ semillas, y las dos apuntan a la misma práctica: **reportar grupos y no puestos
 titula "el modelo X es el mejor" cuando X está a 0,03 de rango del segundo está reportando ruido con
 formato de resultado, y @demsar2006 propuso precisamente el diagrama de diferencias críticas para
 evitarlo.
+
+## Capítulo 23 · Caso de estudio: la competencia M4 {#sec-soluciones-23}
+
+```{python}
+#| echo: false
+from libro.datos import metadatos as _metadatos, resultados_tesis as _res_tesis
+
+MD23 = _metadatos()
+MEDIDAS23 = ["complexity_index", "lz_complexity", "sample_entropy", "perm_entropy"]
+```
+
+### Ejercicio 1 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-23-1
+#| tbl-cap: "Correlación del índice de complejidad contra el sMAPE de tres métodos distintos, sobre las series de M4 donde cada error está disponible."
+filas = []
+for columna, etiqueta in (("error_naive_smape", "naive"),
+                          ("error_snaive_smape", "naive estacional"),
+                          ("error_arima_smape", "ARIMA")):
+    sub = MD23.dropna(subset=[columna, "complexity_index"])
+    filas.append({
+        "método del error": etiqueta,
+        "series": len(sub),
+        "sMAPE medio del método": sub[columna].mean(),
+        "Pearson": sub["complexity_index"].corr(sub[columna]),
+        "Spearman": sub["complexity_index"].corr(sub[columna], method="spearman"),
+    })
+
+pd.DataFrame(filas).set_index("método del error").round(3)
+```
+
+**Con un método mejor la correlación lineal baja y la de rangos sube**, y las dos cosas juntas dicen
+algo sobre qué mide el índice.
+
+ARIMA es el mejor de los tres —sMAPE medio 0,132 contra 0,142 del naive— y el índice correlaciona con
+su error un poco menos en Pearson (+0,384 contra +0,405) y bastante más en Spearman (**+0,444** contra
++0,399).
+
+La lectura es que el índice **no mide en qué fallan los métodos malos: mide dificultad intrínseca de
+la serie**. Si midiera lo primero, la correlación con el error de un método bueno debería derrumbarse,
+porque el buen método arreglaría precisamente los casos que el malo falla. Que la correlación de rangos
+**suba** indica lo contrario: al quitar el ruido del método débil, el ordenamiento por dificultad se
+ve más limpio.
+
+Vale notar también que el naive estacional se evalúa sobre 76.935 series y no 99.935, porque en las
+frecuencias con $m = 1$ no está definido como distinto del naive. Comparar las tres filas sin declarar
+eso sería comparar poblaciones distintas, que es la trampa del @sec-denominador.
+
+### Ejercicio 2 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-23-2
+#| tbl-cap: "sMAPE del naive por cuartil del índice, con media y mediana, y la asimetría de cada cuartil."
+cuartiles = MD23.assign(
+    cuartil=pd.qcut(MD23["complexity_index"], 4,
+                    labels=["Q1, la más simple", "Q2", "Q3", "Q4, la más compleja"])
+)
+resumen = cuartiles.groupby("cuartil", observed=True)["error_naive_smape"].agg(
+    series="size", media="mean", mediana="median")
+resumen["media / mediana"] = resumen["media"] / resumen["mediana"]
+resumen.round(4)
+```
+
+```{python}
+#| label: tbl-sol-23-2b
+#| tbl-cap: "Los dos cocientes entre el cuartil más complejo y el más simple."
+pd.DataFrame([
+    {"cociente": "de las medias",
+     "valor": resumen["media"].iloc[-1] / resumen["media"].iloc[0]},
+    {"cociente": "de las medianas",
+     "valor": resumen["mediana"].iloc[-1] / resumen["mediana"].iloc[0]},
+]).set_index("cociente").round(3)
+```
+
+**El cociente de las medias es 3,27 y el de las medianas 3,71**, y la diferencia va en la dirección
+contraria a la que uno esperaría.
+
+El reflejo habitual —y el que este libro viene aplicando desde el @sec-que-compra— es que la media
+está inflada por la cola, así que el cociente de medias debería ser *mayor* que el de medianas. Acá es
+menor.
+
+La columna `media / mediana` explica por qué. Los dos cuartiles tienen distribución asimétrica a
+derecha, pero el más simple lo es **más** en términos relativos: 1,62 contra 1,43. O sea que Q1 tiene
+proporcionalmente más casos extremos propios que Q4, y esos casos le levantan la media más de lo que
+la cola de Q4 levanta la suya.
+
+Tiene sentido si se piensa qué es Q1: series que el índice declara fáciles y que a veces no lo son.
+Un quiebre de nivel como el de `M3007` del @sec-los-datos puede estar en una serie estructuralmente
+simple, y ahí el naive falla feo. **El índice mide la estructura, y un evento puntual no es
+estructura.**
+
+La conexión con el @sec-agregacion es directa. Ninguno de estos dos cocientes es un promedio de
+razones serie por serie: los dos son razones de agregados, que es la forma correcta según la
+@eq-owa-m4. Calcular el promedio de $e_i^{Q4} / e_j^{Q1}$ no tendría sentido porque las series de los
+dos cuartiles no están emparejadas.
+
+### Ejercicio 3 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-23-3
+#| tbl-cap: "Las frecuencias ordenadas por correlación del índice, junto a la proporción de series en el grupo complejo."
+filas = []
+for frecuencia, grupo in MD23.dropna(subset=["error_naive_smape"]).groupby("frecuencia"):
+    filas.append({
+        "frecuencia": frecuencia, "series": len(grupo),
+        "Pearson": grupo["complexity_index"].corr(grupo["error_naive_smape"]),
+        "% en el grupo complejo": 100 * grupo["cluster"].mean(),
+    })
+
+COMPARA = pd.DataFrame(filas).sort_values("Pearson", ascending=False)
+COMPARA["puesto por correlación"] = range(1, len(COMPARA) + 1)
+COMPARA["puesto por % complejo"] = (
+    COMPARA["% en el grupo complejo"].rank(ascending=False).astype(int))
+COMPARA.set_index("frecuencia").round(3)
+```
+
+```{python}
+#| echo: false
+print("correlación de Spearman entre las dos columnas: "
+      f"{COMPARA['Pearson'].corr(COMPARA['% en el grupo complejo'], method='spearman'):+.3f}")
+print("correlación de Pearson: "
+      f"{COMPARA['Pearson'].corr(COMPARA['% en el grupo complejo']):+.3f}")
+```
+
+**Los órdenes coinciden en los extremos y se cruzan en el medio: Spearman +0,657 y Pearson +0,898.**
+
+Las dos puntas están de acuerdo sin discusión. Horaria es primera en las dos columnas —correlación
++0,736 y 39,1 % de series complejas— y diaria es última en las dos, con +0,019 y 1,7 %. Ese acuerdo es
+el que sostiene el argumento del @sec-donde-no-sirve: dos procedimientos distintos, el PCA y el
+clustering, identifican la misma frecuencia como la que no tiene estructura.
+
+En el medio se cruzan. Semanal es segunda por correlación y **quinta** por proporción de series
+complejas: tiene una relación índice-error muy clara y pocas series en el grupo difícil. No es una
+contradicción: **una cosa es cuántas series difíciles hay y otra es qué tan bien el índice ordena las
+que hay.** Semanal tiene pocas series complejas y las ordena muy bien.
+
+Que Pearson sea +0,898 y Spearman +0,657 con solo seis puntos también merece una advertencia. Con
+$n = 6$, la correlación de Pearson la dominan los dos extremos —horaria arriba y diaria abajo— y la
+de rangos es la que refleja los cruces del medio. **Con seis observaciones, ninguna de las dos
+correlaciones es un resultado; son una descripción de la tabla.**
+
+### Ejercicio 4 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-23-4
+#| tbl-cap: "$R^2$ del sMAPE del naive explicado por el índice, por la frecuencia y por los dos juntos."
+datos = MD23.dropna(subset=["error_naive_smape", "complexity_index"])
+y = datos["error_naive_smape"].to_numpy()
+indice = datos[["complexity_index"]].to_numpy()
+indicadoras = pd.get_dummies(datos["frecuencia"],
+                            drop_first=True).to_numpy().astype(float)
+
+filas = []
+for etiqueta, X in (("solo el índice", indice),
+                    ("solo la frecuencia", indicadoras),
+                    ("índice y frecuencia", np.hstack([indice, indicadoras]))):
+    filas.append({"regresores": etiqueta, "columnas": X.shape[1],
+                  "R²": LinearRegression().fit(X, y).score(X, y)})
+
+pd.DataFrame(filas).set_index("regresores").round(4)
+```
+
+```{python}
+#| label: tbl-sol-23-4b
+#| tbl-cap: "$R^2$ del índice ajustado dentro de cada frecuencia por separado."
+filas = []
+for frecuencia, grupo in datos.groupby("frecuencia"):
+    X = grupo[["complexity_index"]].to_numpy()
+    filas.append({"frecuencia": frecuencia, "series": len(grupo),
+                  "R² del índice": LinearRegression().fit(
+                      X, grupo["error_naive_smape"].to_numpy()).score(
+                      X, grupo["error_naive_smape"].to_numpy())})
+
+pd.DataFrame(filas).set_index("frecuencia").sort_values(
+    "R² del índice", ascending=False).round(4)
+```
+
+**No: el índice explica casi cuatro veces más que la frecuencia.** $R^2$ de 0,164 contra 0,044, y las
+dos juntas dan 0,194.
+
+Ese resultado importa porque descarta la objeción más obvia al índice. Se podría sospechar que la
+correlación global de +0,405 es un **efecto de agregación**: las frecuencias tienen horizontes y
+dificultades distintas, así que cualquier variable que separe frecuencias correlacionaría con el error
+sin decir nada sobre las series. Si eso fuera todo, el $R^2$ de la frecuencia sola tendría que ser
+comparable al del índice. Es cuatro veces menor.
+
+Y la segunda tabla muestra que el índice **sigue funcionando dentro de cada frecuencia**, con la
+variabilidad que el @sec-donde-no-sirve ya había mostrado: $R^2$ de 0,54 en horaria, 0,28 en semanal,
+0,20 en mensual, 0,17 en trimestral, 0,07 en anual y **0,0004 en diaria**.
+
+Vale poner el 0,54 de horaria al lado del 0,164 global. En la frecuencia donde las series tienen
+estructura de verdad, un solo número calculado sin mirar ningún pronóstico explica **más de la mitad**
+de la varianza del error. Ese es el resultado que el @sec-seleccion-escala va a usar para elegir
+método sin probar métodos.
+
+### Ejercicio 5 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-23-5
+#| tbl-cap: "Naive2 contra naive simple en las series del catálogo con $m = 1$: las anuales y, en las convenciones de M4, también las diarias y las semanales."
+def es_estacional_m4(x, m, como_m4=True):
+    """La prueba del capítulo 7, con la particularidad del código oficial de M4."""
+    x = np.asarray(x, float)
+    if m <= 1 or len(x) < 3 * m:
+        return False
+
+    def r(k):
+        mu = x.mean()
+        den = np.sum((x - mu) ** 2)
+        return float(np.sum((x[k:] - mu) * (x[:-k] - mu)) / den) if den else 0.0
+
+    suma = r(1) if como_m4 else r(1) ** 2
+    for i in range(2, m):
+        suma += r(i) ** 2
+    limite = 1.645 * np.sqrt((1 + 2 * suma) / len(x))
+    return abs(r(m)) > limite
+
+
+def naive2(y, h, m):
+    """Naive sobre la serie desestacionalizada, si pasa la prueba de estacionalidad."""
+    y = np.asarray(y, float)
+    if not es_estacional_m4(y, m):
+        return np.repeat(y[-1], h)
+    from statsmodels.tsa.seasonal import seasonal_decompose
+    indices = seasonal_decompose(y, model="multiplicative", period=m).seasonal
+    desestacionalizada = y / indices
+    base = np.repeat(desestacionalizada[-1], h)
+    return base * np.array([indices[-m + (i % m)] for i in range(h)])
+
+
+filas = []
+for identificador in catalogo()["serie"]:
+    s = cargar(identificador)
+    if s.periodo_estacional != 1:
+        continue
+    y_tr, y_te = s.entrenamiento.to_numpy(), s.prueba.to_numpy()
+    h, m = s.horizonte, s.periodo_estacional
+    filas.append({
+        "serie": identificador, "frecuencia": s.frecuencia, "m": m,
+        "sMAPE de Naive2": smape(y_te, naive2(y_tr, h, m)),
+        "sMAPE del naive": smape(y_te, np.repeat(y_tr[-1], h)),
+    })
+
+NO_ESTACIONALES = pd.DataFrame(filas).set_index("serie")
+NO_ESTACIONALES["diferencia"] = (NO_ESTACIONALES["sMAPE de Naive2"]
+                                 - NO_ESTACIONALES["sMAPE del naive"])
+NO_ESTACIONALES.round(6)
+```
+
+```{python}
+#| echo: false
+print(f"series con m = 1 en el catálogo: {len(NO_ESTACIONALES)}")
+print("diferencia máxima entre Naive2 y el naive simple: "
+      f"{NO_ESTACIONALES['diferencia'].abs().max():.10f}")
+```
+
+**La diferencia es exactamente cero en las trece series del catálogo con $m = 1$**, que son las
+anuales y también las diarias y semanales: M4 declara esas tres frecuencias no estacionales, como el
+@sec-datos-temporales documentó.
+
+Y no es una coincidencia numérica: es una identidad. La primera línea de la prueba de estacionalidad
+devuelve `False` cuando $m \leq 1$, así que `naive2` toma la rama que repite el último valor y **es**
+el naive, línea por línea. No hay descomposición, no hay índices estacionales, no hay
+`seasonal_decompose`.
+
+Eso explica los tres ceros de la @tbl-naive2. Anual, semanal y diaria tienen $m = 1$ en las
+convenciones de M4, así que ahí no queda ningún grado de libertad de implementación: cualquier
+programa correcto da el mismo número que los organizadores. Las décimas de diferencia en las tres
+frecuencias estacionales vienen enteras de la desestacionalización.
+
+La lección para validar un pipeline: **buscar los casos donde el resultado está determinado y
+verificar que dé exacto.** Un cero en un caso degenerado vale más que una diferencia pequeña en un
+caso general, porque el cero no admite explicaciones.
+
+### Ejercicio 6 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-23-6
+#| tbl-cap: "Conteo de series por frecuencia, con dos pruebas de «número sospechoso»."
+def es_potencia_de_dos(n):
+    return n > 0 and (n & (n - 1)) == 0
+
+
+conteos = MD23.groupby("frecuencia").size().rename("series").to_frame()
+conteos["¿potencia de 2?"] = conteos["series"].map(es_potencia_de_dos)
+conteos["¿múltiplo de 1000?"] = conteos["series"] % 1000 == 0
+conteos.loc["total"] = [len(MD23), es_potencia_de_dos(len(MD23)),
+                        len(MD23) % 1000 == 0]
+conteos
+```
+
+**Ninguna frecuencia tiene un conteo que sea potencia de dos, y tres tienen conteos que son múltiplos
+exactos de mil.** La respuesta a "¿hay que investigarlo?" es no, y el razonamiento es lo que vale.
+
+Los tres múltiplos de mil —23.000 anuales, 24.000 trimestrales y 48.000 mensuales— son **redondos por
+diseño**. Los organizadores de M4 eligieron cuántas series poner de cada frecuencia, y eligieron
+números redondos porque son personas eligiendo cantidades. Un número redondo explicado por una
+decisión no es sospechoso.
+
+Los tres que no son redondos —4.227 diarias, 414 horarias, 294 semanales— son "todas las que había".
+Ahí el número lo puso la disponibilidad de datos, no una decisión, y por eso queda con la forma que
+queda.
+
+La distinción es la que importa para el diagnóstico del @sec-truncamiento: **lo sospechoso no es que
+un número sea redondo, es que sea redondo en la base equivocada.** 16.384 es redondo en base 2 y
+ridículo en base 10, y nadie elige 16.384 series a propósito. Un número redondo en base 2 es la firma
+de un límite técnico: un buffer, un formato de archivo, un tope de filas.
+
+Y las semanales tienen una segunda capa que conviene notar. El total es 294 y no 359, porque el
+@sec-los-datos documenta que 65 series semanales se descartan por ser demasiado cortas para calcular
+todos los descriptores. **294 es un número derivado**, y el único registro de esa resta es la
+documentación: nada en el conteo lo delata.
