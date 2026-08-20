@@ -466,6 +466,39 @@ después de responder, o no se calcula.
    decidir si en el PDF se reemplazan por una figura equivalente —más trabajo,
    mejor resultado— o si se deja el código a la vista.
 
-2. **El dominio propio.** Si el libro va a vivir en `libro.tudominio.com` en vez
+2. **El dominio propio.** Elegido: `pronosticos.dev`. Falta comprarlo y hacer
+   los cuatro pasos de abajo, en ese orden. Si se hace al revés —el `CNAME` en
+   el repositorio antes del DNS— GitHub deja de servir en `github.io` y el libro
+   queda inaccesible hasta que el DNS resuelva.
+
+   **Por qué `.dev` y no `.com`.** El plural «pronosticos» está tomado en `.com`,
+   `.org`, `.net`, `.app` y `.io`, todos en manos de revendedores: es la palabra
+   clave de las apuestas deportivas en español. `.dev` esquiva esa competencia,
+   obliga HTTPS por diseño —está en la lista HSTS precargada— y se lee como
+   material técnico.
+
+   **Los cuatro pasos.**
+
+   1. Comprar el dominio. En el registrador se confirma la disponibilidad real;
+      el whois de `.dev` no responde desde una terminal cualquiera.
+   2. En el DNS del registrador, para el dominio raíz, cuatro registros `A` a las
+      direcciones de GitHub Pages —confirmarlas en la documentación de GitHub al
+      momento de hacerlo, porque cambian—: `185.199.108.153`, `185.199.109.153`,
+      `185.199.110.153`, `185.199.111.153`. Y un `CNAME` de `www` a
+      `jorgechiles.github.io`. Si el registrador soporta `ALIAS`/`ANAME`, uno solo
+      a `jorgechiles.github.io` reemplaza a los cuatro `A`.
+   3. `gh api -X PUT repos/JorgeChiles/libro-pronostico/pages -f cname=pronosticos.dev`
+      y después, en el repositorio, un archivo `CNAME` en la raíz con el dominio
+      —Quarto lo copia a `_site/` si está en `resources`, o el workflow lo agrega—.
+   4. Esperar el certificado y activar «Enforce HTTPS». Verificar los dos:
+      `curl -I https://pronosticos.dev` y que una celda editable ejecute, porque
+      el service worker de los widgets se registra por dominio y es lo primero
+      que se rompe al mudar el sitio.
+
+   **Lo que hay que revisar después de mudarlo.** El `site-url` de `_quarto.yml`
+   —lo usan los enlaces canónicos y el buscador— y que el service worker de
+   shinylive quede en la raíz del dominio nuevo.
+
+3. **Lo que era el punto 2.** Si el libro va a vivir en `libro.tudominio.com` en vez
    de en `jorgechiles.github.io/...`, hay que agregar el archivo `CNAME` al
    repositorio y el registro de DNS en Squarespace.
