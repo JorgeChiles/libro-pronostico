@@ -641,7 +641,7 @@ iguales**. La diferencia aparece en la mediana, donde AutoARIMA y AutoETS le sac
 varios puntos al naive estacional, y en el conteo de victorias.
 
 Que el promedio y la mediana cuenten historias distintas es exactamente la
-advertencia de la @sec-saturacion. Con 33 series, además, ninguna de estas diferencias
+advertencia de la @sec-saturacion. Con 35 series, además, ninguna de estas diferencias
 es estadísticamente concluyente: se necesitan cientos de series para distinguir
 métodos que difieren en un punto de sMAPE.
 

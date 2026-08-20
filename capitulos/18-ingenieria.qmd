@@ -135,17 +135,22 @@ mostrar(fig, alto=420, titulo_y="sMAPE de prueba")
 ```{python}
 #| label: tbl-curva-rezagos
 #| tbl-cap: "Los mismos valores de la @fig-curva-rezagos en tabla."
-pd.DataFrame({"rezagos": CANTIDADES, "sMAPE medio": medias,
-              "sMAPE mediano": medianas}).set_index("rezagos").round(2)
+CURVA = pd.DataFrame({"rezagos": CANTIDADES, "sMAPE medio": medias,
+                      "sMAPE mediano": medianas}).set_index("rezagos")
+CURVA.round(2)
 ```
 
-**La media dibuja la U del @sec-sobreajuste con una nitidez de libro de texto.** Baja de 21,45 con
-un solo rezago a **13,54 con doce**, y después sube: 16,07 con dieciocho, 18,80 con veinticuatro
-y 31,06 con treinta y seis. El mínimo está en 12, que para las series mensuales del catálogo es
+**La media dibuja la U del @sec-sobreajuste con una nitidez de libro de texto.** Baja de
+`{python} f"{CURVA.loc[1, "sMAPE medio"]:.2f}".replace(".", ",")` con un solo rezago a **`{python} f"{CURVA.loc[12, "sMAPE medio"]:.2f}".replace(".", ",")` con
+doce**, y después sube: `{python} f"{CURVA.loc[18, "sMAPE medio"]:.2f}".replace(".", ",")` con dieciocho,
+`{python} f"{CURVA.loc[24, "sMAPE medio"]:.2f}".replace(".", ",")` con veinticuatro y `{python} f"{CURVA.loc[36, "sMAPE medio"]:.2f}".replace(".", ",")` con
+treinta y seis. El mínimo está en 12, que para las series mensuales del catálogo es
 exactamente el período estacional.
 
-**Y la mediana no dibuja ninguna U**: baja de manera monótona hasta 7,74 en veinticuatro rezagos y
-apenas sube en treinta y seis. Es el mismo patrón de la @sec-que-compra y ya conviene tenerlo como
+**Y la mediana no dibuja ninguna U**: baja hasta `{python} f"{CURVA.loc[18, "sMAPE mediano"]:.2f}".replace(".", ",")` en
+dieciocho rezagos y de ahí en adelante se mueve por centésimas
+—`{python} f"{CURVA.loc[24, "sMAPE mediano"]:.2f}".replace(".", ",")` con veinticuatro y `{python} f"{CURVA.loc[36, "sMAPE mediano"]:.2f}".replace(".", ",")` con
+treinta y seis—. Es el mismo patrón de la @sec-que-compra y ya conviene tenerlo como
 reflejo: cuando la media y la mediana discrepan, el efecto vive en la cola. Acá significa que
 **agregar rezagos mejora la serie típica y destruye unas pocas**, y las pocas destruidas pesan más
 que las muchas mejoradas.
@@ -232,17 +237,18 @@ for identificador in APTAS:
 CONJ = pd.DataFrame(filas)
 COLUMNAS = list(CONJUNTOS) + ["rezagos por ACF"]
 
-pd.DataFrame({
+TABLA_CONJ = pd.DataFrame({
     "sMAPE medio": CONJ[COLUMNAS].mean(),
     "sMAPE mediano": CONJ[COLUMNAS].median(),
     "columnas": [CONJ[c + " cols"].median() for c in COLUMNAS],
     "gana en": CONJ[COLUMNAS].idxmin(axis=1).value_counts().reindex(
         COLUMNAS, fill_value=0),
-}).round(2)
+})
+TABLA_CONJ.round(2)
 ```
 
-**Seleccionar con el correlograma es lo mejor de la tabla en la media —12,85— con la mitad de las
-columnas.** Seis características le ganan a doce y a veinticuatro, y también le ganan en la mediana
+**Seleccionar con el correlograma es lo mejor de la tabla en la media
+—`{python} f"{TABLA_CONJ.loc["rezagos por ACF", "sMAPE medio"]:.2f}".replace(".", ",")`— con la mitad de las columnas.** Seis características le ganan a doce y a veinticuatro, y también le ganan en la mediana
 a las doce.
 
 Vale notar de dónde sale la ventaja, porque no es que el correlograma sea sabio: es que **elegir
@@ -348,8 +354,10 @@ Los estadísticos de ventana móvil —media, desviación, mínimo y máximo de 
 períodos— son la familia que más se recomienda en los tutoriales de pronóstico con aprendizaje
 automático, y `tsfresh` [@christ2018] genera cientos de variantes automáticamente.
 
-En la @tbl-conjuntos son **la peor de las cinco filas en la media**: 23,11 contra los 13,54 de los
-doce rezagos solos. Y son **la mejor en la mediana**: 8,17 contra 8,49. Ese contraste ya avisa que
+En la @tbl-conjuntos son **la peor de las cinco filas en la media**:
+`{python} f"{TABLA_CONJ.loc["+ ventana móvil", "sMAPE medio"]:.2f}".replace(".", ",")` contra los `{python} f"{TABLA_CONJ.loc["12 rezagos", "sMAPE medio"]:.2f}".replace(".", ",")`
+de los doce rezagos solos. Y son **la mejor en la mediana**:
+`{python} f"{TABLA_CONJ.loc["+ ventana móvil", "sMAPE mediano"]:.2f}".replace(".", ",")` contra `{python} f"{TABLA_CONJ.loc["12 rezagos", "sMAPE mediano"]:.2f}".replace(".", ",")`. Ese contraste ya avisa que
 hay una cola, y la cola tiene una causa concreta.
 
 ```{python}
@@ -465,25 +473,31 @@ for identificador in APTAS:
 
 REG = pd.DataFrame(filas)
 nombres_reg = list(REGULARIZADORES)
-pd.DataFrame({
+TABLA_REG = pd.DataFrame({
     "sMAPE medio": REG[nombres_reg].mean(),
     "sMAPE mediano": REG[nombres_reg].median(),
     "gana en": REG[nombres_reg].idxmin(axis=1).value_counts().reindex(
         nombres_reg, fill_value=0),
-}).round(2)
+})
+TABLA_REG.round(2)
 ```
 
-La respuesta a la cuenta pendiente es un **sí muy modesto**. La elastic net con $\ell_1 = 0{,}2$
-—o sea casi Ridge— da el mejor sMAPE medio de la tabla, 13,68, apenas por debajo de los 13,81 de no
-regularizar nada. Y Lasso es la peor de las cinco, con 15,25.
+La respuesta a la cuenta pendiente es **no**. Ninguna de las cuatro formas de penalizar le gana a
+no penalizar: el mejor sMAPE medio de la tabla es el de la regresión sin regularizar,
+`{python} f"{TABLA_REG.loc["sin regularizar", "sMAPE medio"]:.2f}".replace(".", ",")`, y también es la mejor en la mediana
+—`{python} f"{TABLA_REG.loc["sin regularizar", "sMAPE mediano"]:.2f}".replace(".", ",")`—. De las regularizadas, la elastic net con
+$\ell_1 = 0{,}2$ —o sea casi Ridge— es la que más se le acerca, con
+`{python} f"{TABLA_REG.loc["elastic net, l1 = 0,2", "sMAPE medio"]:.2f}".replace(".", ",")`, y Lasso es la peor de las cinco, con
+`{python} f"{TABLA_REG.loc["Lasso λ = 1", "sMAPE medio"]:.2f}".replace(".", ",")`.
 
 Eso confirma el aviso de la @sec-regularizacion en su parte negativa: **con grupos de rezagos
-correlacionados, la selección dura de Lasso hace daño.** Lo que no confirma es que la elastic net
-sea la solución: la mejora sobre no regularizar es de 0,13 puntos de sMAPE en 25 series, que es
-ruido.
+correlacionados, la selección dura de Lasso hace daño.** Y no confirma la parte positiva: la
+elastic net existe para arreglar ese problema, pero acá tampoco alcanza para justificar la
+penalización.
 
-Lo interesante es que **sin regularizar gana en 10 de las 25 series**, más que cualquier
-alternativa. Con 24 columnas y una mediana de más de 150 filas, estas series no están en el régimen
+Lo interesante es que **sin regularizar gana en
+`{python} f"{int(TABLA_REG.loc['sin regularizar', 'gana en'])}"` de las
+`{python} f"{int(TABLA_REG['gana en'].sum())}"` series**, más que cualquier alternativa. Con 24 columnas y una mediana de más de 150 filas, estas series no están en el régimen
 donde la regularización paga, y la @sec-regularizacion-no-ayuda ya había medido lo mismo en el caso
 extremo. La regularización es una respuesta a un exceso de capacidad, y acá el exceso lo produce el
 número de rezagos, no la falta de penalización: la @fig-curva-rezagos dice que la solución es usar
@@ -494,7 +508,7 @@ doce columnas, no penalizar veinticuatro.
 | familia | cuánto cuesta | qué midió este capítulo |
 |---|---|---|
 | rezagos $1 \dots p$ | $p$ columnas | la media es una U con mínimo en $p = m$; la mediana baja hasta $p = 24$ |
-| rezagos por correlograma | 6 columnas | el mejor sMAPE medio del capítulo, 12,85, con la mitad de columnas |
+| rezagos por correlograma | 6 columnas | el mejor sMAPE medio del capítulo, con la mitad de columnas |
 | Fourier | $2K$ columnas | mejora media y mediana; con $K = m/2$ equivale a indicadoras solo sin penalización |
 | indicadoras estacionales | $m - 1$ columnas | cara en columnas y equivalente a Fourier completo |
 | estadísticos de ventana móvil | 4 por ventana | trampa en pronóstico recursivo: realimentación positiva |

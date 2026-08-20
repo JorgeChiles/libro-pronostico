@@ -184,20 +184,23 @@ pd.DataFrame({
 
 La tabla tiene cuatro lecturas y ninguna es la que se espera.
 
-**Gana *extra trees*, con 12,55 de media y 6,75 de mediana.** Le gana al bosque aleatorio —13,31—
-y por bastante al boosting. Que el ensamble con los cortes elegidos **al azar** le gane al que los
+**Gana *extra trees*, con `{python} f"{COMP["extra trees"].mean():.2f}".replace(".", ",")` de media y
+`{python} f"{COMP["extra trees"].median():.2f}".replace(".", ",")` de mediana.** Le gana al bosque aleatorio
+—`{python} f"{COMP["bosque aleatorio"].mean():.2f}".replace(".", ",")`— y por bastante al boosting. Que el ensamble con los cortes elegidos **al azar** le gane al que los
 optimiza no es casualidad: con doscientas filas, elegir el mejor corte es una decisión con mucha
 varianza, y renunciar a optimizarlo es una forma de regularización. Es el @sec-sobreajuste otra
 vez, disfrazado de detalle de implementación.
 
-**El boosting es peor que `snaive`.** 17,80 contra 15,31, y en la mediana 10,77 contra 11,60. Con
+**El boosting es peor que `snaive`.** `{python} f"{COMP["boosting"].mean():.2f}".replace(".", ",")` contra
+`{python} f"{COMP["snaive"].mean():.2f}".replace(".", ",")`, y en la mediana `{python} f"{COMP["boosting"].median():.2f}".replace(".", ",")` contra
+`{python} f"{COMP["snaive"].median():.2f}".replace(".", ",")`. Con
 120 iteraciones sobre tablas de cien a trescientas filas, el boosting ajusta el ruido: cada árbol
 corrige el residuo del anterior y el residuo de una serie corta es mayormente ruido. Es el
 resultado que más contradice la sabiduría recibida sobre datos tabulares [@grinsztajn2022], y la
 diferencia con esos resultados está en el tamaño: los conjuntos tabulares donde el boosting brilla
 tienen decenas de miles de filas.
 
-**SVR con núcleo radial es un desastre**: 36,71, peor que `naive`. Lo dejo en la tabla porque la
+**SVR con núcleo radial es un desastre**: `{python} f"{COMP["SVR rbf"].mean():.2f}".replace(".", ",")`, peor que `naive`. Lo dejo en la tabla porque la
 @sec-diferenciar explica por qué y cómo se arregla, y porque es útil ver que un modelo respetable
 puede ser inaplicable a un problema por un motivo estructural.
 
@@ -323,9 +326,12 @@ pd.DataFrame([
 
 Acá hay que corregir la lectura que dejó la @sec-quitar-tendencia, y es una corrección que importa.
 
-**Diferenciar empeora la media en siete de los nueve modelos.** El árbol sin límite pasa de 16,24
-a 23,23, el boosting de 17,13 a 24,16, el bosque de 13,21 a 19,00. Solo mejoran Ridge —de 14,88 a
-13,86— y SVR, de manera espectacular.
+**Diferenciar empeora la media en siete de los nueve modelos.** El árbol sin límite pasa de
+`{python} f"{DIF["árbol sin límite nivel"].mean():.2f}".replace(".", ",")` a `{python} f"{DIF["árbol sin límite dif"].mean():.2f}".replace(".", ",")`, el boosting
+de `{python} f"{DIF["boosting nivel"].mean():.2f}".replace(".", ",")` a `{python} f"{DIF["boosting dif"].mean():.2f}".replace(".", ",")`, el bosque de
+`{python} f"{DIF["bosque aleatorio nivel"].mean():.2f}".replace(".", ",")` a `{python} f"{DIF["bosque aleatorio dif"].mean():.2f}".replace(".", ",")`. Solo
+mejoran Ridge —de `{python} f"{DIF["Ridge nivel"].mean():.2f}".replace(".", ",")` a `{python} f"{DIF["Ridge dif"].mean():.2f}".replace(".", ",")`— y SVR, de
+manera espectacular.
 
 **Y sin embargo mejora en aproximadamente la mitad de las series en todos los modelos**: entre 14 y
 18 de 30. O sea que no es que diferenciar sea malo: es que **cuando ayuda ayuda poco y cuando
@@ -349,7 +355,8 @@ La regla operativa que queda: **diferenciar si el diagnóstico del recuadro ante
 techo está activo, y no como paso por omisión.** Y verificarlo, porque la mitad de las veces sale
 mal.
 
-El caso de SVR es aparte. Pasa de 36,58 a 19,62 porque un núcleo radial sobre rezagos de nivel es
+El caso de SVR es aparte. Pasa de `{python} f"{DIF["SVR rbf nivel"].mean():.2f}".replace(".", ",")` a
+`{python} f"{DIF["SVR rbf dif"].mean():.2f}".replace(".", ",")` porque un núcleo radial sobre rezagos de nivel es
 un modelo condenado: al alejarse de los datos de entrenamiento la predicción decae hacia una
 constante, que en la escala de la serie es un número arbitrario. Sobre diferencias, esa constante
 es cero, que es una predicción razonable. Sigue siendo el peor de la tabla.
@@ -367,16 +374,20 @@ for etiqueta, seleccion in (("n / h < 10", COMP[COMP["n / h"] < 10]),
     fila.update(seleccion[TODOS].mean().to_dict())
     filas.append(fila)
 
-pd.DataFrame(filas).set_index("series").T.round(2)
+POR_LARGO_MODELOS = pd.DataFrame(filas).set_index("series").T
+POR_LARGO_MODELOS.round(2)
 ```
 
 La tabla parte el capítulo en dos.
 
 **En las series largas todo funciona.** Ocho de los nueve modelos le ganan a `snaive`, y *extra
-trees* llega a 7,97 contra los 11,42 de la referencia: una mejora del 30 %.
+trees* llega a `{python} f"{POR_LARGO_MODELOS.loc["extra trees"].iloc[1]:.2f}".replace(".", ",")` contra los `{python} f"{POR_LARGO_MODELOS.loc["snaive"].iloc[1]:.2f}".replace(".", ",")` de la
+referencia: una mejora del
+`{python} f"{100 * (1 - POR_LARGO_MODELOS.loc['extra trees'].iloc[1] / POR_LARGO_MODELOS.loc['snaive'].iloc[1]):.0f}"` %.
 
-**En las series cortas casi nada funciona.** `snaive` da 22,38 y solo *extra trees* le gana, con
-20,86. Ridge da 25,85, el boosting 31,99 y SVR 39,31. **Ocho de nueve modelos de aprendizaje
+**En las series cortas casi nada funciona.** `snaive` da `{python} f"{POR_LARGO_MODELOS.loc["snaive"].iloc[0]:.2f}".replace(".", ",")` y solo *extra
+trees* le gana, con `{python} f"{POR_LARGO_MODELOS.loc["extra trees"].iloc[0]:.2f}".replace(".", ",")`. Ridge da `{python} f"{POR_LARGO_MODELOS.loc["Ridge"].iloc[0]:.2f}".replace(".", ",")`, el
+boosting `{python} f"{POR_LARGO_MODELOS.loc["boosting"].iloc[0]:.2f}".replace(".", ",")` y SVR `{python} f"{POR_LARGO_MODELOS.loc["SVR rbf"].iloc[0]:.2f}".replace(".", ",")`. **Ocho de nueve modelos de aprendizaje
 automático son peores que repetir el ciclo del año pasado.**
 
 Es la advertencia del @sec-intro-ml con nombres y números. Ahí decía que el 51 % de las series de
@@ -412,12 +423,16 @@ for etiqueta, kw in CONFIGURACIONES.items():
                   "series largas": np.mean(largas),
                   "todas": np.mean(cortas + largas)})
 
-pd.DataFrame(filas).set_index("configuración").round(2)
+CAPACIDAD = pd.DataFrame(filas).set_index("configuración")
+CAPACIDAD.round(2)
 ```
 
 **No, no se puede.** La mejor configuración para series cortas —hoja mínima de 10 y profundidad
-2— baja de 31,99 a 28,38, sigue muy por encima de los 22,38 de `snaive`, y para conseguirlo
-empeora las series largas de 9,99 a 12,91.
+2— baja de `{python} f"{CAPACIDAD.loc["por omisión (120 iteraciones)", "series cortas"]:.2f}".replace(".", ",")` a
+`{python} f"{CAPACIDAD.loc["hoja mínima 10, profundidad 2", "series cortas"]:.2f}".replace(".", ",")`, sigue muy por encima de los
+`{python} f"{POR_LARGO_MODELOS.loc["snaive"].iloc[0]:.2f}".replace(".", ",")` de `snaive`, y para conseguirlo empeora las series largas de
+`{python} f"{CAPACIDAD.loc["por omisión (120 iteraciones)", "series largas"]:.2f}".replace(".", ",")` a
+`{python} f"{CAPACIDAD.loc["hoja mínima 10, profundidad 2", "series largas"]:.2f}".replace(".", ",")`.
 
 Eso es información útil sobre dónde está el problema. **No es de hiperparámetros: es de datos.**
 Bajarle capacidad al boosting no lo convierte en un buen modelo para cien filas; lo convierte en un
@@ -513,7 +528,7 @@ else:
 | situación | qué usar | por qué |
 |---|---|---|
 | $n/h < 10$ | `snaive` o `naive`, o *extra trees* si hay que usar algo | ocho de nueve modelos pierden contra la referencia |
-| $n/h \geq 10$, sin tendencia sostenida | *extra trees* | 7,97 contra 11,42 de `snaive`, y cuesta 1,7 segundos |
+| $n/h \geq 10$, sin tendencia sostenida | *extra trees* | el mejor de la tabla en series largas, y cuesta menos de dos segundos |
 | tendencia sostenida | lineal regularizado | los modelos acotados tienen un techo que no baja con más datos |
 | muchas filas por serie | boosting, con `lightgbm` | es donde la literatura tabular lo respalda, y no es el caso de M4 |
 

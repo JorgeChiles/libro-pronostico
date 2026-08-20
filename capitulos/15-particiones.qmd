@@ -210,28 +210,34 @@ for K in (1, 2, 3, 5, 7, 10):
         "optimismo": np.mean(err_prueba) - np.mean(err_val),
     })
 
-pd.DataFrame(filas).set_index("candidatos").round(2)
+OPTIMISMO = pd.DataFrame(filas).set_index("candidatos")
+OPTIMISMO.round(2)
 ```
 
 La @tbl-optimismo es el capítulo entero en seis filas.
 
-**Con un solo candidato el optimismo es 1,29.** No es cero, porque validación y prueba son
+**Con un solo candidato el optimismo es `{python} f"{OPTIMISMO.loc[1, "optimismo"]:.2f}".replace(".", ",")`.** No es cero, porque validación y prueba son
 períodos distintos de la serie y el segundo resulta más difícil, pero ahí no hubo selección:
 es la diferencia honesta entre dos ventanas de tiempo.
 
-**Con diez candidatos el optimismo es 3,45**, casi el triple. Nada cambió en los modelos ni en
+**Con diez candidatos el optimismo es `{python} f"{OPTIMISMO.loc[10, "optimismo"]:.2f}".replace(".", ",")`**, casi el triple. Nada cambió en los modelos ni en
 los datos; lo único que creció es la cantidad de veces que se miró el mismo conjunto.
 
-Y el detalle que conviene mirar dos veces: **el error de validación mejora de 10,34 a 9,71 al
-pasar de 7 a 10 candidatos, y el de prueba no mejora** —13,15 contra 13,16—. Los últimos tres
+Y el detalle que conviene mirar dos veces: **el error de validación mejora de
+`{python} f"{OPTIMISMO.loc[7, "sMAPE en validación"]:.2f}".replace(".", ",")` a `{python} f"{OPTIMISMO.loc[10, "sMAPE en validación"]:.2f}".replace(".", ",")` al
+pasar de 7 a 10 candidatos, y el de prueba no mejora** —`{python} f"{OPTIMISMO.loc[7, "sMAPE en prueba"]:.2f}".replace(".", ",")` contra
+`{python} f"{OPTIMISMO.loc[10, "sMAPE en prueba"]:.2f}".replace(".", ",")`—. Los últimos tres
 candidatos no compraron precisión: compraron optimismo. Quien reporte el número de validación
-va a creer que mejoró un 6 % algo que no se movió.
+va a creer que mejoró un
+`{python} f"{100 * (1 - OPTIMISMO.loc[10, 'sMAPE en validación'] / OPTIMISMO.loc[7, 'sMAPE en validación']):.0f}"` %
+algo que no se movió.
 
 ::: {.callout-note}
 ## Lo que sí funciona
 
 La lectura pesimista de la @tbl-optimismo sería "elegir no sirve". Es al revés: el sMAPE de
-prueba baja de 25,90 con un candidato a 13,16 con diez, así que **elegir el modelo reduce el
+prueba baja de `{python} f"{OPTIMISMO.loc[1, "sMAPE en prueba"]:.2f}".replace(".", ",")` con un candidato a
+`{python} f"{OPTIMISMO.loc[10, "sMAPE en prueba"]:.2f}".replace(".", ",")` con diez, así que **elegir el modelo reduce el
 error a la mitad**. El problema no es la selección. El problema es reportar como estimación
 del error futuro el mismo número con el que se seleccionó.
 :::
@@ -350,8 +356,12 @@ print(f"prueba de signos sobre {mejora + empeora} series: "
       f"{mejora} a {empeora},  p = {_p:.4f}")
 ```
 
-**Reajustar gana en 24 de 30 series** y baja el sMAPE medio de 16,71 a 13,16, un 21 %. El
-signo es consistente y no es casualidad: la prueba de signos da $p = 0{,}0014$.
+**Reajustar gana en `{python} f"{mejora}"` de `{python} f"{mejora + empeora}"` series** y baja el
+sMAPE medio de `{python} f"{comparacion['sin reajustar'].mean():.2f}".replace(".", ",")` a
+`{python} f"{comparacion['reajustado'].mean():.2f}".replace(".", ",")`, un
+`{python} f"{100 * (1 - comparacion['reajustado'].mean() / comparacion['sin reajustar'].mean()):.0f}"` %.
+El signo es consistente y no es casualidad: la prueba de signos da
+$p =$ `{python} f"{_p:.4f}".replace(".", ",")`.
 
 La razón es sencilla y vale recordarla cada vez que se arma una partición temporal: el
 conjunto de validación son las observaciones **más recientes**, justo las que más informan
@@ -411,7 +421,7 @@ for identificador in catalogo()["serie"]:
 pd.DataFrame(filas).set_index("serie")
 ```
 
-Cuatro de las 34 series del catálogo, todas por el mismo motivo. `Y21804` y `Y22817` tienen 13
+Cuatro de las 35 series del catálogo, todas por el mismo motivo. `Y21804` y `Y22817` tienen 13
 observaciones y horizonte 6: apartar una validación dejaría 7 datos para ajustar cualquier cosa.
 
 El piso de 12 observaciones es una convención de este libro, no un resultado, y `Q5655` —que
@@ -466,13 +476,17 @@ for etiqueta, factor in (("h/2", 0.5), ("h", 1.0), ("2h", 2.0)):
 pd.DataFrame(filas).set_index("largo de la validación").round(2)
 ```
 
-El mejor error de prueba lo da $h$: 13,16 contra 14,10 y 14,31. Hay que decirlo con cuidado,
-igual: **con 30 series esas tres diferencias no son concluyentes.** Lo que la tabla sostiene es
+El mejor error de prueba lo da $h$:
+`{python} f"{filas[1]['sMAPE en prueba']:.2f}".replace(".", ",")` contra
+`{python} f"{filas[0]['sMAPE en prueba']:.2f}".replace(".", ",")` y
+`{python} f"{filas[2]['sMAPE en prueba']:.2f}".replace(".", ",")`. Hay que decirlo con cuidado,
+igual: **con `{python} f"{len(MEDIDAS)}"` series esas tres diferencias no son concluyentes.** Lo que la tabla sostiene es
 una recomendación por defecto, no un resultado.
 
 Lo que sí es interesante es la última columna, que va en dirección **opuesta** al error. Con
-una validación de $h/2$ el ganador de validación coincide con el mejor de prueba en 15 series
-de 30, más del doble que con $2h$, y sin embargo su error de prueba es el peor de los tres.
+una validación de $h/2$ el ganador de validación coincide con el mejor de prueba en
+`{python} f"{filas[0][f'aciertos sobre {len(MEDIDAS)}']}"` series de
+`{python} f"{len(MEDIDAS)}"`, más del doble que con $2h$, y sin embargo su error de prueba es el peor de los tres.
 Acertar más seguido no compensa si, cuando falla, falla peor: la validación corta acierta en
 los casos fáciles y se equivoca de manera catastrófica en los difíciles. **La tasa de aciertos
 no es la métrica que importa; el error resultante sí.**
@@ -585,7 +599,7 @@ Las soluciones están en la @sec-soluciones-15.
 igual con $K$? ¿Por qué las dos medidas pueden contar historias distintas?
 
 **2.** Calcula el error de prueba de los diez métodos sobre una serie del catálogo. ¿Cuánto va
-del mejor al peor? Compáralo con el optimismo de 3,45 de la @tbl-optimismo y decide cuál de
+del mejor al peor? Compáralo con el optimismo de `{python} f"{OPTIMISMO.loc[10, "optimismo"]:.2f}".replace(".", ",")` de la @tbl-optimismo y decide cuál de
 los dos errores es más grave: elegir mal el modelo o reportar mal el error.
 
 **3.** En la @tbl-reajustar hay 6 series donde reajustar empeora. Identifícalas y compara la

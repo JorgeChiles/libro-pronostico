@@ -7,6 +7,7 @@
 #
 # Por eso todo pasa por acá y no por `quarto render` a mano.
 
+SHELL := /bin/bash
 VENV ?= $(HOME)/.venvs/libro
 PY   := $(VENV)/bin/python
 export QUARTO_PYTHON := $(PY)
@@ -43,8 +44,11 @@ kernel:
 # Quarto avisa de una referencia cruzada sin resolver con un WARN y sigue de
 # largo, así que la compilación termina en verde con un enlace roto en el texto.
 # Por eso `libro` corre siempre el chequeo al final.
+# `set -o pipefail` no es decorativo: sin él, `tee` devuelve 0 aunque el render
+# falle, y `make libro` termina en verde con capítulos sin compilar. Pasó al
+# corregir M16834.
 libro html:
-	quarto render --to live-html 2>&1 | tee .ultima-compilacion.log
+	set -o pipefail; quarto render --to live-html 2>&1 | tee .ultima-compilacion.log
 	@$(MAKE) --no-print-directory referencias
 
 # Falla si quedó una referencia cruzada sin resolver. Pasa el registro de la
@@ -87,8 +91,15 @@ prueba-sin-conexion:
 datos:
 	$(PY) -m libro._construir_cache
 
+# Regenerar los datos invalida los resultados congelados: `freeze: auto` mira la
+# fecha del .qmd, no la de los parquet, así que un capítulo que no se editó
+# seguiría publicando números calculados con el catálogo anterior. Pasó al
+# corregir M16834: los capítulos 5, 13, 16 y 21 quedaron con los viejos.
 catalogo:
 	$(PY) -m libro._construir_catalogo
+	rm -rf _freeze
+	@echo ""
+	@echo "_freeze borrado: el próximo 'make libro' reejecuta todo el libro."
 
 datos-widgets:
 	$(PY) -m libro._datos_widgets

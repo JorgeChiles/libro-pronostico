@@ -165,7 +165,7 @@ estimada apunta en la dirección equivocada.
 
 ```{python}
 #| label: tbl-cota
-#| tbl-cap: "La @eq-cota aplicada al pronóstico de Holt sobre las 34 series del catálogo, con distintos márgenes. Son 641 pasos en total."
+#| tbl-cap: "La @eq-cota aplicada al pronóstico de Holt sobre las series del catálogo, con distintos márgenes."
 from statsmodels.tsa.holtwinters import Holt
 
 PRON_HOLT = {}
@@ -368,7 +368,8 @@ puntos de sMAPE, sin perder nada de la protección: las ganancias de cien puntos
 Holt se desbarranca siguen ahí.
 
 **Esa es la cota que la aplicación de este proyecto tiene tomada como decisión**, y ahora está
-medida: no es una regla de gusto sino una que sobre 34 series y 641 pasos mejora el MASE medio un
+medida: no es una regla de gusto sino una que sobre `{python} f"{len(SERIES)}"` series y
+`{python} f"{PASOS}"` pasos mejora el MASE medio un
 `{python} f"{100 * (1 - CONDICIONAL.loc['condicional a la tendencia', 'MASE medio'] / CONDICIONAL.loc['sin cota', 'MASE medio']):.0f}"` %
 y daña a lo sumo `{python} f"{CONDICIONAL.loc['condicional a la tendencia', 'peor daño (puntos de sMAPE)']:.1f}"`
 puntos a una sola serie.
@@ -430,7 +431,7 @@ imposibles?**
 
 ```{python}
 #| label: tbl-cota-intervalo
-#| tbl-cap: "Intervalos del 95 % por bootstrap del naive estacional sobre las 34 series del catálogo, con B = 500 trayectorias, y qué pasa al acotarlos."
+#| tbl-cap: "Intervalos del 95 % por bootstrap del naive estacional sobre las series del catálogo, con B = 500 trayectorias, y qué pasa al acotarlos."
 rng = np.random.default_rng(42)
 
 
@@ -487,7 +488,7 @@ INTERVALOS.round(3)
 ```
 
 El extremo inferior es negativo en `{python} f"{100 * negativos / pasos:.1f}"` % de los
-`{python} f"{pasos}"` pasos, en `{python} f"{series_con_negativo}"` de las 34 series, siempre en
+`{python} f"{pasos}"` pasos, en `{python} f"{series_con_negativo}"` de las `{python} f"{len(SERIES)}"` series, siempre en
 series cuyo histórico es estrictamente positivo. Un intervalo que dice "entre −400 y 1.200 unidades"
 no es conservador: es un error visible.
 
@@ -1012,7 +1013,7 @@ La serie es corta y el ruido es visible —hay una antigüedad donde el congelad
 así que el número que vale es la frecuencia con que pierde, que sí crece de manera consistente.
 
 Y la conclusión práctica no sale del tamaño de la penalización sino de compararla con el costo. Con
-Ridge, reajustar las 34 series cuesta milisegundos; con el boosting de la
+Ridge, reajustar todas las series del catálogo cuesta milisegundos; con el boosting de la
 @tbl-almacenamiento cuesta minutos y
 `{python} f"{ALMACEN.loc['boosting por histogramas', 'recursiva × 99.935 (GB)']:.0f}"` GB de
 reescritura. **La respuesta a "cada cuánto reajustar" es una función del costo de ajustar, no de la
@@ -1095,7 +1096,7 @@ mediciones sea cuestión de cambiar una celda.
 
 De lo que falta, tres cosas quedan explícitamente sin resolver.
 
-**El enfoque global no está demostrado acá.** La @sec-modelo-global lo explica: un catálogo de 34 series
+**El enfoque global no está demostrado acá.** La @sec-modelo-global lo explica: un catálogo de 35 series
 curadas no puede mostrar la ventaja de entrenar un modelo sobre miles. La tesis lo midió y este
 libro lo cita, pero no lo ejecuta.
 
