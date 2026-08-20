@@ -204,8 +204,13 @@ tienen decenas de miles de filas.
 @sec-diferenciar explica por qué y cómo se arregla, y porque es útil ver que un modelo respetable
 puede ser inaplicable a un problema por un motivo estructural.
 
-**Y el costo no acompaña a la calidad.** El boosting consume 9,31 segundos contra los 0,06 de
-Ridge —155 veces más— para dar un resultado peor. *Extra trees*, que gana, cuesta 1,74 segundos.
+**Y el costo no acompaña a la calidad.** El boosting consume
+`{python} f"{_segundos['boosting']:.2f}".replace(".", ",")` segundos contra los
+`{python} f"{_segundos['Ridge']:.2f}".replace(".", ",")` de Ridge
+—`{python} f"{_segundos['boosting'] / _segundos['Ridge']:.0f}"` veces más— para dar un resultado
+peor. *Extra trees*, que gana, cuesta
+`{python} f"{_segundos['extra trees']:.2f}".replace(".", ",")` segundos. Los tiempos son de la
+máquina que compiló esta página y sirven para comparar entre sí, no como referencia absoluta.
 
 ```{python}
 #| label: fig-modelos
