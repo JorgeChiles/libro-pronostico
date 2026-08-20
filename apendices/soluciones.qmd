@@ -7391,3 +7391,386 @@ Y las semanales tienen una segunda capa que conviene notar. El total es 294 y no
 @sec-los-datos documenta que 65 series semanales se descartan por ser demasiado cortas para calcular
 todos los descriptores. **294 es un número derivado**, y el único registro de esa resta es la
 documentación: nada en el conteo lo delata.
+
+## Capítulo 24 · Selección de modelos a escala {#sec-soluciones-24}
+
+```{python}
+#| echo: false
+from sklearn.ensemble import ExtraTreesClassifier as _ETC
+from sklearn.ensemble import ExtraTreesRegressor as _ETR
+from sklearn.model_selection import train_test_split as _split
+
+ERR24 = {"naive": "error_naive_smape", "snaive": "error_snaive_smape",
+         "ARIMA": "error_arima_smape"}
+NOM24 = list(ERR24)
+POS24 = {n: i for i, n in enumerate(NOM24)}
+
+_m24 = _metadatos()
+_m24 = _m24.assign(
+    error_snaive_smape=_m24["error_snaive_smape"].fillna(_m24["error_naive_smape"]))
+D24 = _m24.dropna(subset=list(ERR24.values())).copy()
+E24 = D24[list(ERR24.values())].to_numpy().astype(float)
+D24["ganador"] = [NOM24[i] for i in E24.argmin(axis=1)]
+D24["oráculo"] = E24.min(axis=1)
+
+FEAT24 = [c for c in D24.columns
+          if c.startswith("z_")
+          or c in ("complexity_index", "trend_strength", "seasonal_strength",
+                   "adf_pvalue", "kpss_pvalue", "diff_var_ratio",
+                   "change_points_per_length", "dominant_energy_ratio",
+                   "perm_entropy", "sample_entropy", "lz_complexity",
+                   "n_entrenamiento", "periodo_estacional", "horizonte")]
+X24 = D24[FEAT24].fillna(D24[FEAT24].median())
+TR24, TE24 = _split(np.arange(len(D24)), test_size=0.3, random_state=42,
+                    stratify=D24["frecuencia"])
+ETE24 = E24[TE24]
+REAL24 = D24["ganador"].iloc[TE24].to_numpy()
+FIJO24 = min(D24[c].iloc[TE24].mean() for c in ERR24.values())
+ORAC24 = ETE24.min(axis=1).mean()
+HUECO24 = FIJO24 - ORAC24
+
+
+def error24(eleccion, matriz):
+    return matriz[np.arange(len(matriz)),
+                  [POS24[m] for m in eleccion]].astype(float)
+
+
+CLF24 = _ETC(n_estimators=200, random_state=0, n_jobs=1,
+             min_samples_leaf=5).fit(X24.iloc[TR24], D24["ganador"].iloc[TR24])
+PRED24 = CLF24.predict(X24.iloc[TE24])
+```
+
+### Ejercicio 1 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-24-1
+#| tbl-cap: "El meta-modelo entrenado en cinco frecuencias y evaluado en la sexta. Un porcentaje negativo significa que elegir salió peor que fijar un método."
+filas = []
+for frecuencia in sorted(D24["frecuencia"].unique()):
+    es_otra = D24["frecuencia"].to_numpy() != frecuencia
+    entrena, evalua = np.where(es_otra)[0], np.where(~es_otra)[0]
+
+    modelo = _ETC(n_estimators=150, random_state=0, n_jobs=1,
+                  min_samples_leaf=5).fit(X24.iloc[entrena],
+                                          D24["ganador"].iloc[entrena])
+    prediccion = modelo.predict(X24.iloc[evalua])
+    matriz = E24[evalua]
+    fijo = min(D24[c].iloc[evalua].mean() for c in ERR24.values())
+    oraculo = matriz.min(axis=1).mean()
+    hueco = fijo - oraculo
+    errores = error24(prediccion, matriz)
+
+    filas.append({
+        "frecuencia excluida": frecuencia, "series": len(evalua),
+        "acierta %": 100 * np.mean(
+            prediccion == D24["ganador"].iloc[evalua].to_numpy()),
+        "mejor fija": fijo, "meta-modelo": errores.mean(),
+        "% del hueco": 100 * (fijo - errores.mean()) / hueco
+        if hueco > 1e-9 else np.nan,
+    })
+
+pd.DataFrame(filas).set_index("frecuencia excluida").astype(float).round(
+    {"series": 0, "acierta %": 1, "mejor fija": 4, "meta-modelo": 4,
+     "% del hueco": 1})
+```
+
+**No generaliza, y en la frecuencia horaria el resultado es catastrófico.**
+
+Entrenado sin ver ninguna serie horaria, el meta-modelo da un sMAPE de 0,2403 contra los 0,1391 de
+la mejor estrategia fija: **un 73 % peor**, o un −4.698 % del hueco. Y en mensual y diaria también
+pierde, con −19,7 % y −9,0 %.
+
+Solo funciona en semanal (+32,0 %), trimestral (+14,6 %) y anual (+8,3 %), que son justamente las
+frecuencias cuyas dinámicas se parecen a las de las demás.
+
+El caso horario explica el mecanismo. Sus 414 series tienen $m = 24$, más de 700 observaciones y un
+ciclo diario limpio: son las únicas de M4 con esa estructura, como el @sec-donde-si midió. El
+meta-modelo entrenado sobre las otras cinco frecuencias nunca vio nada parecido, así que **extrapola
+una regla aprendida en series de cien observaciones a series de novecientas**, y elige mal de manera
+sistemática.
+
+::: {.callout-warning}
+## Consecuencia directa para la aplicación de pronóstico
+
+En la aplicación, alguien sube una serie y el sistema no sabe de antemano si su estructura se parece
+a las del entrenamiento. Este ejercicio dice qué pasa cuando no se parece: **el meta-modelo no se
+degrada suavemente, puede ser mucho peor que no elegir nada.**
+
+De ahí una regla de diseño que la @tbl-receta-seleccion no incluía: **el meta-modelo necesita una
+salida de «no sé».** Si la serie que llega cae lejos del rango de características que el modelo vio
+—cosa que se puede medir con una distancia o con la probabilidad que el clasificador asigna—, la
+respuesta correcta es usar el método fijo por omisión, no la predicción del meta-modelo.
+
+Es la misma lección del techo de extrapolación del @sec-techo, un nivel más arriba: **un modelo
+entrenado en un rango no sabe que está afuera de él a menos que se lo pregunte.**
+:::
+
+### Ejercicio 2 {.unnumbered}
+
+**No se puede calcular, y el motivo vale más que el cálculo.**
+
+`metadatos()` trae, para cada serie, el **sMAPE** de cada método. No trae los pronósticos. Y el error
+de una combinación no se puede deducir de los errores de sus miembros: si $\hat{y}^{(1)}$ y
+$\hat{y}^{(2)}$ tienen errores $e_1$ y $e_2$, el error del promedio depende de **en qué dirección** se
+equivocó cada uno, y eso los sMAPE ya lo perdieron.
+
+```{python}
+#| label: tbl-sol-24-2
+#| tbl-cap: "Lo que sí se puede calcular con los errores solos, y que no es lo que el ejercicio pedía."
+regresores = {}
+for nombre, columna in ERR24.items():
+    regresores[nombre] = _ETR(n_estimators=100, random_state=0, n_jobs=1,
+                              min_samples_leaf=5).fit(X24.iloc[TR24],
+                                                      D24[columna].iloc[TR24])
+predichos = np.column_stack([regresores[n].predict(X24.iloc[TE24])
+                             for n in NOM24])
+eleccion = [NOM24[i] for i in predichos.argmin(axis=1)]
+
+pesos = 1.0 / np.clip(predichos, 1e-6, None)
+pesos = pesos / pesos.sum(axis=1, keepdims=True)
+
+pd.DataFrame([
+    {"cantidad": "elegir el de menor error predicho",
+     "sMAPE": error24(eleccion, ETE24).mean(),
+     "¿es el error de una combinación?": "no: es el error de una elección"},
+    {"cantidad": "promedio ponderado de los tres errores",
+     "sMAPE": float((pesos * ETE24).sum(axis=1).mean()),
+     "¿es el error de una combinación?": "no: es un promedio de errores"},
+    {"cantidad": "promedio simple de los tres errores",
+     "sMAPE": float(ETE24.mean(axis=1).mean()),
+     "¿es el error de una combinación?": "no"},
+    {"cantidad": "oráculo", "sMAPE": ORAC24,
+     "¿es el error de una combinación?": "no"},
+]).set_index("cantidad").round(4)
+```
+
+Las dos filas del medio son la trampa. El promedio ponderado de los errores da 0,1359 y el simple
+0,1399, y **ninguno de los dos es el error de un pronóstico combinado**: son promedios de errores de
+pronósticos distintos, que es una cantidad sin interpretación.
+
+El @sec-ensambles midió la diferencia con datos reales. Ahí el promedio de los nueve métodos daba un
+sMAPE de 18,53 mientras el promedio de los nueve sMAPE individuales era otro número: **combinar
+pronósticos y promediar errores son operaciones distintas**, y solo la primera es un método.
+
+**Qué habría que guardar.** Para responder el ejercicio hacen falta los $h$ valores pronosticados por
+cada método en cada serie: para las 99.935 series de M4, con los horizontes de cada frecuencia, son
+unos 3,4 millones de números por método. Es perfectamente factible —serían unos pocos cientos de
+megabytes— y es una decisión de diseño que hay que tomar **antes** de correr el experimento, porque
+volver a correrlo cuesta las veinte horas del @sec-costo.
+
+La lección general para cualquier pipeline de evaluación: **guardar los pronósticos, no solo las
+métricas.** Las métricas se recalculan de los pronósticos; los pronósticos no se recuperan de las
+métricas, y cada pregunta nueva que surja va a necesitarlos.
+
+### Ejercicio 3 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-24-3
+#| tbl-cap: "El hueco entre la mejor estrategia fija y el oráculo, por cuartil del índice de complejidad."
+por_cuartil = D24.assign(
+    cuartil=pd.qcut(D24["complexity_index"], 4,
+                    labels=["Q1, la más simple", "Q2", "Q3", "Q4, la más compleja"])
+)
+
+filas = []
+for cuartil, grupo in por_cuartil.groupby("cuartil", observed=True):
+    fijo = min(grupo[c].mean() for c in ERR24.values())
+    oraculo = grupo["oráculo"].mean()
+    filas.append({"cuartil": cuartil, "series": len(grupo),
+                  "mejor fija": fijo, "oráculo": oraculo,
+                  "hueco absoluto": fijo - oraculo,
+                  "hueco relativo %": 100 * (fijo - oraculo) / fijo})
+
+pd.DataFrame(filas).set_index("cuartil").astype(float).round(4)
+```
+
+**En términos absolutos vale casi cuatro veces más elegir en las series difíciles; en términos
+relativos, exactamente lo mismo en todas.**
+
+El hueco absoluto va de 0,0100 en el cuartil más simple a 0,0393 en el más complejo: un factor de
+3,9. Pero el hueco **relativo** se queda entre el 16,0 % y el 17,9 % en los cuatro cuartiles, con una
+variación de menos de dos puntos.
+
+Esa constancia es un resultado y no una casualidad. Dice que **la ventaja de elegir bien es
+proporcional al error, no aditiva**: en una serie donde todos los métodos dan un sMAPE del 22 %,
+elegir el mejor ahorra unos 4 puntos; donde todos dan 6 %, ahorra 1. La proporción es la misma.
+
+Para decidir dónde invertir el esfuerzo, la respuesta depende de qué se optimice. Si lo que importa es
+el **error total** de una cartera —un presupuesto agregado, una capacidad—, conviene concentrarse en
+las series difíciles, porque ahí están los puntos de sMAPE. Si lo que importa es el error **de cada
+serie por separado**, da lo mismo: el porcentaje que se gana es el mismo en todas.
+
+Y vale conectarlo con el @sec-donde-funciona-seleccion. Ahí el hueco variaba mucho **por frecuencia**
+—0,0015 en horaria contra 0,0182 en semanal— y acá casi no varía por cuartil de complejidad. O sea
+que **la frecuencia predice mejor que la complejidad si conviene elegir**, que es la misma conclusión
+que la @fig-importancias sacó para elegir *qué* método.
+
+### Ejercicio 4 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-24-4
+#| tbl-cap: "Matriz de confusión del clasificador: filas el ganador real, columnas el método elegido."
+pd.crosstab(pd.Series(REAL24, name="ganador real"),
+            pd.Series(PRED24, name="método elegido"))
+```
+
+```{python}
+#| label: tbl-sol-24-4b
+#| tbl-cap: "Cuánto cuesta cada tipo de error, en exceso de sMAPE sobre el oráculo."
+costo = pd.DataFrame({
+    "real": REAL24, "elegido": PRED24,
+    "exceso": error24(PRED24, ETE24) - ETE24.min(axis=1),
+})
+detalle = costo.groupby(["real", "elegido"])["exceso"].agg(
+    series="size", **{"exceso medio": "mean", "exceso total": "sum"})
+detalle.astype(float).round(4)
+```
+
+**Hay confusiones caras y baratas, y el clasificador comete la más cara con más frecuencia que
+ninguna otra.**
+
+La confusión más costosa en total es **elegir ARIMA cuando el naive era mejor**: pasa en 4.866 series,
+cuesta 0,0294 de exceso en cada una y suma 143,3 puntos de sMAPE. Es, sola, el 41 % de todo el exceso
+que el clasificador acumula.
+
+Y el motivo se ve en la matriz. El clasificador predice ARIMA en 16.020 series cuando ARIMA gana en
+solo 12.968: **está sesgado hacia ARIMA**, que es la clase mayoritaria y la mejor estrategia fija. El
+sesgo es entendible —el clasificador minimiza el error de clasificación y ARIMA es la apuesta segura—
+y sale caro porque las series donde el naive gana son justamente las que un ARIMA maneja mal.
+
+Las confusiones baratas están en el otro extremo: elegir naive cuando ARIMA era mejor cuesta 0,0204,
+la mitad que la inversa.
+
+Esa asimetría explica el resultado de la @tbl-meta que parecía paradójico. **La variante de regresión
+acierta menos y gana más porque no minimiza el error de clasificación: minimiza el error de
+pronóstico predicho**, así que cuando duda entre ARIMA y el naive tiene en cuenta cuánto se pierde en
+cada dirección. Un clasificador trata todas las confusiones como iguales y no lo son.
+
+::: {.callout-tip}
+## Cómo se arregla un clasificador sesgado hacia lo caro
+
+Dos maneras, en orden de preferencia:
+
+**Predecir el error en vez de la clase**, que es lo que la @tbl-meta ya mostró que funciona mejor. La
+magnitud del error es la información que el problema necesita y clasificar la descarta.
+
+**Ponderar las clases por lo que cuesta equivocarse**, con `class_weight` o con una matriz de costos.
+Es más barato de implementar y menos preciso, porque el costo de confundir dos métodos no es una
+constante por par: depende de la serie.
+:::
+
+### Ejercicio 5 {.unnumbered}
+
+```{python}
+#| label: fig-sol-24-5
+#| fig-cap: "Cuánto del hueco recupera el meta-modelo según cuántas series de entrenamiento tenga. La escala horizontal es logarítmica."
+FRACCIONES = (0.01, 0.05, 0.10, 0.30, 0.70, 1.00)
+
+filas = []
+for fraccion in FRACCIONES:
+    cuantas = max(50, int(len(TR24) * fraccion))
+    subconjunto = TR24[:cuantas]
+    modelo = _ETC(n_estimators=150, random_state=0, n_jobs=1,
+                  min_samples_leaf=5).fit(X24.iloc[subconjunto],
+                                          D24["ganador"].iloc[subconjunto])
+    prediccion = modelo.predict(X24.iloc[TE24])
+    errores = error24(prediccion, ETE24)
+    filas.append({"series de entrenamiento": cuantas,
+                  "acierta %": 100 * np.mean(prediccion == REAL24),
+                  "% del hueco": 100 * (FIJO24 - errores.mean()) / HUECO24})
+
+CURVA = pd.DataFrame(filas)
+
+fig = go.Figure()
+fig.add_trace(go.Scatter(x=CURVA["series de entrenamiento"],
+                         y=CURVA["% del hueco"], mode="lines+markers",
+                         name="% del hueco recuperado",
+                         line=dict(color=COLORES["observado"], width=2)))
+fig.add_trace(go.Scatter(x=CURVA["series de entrenamiento"],
+                         y=CURVA["acierta %"], mode="lines+markers",
+                         name="acierta el ganador %",
+                         line=dict(color=COLORES["prueba"], width=2, dash="dash")))
+fig.update_xaxes(title="series de entrenamiento", type="log")
+mostrar(fig, alto=400, titulo_y="porcentaje")
+```
+
+```{python}
+#| label: tbl-sol-24-5
+#| tbl-cap: "Los mismos valores en tabla."
+CURVA.set_index("series de entrenamiento").astype(float).round(1)
+```
+
+**Con 699 series el meta-modelo ya recupera el 20 % del hueco, y de ahí en adelante la curva se
+aplana.**
+
+Pasar de 699 a 6.995 series —diez veces más— sube el rendimiento de 20,3 % a 33,4 %. Pasar de 6.995 a
+48.967 —siete veces más— lo sube de 33,4 % a 39,9 %: seis puntos y medio por siete veces más datos.
+
+La respuesta a "cuántas series hacen falta" es entonces **unos pocos miles**, y eso es una noticia
+excelente para cualquiera que quiera aplicar esto sin tener M4. No hacen falta cien mil series: con
+tres o cinco mil se consigue tres cuartas partes del beneficio.
+
+Vale notar que las dos curvas de la figura se aplanan **al mismo ritmo**, lo que refuerza el resultado
+del ejercicio 4: la exactitud y la ganancia están relacionadas pero no son la misma cosa, y las dos
+saturan porque el problema tiene un límite intrínseco. Con las características disponibles no se puede
+predecir el ganador mucho mejor que el 55 %, y con más series eso no cambia.
+
+### Ejercicio 6 {.unnumbered}
+
+```{python}
+#| label: tbl-sol-24-6
+#| tbl-cap: "Siete características elegidas por importancia contra siete elegidas por costo."
+importancias = pd.Series(CLF24.feature_importances_,
+                         index=FEAT24).sort_values(ascending=False)
+SIETE_IMPORTANTES = list(importancias.head(7).index)
+SIETE_BARATAS = ["n_entrenamiento", "periodo_estacional", "horizonte",
+                 "seasonal_strength", "trend_strength", "z_acf1", "adf_pvalue"]
+
+filas = []
+for etiqueta, columnas in (("las siete más importantes", SIETE_IMPORTANTES),
+                           ("las siete más baratas", SIETE_BARATAS),
+                           ("las 21", FEAT24)):
+    modelo = _ETC(n_estimators=200, random_state=0, n_jobs=1,
+                  min_samples_leaf=5).fit(X24[columnas].iloc[TR24],
+                                          D24["ganador"].iloc[TR24])
+    prediccion = modelo.predict(X24[columnas].iloc[TE24])
+    errores = error24(prediccion, ETE24)
+    filas.append({"conjunto": f"{etiqueta} ({len(columnas)})",
+                  "sMAPE": errores.mean(),
+                  "acierta %": 100 * np.mean(prediccion == REAL24),
+                  "% del hueco": 100 * (FIJO24 - errores.mean()) / HUECO24})
+
+pd.DataFrame(filas).set_index("conjunto").astype(float).round(
+    {"sMAPE": 4, "acierta %": 1, "% del hueco": 1})
+```
+
+```{python}
+#| label: tbl-sol-24-6b
+#| tbl-cap: "Cuáles características tiene cada conjunto y cuántas comparten."
+compartidas = sorted(set(SIETE_IMPORTANTES) & set(SIETE_BARATAS))
+pd.DataFrame([
+    {"conjunto": "por importancia", "características": ", ".join(SIETE_IMPORTANTES)},
+    {"conjunto": "por costo", "características": ", ".join(SIETE_BARATAS)},
+    {"conjunto": f"en común ({len(compartidas)})",
+     "características": ", ".join(compartidas)},
+]).set_index("conjunto")
+```
+
+**Sí le gana, y por muy poco: 33,2 % contra 31,8 % del hueco.** Un punto y medio de diferencia entre
+elegir las características por lo que aportan y elegirlas por lo que cuestan.
+
+La razón está en la segunda tabla: **los dos conjuntos comparten cuatro de siete características**,
+entre ellas la más importante de todas, la fuerza de la estacionalidad. Las tres que difieren son
+sustituibles entre sí, así que la elección por costo no está dejando afuera nada crítico.
+
+Y ese resultado es mejor de lo que parece para la aplicación de pronóstico. Significa que **se puede
+elegir el conjunto de características por criterios de ingeniería —costo, latencia, cuántos datos
+hacen falta para calcularlas— sin sacrificar casi nada de rendimiento.** No hace falta pagar los
+diecinueve segundos de `sample_entropy` del @sec-costo para tomar una buena decisión de modelo.
+
+Vale una advertencia sobre el procedimiento, igual. Las importancias con las que se armó el conjunto
+"por importancia" se calcularon con un modelo entrenado sobre el **mismo** conjunto de entrenamiento,
+así que hay una selección de características apoyada en datos que después se usan para evaluar. El
+efecto acá es chico —el hueco entre los dos conjuntos es de un punto y medio— pero es exactamente el
+tipo de fuga que el @sec-trampa advierte: **seleccionar variables es una decisión, y las decisiones se
+toman con el conjunto de validación.**
