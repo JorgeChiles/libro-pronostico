@@ -434,7 +434,8 @@ Tres maneras de usar ventanas móviles sin caer en esto:
    reales y mantenerlos fijos durante todo el horizonte. Pierde información y no puede divergir.
 3. **Acotando la entrada.** Recortar cada característica al rango que tuvo en el entrenamiento
    antes de pasarla al modelo. Es el mismo tipo de cota que una aplicación de pronóstico necesita
-   sobre su salida, y el @sec-produccion la trata en detalle.
+   sobre su salida, y el @sec-produccion la mide: recortar el pronóstico al rango que la serie ya
+visitó baja el MASE medio un 56 % y el peor caso a un tercio.
 
 El ejercicio 4 mide las tres.
 :::
@@ -519,8 +520,9 @@ doce columnas, no penalizar veinticuatro.
 Y una advertencia sobre el género completo. Existe una tradición de generar cientos de
 características automáticamente y dejar que el modelo elija [@christ2018], y hay trabajo que la usa
 muy bien: @monteromanso2020 quedaron segundos en M4 calculando 42 características por serie y
-usándolas **no como entradas del pronóstico sino para decidir cómo combinar modelos**. Es una idea
-distinta, y el @sec-seleccion-escala la desarrolla.
+usándolas **no como entradas del pronóstico sino para decidir cómo combinar modelos**. Es una idea distinta —las características describen la serie, no predicen su valor— y el @sec-
+seleccion-escala la desarrolla entrenando un clasificador sobre 21 descriptores para elegir
+método serie por serie.
 
 Para el pronóstico directo, lo que este capítulo mide es que **la cantidad de columnas es el
 hiperparámetro que manda**, y que generar cientos de características en series de 100 observaciones

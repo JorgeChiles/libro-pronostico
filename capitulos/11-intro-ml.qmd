@@ -28,6 +28,115 @@ Este capítulo dice qué cambia, qué se gana, qué se pierde y —lo más impor
 conviene. La respuesta a la última pregunta es menos entusiasta de lo que suele
 leerse, y es mejor decirlo al principio que descubrirlo en el capítulo 22.
 
+## De dónde viene esto {#sec-de-donde-viene}
+
+Conviene ubicar las palabras antes de usarlas, porque en este campo se usan como
+sinónimos y no lo son.
+
+La **inteligencia artificial** es el programa de investigación más amplio y el más
+viejo: construir máquinas que hagan cosas que, hechas por personas, llamaríamos
+inteligentes. El nombre se acuñó en un taller en Dartmouth en 1956, pero la pregunta
+es anterior: @turing1950 la había planteado como un problema empírico —¿puede una
+máquina sostener una conversación indistinguible de la de una persona?— en vez de
+filosófico.
+
+El **aprendizaje automático** es una rama de eso, y su idea distintiva es una renuncia:
+en vez de programar las reglas, se le muestran ejemplos al programa y las reglas salen
+de ahí. @samuel1959 acuñó el término con un programa que jugaba a las damas y —esto
+importa— **mejoraba jugando contra sí mismo**. Ya en ese artículo está la estructura de
+la @eq-supervisado: entradas, una salida, y un criterio numérico que se optimiza.
+
+El **aprendizaje profundo** es un subconjunto del aprendizaje automático: modelos con
+muchas capas de representación, donde cada capa aprende una transformación de la
+anterior. No es una idea distinta, es una cuestión de profundidad y escala.
+
+La **ciencia de datos** no es una rama de las anteriores sino un linaje paralelo, y
+nace de una insatisfacción con la estadística académica. @tukey1962 —el mismo del
+@sec-visualizacion— escribió que el análisis de datos es una ciencia empírica y no una
+rama de la matemática, y que juzgarlo por sus teoremas era el error. Sesenta años
+después, esa discusión sigue viva y es la que decide qué cuenta como evidencia en este
+libro.
+
+::: {.callout-note}
+## Las dos culturas, que es la discusión de fondo
+
+@breiman2001b puso el desacuerdo en términos que siguen siendo los mejores disponibles.
+Hay dos maneras de encarar un problema de datos:
+
+**La cultura del modelo de datos.** Se supone que los datos vienen de un mecanismo
+estocástico conocido —una regresión lineal, un ARIMA, un proceso con ruido normal—, se
+estiman sus parámetros y se valida con pruebas de bondad de ajuste. El modelo es una
+afirmación sobre cómo funciona el mundo, y se puede interpretar.
+
+**La cultura del modelo algorítmico.** Se trata al mecanismo como desconocido. Se busca
+una función que prediga bien y se la juzga **solo** por su error fuera de la muestra. El
+modelo no afirma nada sobre el mundo y muchas veces no se puede interpretar.
+
+**La Parte I de este libro es la primera cultura y la Parte II es la segunda**, y por eso
+el cambio de parte se siente como un cambio de idioma. Breiman escribió que el 98 % de
+los estadísticos vivía en la primera y que eso los estaba dejando afuera de problemas
+importantes. Tenía razón en el diagnóstico. Lo que la Parte II mide es que, en series de
+tiempo cortas, la segunda cultura no gana automáticamente: el @sec-modelos-basicos
+encuentra que el boosting pierde contra repetir el ciclo del año pasado, y el
+@sec-caso-m4 que en 4.773 series los métodos estadísticos clásicos quedan por delante de
+casi todas las redes.
+
+La conclusión no es que una cultura le gane a la otra. Es que **la pregunta de cuál sirve
+es empírica**, y este libro la trata así.
+:::
+
+## Sesenta años en dos columnas {#sec-cronologia}
+
+Las dos tradiciones —la del aprendizaje automático y la del pronóstico— corrieron
+separadas durante medio siglo y se cruzaron hace muy poco. Verlas en paralelo explica
+por qué el encuentro fue incómodo.
+
+| año | aprendizaje automático | pronóstico de series |
+|---|---|---|
+| 1943 | @mcculloch1943 modelan la neurona como una compuerta lógica | |
+| 1950 | @turing1950 propone juzgar la inteligencia por conducta observable | |
+| 1956 | el taller de Dartmouth le pone nombre al campo | |
+| 1957 | | Holt formula el suavizado exponencial con tendencia [@holt2004] |
+| 1958 | @rosenblatt1958 construye el perceptrón: el primer modelo que aprende de ejemplos | |
+| 1959 | @samuel1959 acuña «aprendizaje automático» jugando a las damas | |
+| 1960 | | Winters le agrega la estacionalidad [@winters1960] |
+| 1962 | @tukey1962 reclama el análisis de datos como ciencia empírica | |
+| 1969 | @minsky1969 demuestran qué no puede aprender un perceptrón; llega el primer invierno | |
+| 1970 | | @boxjenkins1970 publican la metodología ARIMA |
+| 1982 | | @makridakis1982 organiza la primera competencia M: **los métodos simples ganan** |
+| 1986 | @rumelhart1986 popularizan la retropropagación y las redes vuelven | |
+| 1989 | @lecun1989 aplica redes convolucionales a códigos postales reales | |
+| 1997 | @hochreiter1997 inventan la LSTM para memoria de largo plazo | |
+| 2001 | @breiman2001b nombra las dos culturas | |
+| 2012 | @krizhevsky2012 ganan ImageNet y empieza la década del aprendizaje profundo | |
+| 2017 | @vaswani2017 presentan el Transformer | |
+| 2018 | | @makridakis2018 corren M4 sobre 100.000 series |
+| 2020 | | gana un híbrido [@smyl2020]: una red **más** suavizado exponencial |
+
+: Dos tradiciones que se cruzan tarde. La columna vacía no significa que no pasara nada: significa que pasaba en otra conversación. {#tbl-cronologia}
+
+Tres cosas que la tabla dice y conviene leer despacio.
+
+**El pronóstico decidió por competencia mucho antes que el aprendizaje automático.** La
+primera competencia M es de 1982 y su resultado —los métodos simples le ganan a los
+sofisticados— se publicó cuando las redes neuronales todavía estaban en su primer
+invierno. La cultura de «que lo diga la medición» no llegó al pronóstico desde el
+aprendizaje automático: estaba antes.
+
+**Las dos tradiciones se cruzan recién en M4**, y el resultado del cruce no es el que se
+esperaba: el ganador de 2018 no es una red ni un método estadístico, sino la combinación
+de los dos [@smyl2020]. El @sec-caso-m4 lo mide en detalle: ordena los 26 modelos de la competencia por OWA y muestra
+con la prueba de Nemenyi que el ranking fino no se sostiene, porque los primeros puestos son
+indistinguibles entre sí.
+
+**Los inviernos existieron.** El de 1969 duró unos quince años y lo provocó un resultado
+matemático correcto: @minsky1969 mostraron que un perceptrón de una capa no puede
+aprender la función XOR. La respuesta —apilar capas y entrenarlas con retropropagación—
+existía en 1986, y hubo que esperar a que hubiera datos y cómputo para que rindiera. Esa
+secuencia, *idea correcta que necesita escala para funcionar*, es exactamente el patrón
+que el @sec-aprendizaje-profundo encuentra en series de tiempo: las redes funcionan
+donde hay datos, y la mayoría de las series no los tiene.
+
 ## El mismo problema, otra formulación {#sec-otra-formulacion}
 
 El puente ya está construido: lo armó la @sec-rezagos-predictores. Una serie se
@@ -99,7 +208,8 @@ Parte II, en general, no: hay que construirlos por remuestreo, y de eso trata el
 fuera del rango que vio**, porque su pronóstico es un promedio de observaciones de
 entrenamiento. En una serie con tendencia creciente eso es una limitación grave, y es la
 razón por la que los modelos basados en árboles necesitan que se les quite la tendencia
-antes. El @sec-modelos-basicos lo muestra con datos.
+antes. El @sec-modelos-basicos lo muestra con datos: los nueve modelos acotados comparten el mismo
+techo de extrapolación, y diferenciar la serie corrige a unos y arruina a otros.
 
 **Y sobre todo, datos.** Este es el punto que decide casi todo, y merece números.
 

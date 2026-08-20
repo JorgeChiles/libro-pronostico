@@ -330,8 +330,8 @@ eligiera $K$ por $R^2$ elegiría el modelo más grande y no ganaría nada.
 Para elegir hay dos alternativas legítimas, y las dos ya aparecieron en el libro: el
 **AICc** de la @eq-aicc, que penaliza la complejidad, y la **evaluación fuera de
 muestra** del @sec-evaluacion. El $R^2$ ajustado corrige parte del problema pero sigue
-siendo una medida de ajuste dentro de la muestra, no de capacidad predictiva. Sobre
-esto vuelve, con mucho más detalle, el @sec-sobreajuste.
+siendo una medida de ajuste dentro de la muestra, no de capacidad predictiva. Sobre esto vuelve el @sec-sobreajuste, que descompone el error en sesgo y varianza y mide la U
+que dibuja el error de prueba a medida que sube la capacidad del modelo.
 
 ## Rezagos como predictores {#sec-rezagos-predictores}
 
@@ -409,7 +409,9 @@ inventados por él mismo. Es una diferencia de fondo entre entrenamiento y uso.
 
 La alternativa es entrenar un modelo por horizonte —la estrategia **directa**—. La
 comparación entre las dos no tiene un ganador universal y sigue siendo materia de
-investigación [@petropoulos2022]; el @sec-prediccion la desarrolla.
+investigación [@petropoulos2022]; el @sec-prediccion la desarrolla: compara las estrategias multipaso sobre el catálogo y
+encuentra que la recursiva, que es la sospechosa habitual de acumular error, no se degrada más
+que la directa.
 :::
 
 ## Regresión contra los métodos anteriores {#sec-comparacion-regresion}

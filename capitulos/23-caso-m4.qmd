@@ -442,7 +442,8 @@ promedio, se llevan 12,5 de esas 16,6 horas.
 Eso tiene una consecuencia directa para la fase siguiente de este proyecto: **si el índice va a
 calcularse en línea, cuando alguien sube una serie a una aplicación web, ese cálculo hay que
 vectorizarlo o precomputarlo.** Diecinueve segundos de espera por una característica de diagnóstico
-no es aceptable en una interfaz, y el @sec-produccion lo trata.
+no es aceptable en una interfaz, y el @sec-produccion lo resuelve midiendo: vectorizar el bucle
+interno baja esa cuenta de cuatro segundos a cien milisegundos, sin cambiar el resultado.
 
 ::: {.callout-note}
 ## Sobre estimar costos de cómputo

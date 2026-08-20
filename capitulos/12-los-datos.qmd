@@ -22,13 +22,63 @@ def smape(real, pron):
     return 200 * np.mean(np.abs(real - pron) / den)
 ```
 
-El @sec-supervisado prometió que este capítulo trata la fuga de información en detalle, y el
-@sec-validacion-cruzada volvió a señalarlo. Cumple con eso al final. Pero antes hay algo más
-básico que hacer, y es mirar los datos.
+Un modelo no puede ser mejor que los datos con los que se entrena, y este capítulo es sobre
+eso. Empieza ubicando las series de tiempo entre los tipos de datos que existen, sigue con
+qué contiene y qué no contiene el conjunto que usa este libro, y termina con la manera más
+común de arruinar un experimento sin darse cuenta: dejar que información del futuro se filtre
+al entrenamiento. El @sec-supervisado adelantó que ese problema es el que decide si una
+medición vale algo, y el @sec-validacion-cruzada mostró que ni siquiera promediar varios
+cortes lo evita si la partición está mal hecha.
 
-Este libro usa M4 en todos sus ejemplos, y M4 es el conjunto de series más usado de la
-literatura de pronóstico. Eso no lo hace limpio. Este capítulo muestra qué contiene, qué no
-contiene, y una serie que va a incomodar.
+## Qué clase de dato es una serie de tiempo {#sec-clases-de-datos}
+
+La primera decisión de cualquier proyecto de datos es qué se tiene entre manos, porque de eso
+depende todo lo demás. La división habitual tiene tres casilleros.
+
+**Datos estructurados.** Viven en una tabla con filas y columnas, cada columna tiene un tipo
+declarado y cada fila es una observación. Una planilla de ventas, una tabla de una base de
+datos relacional, un archivo de encuesta. Es el terreno donde la estadística clásica y el
+aprendizaje automático tabular funcionan sin traducción.
+
+**Datos no estructurados.** No tienen esa forma: texto libre, imágenes, audio, video. Para
+usarlos hay que **construir** la representación numérica —los píxeles de una foto, los tokens
+de un texto— y esa construcción es la mitad del problema. Es donde el aprendizaje profundo
+cambió las reglas, y la @sec-cronologia ubica cuándo.
+
+**Datos semiestructurados.** Tienen forma pero no una tabla: un JSON anidado, un registro de
+eventos, un grafo. Se los suele aplanar a tabla antes de modelar, y en ese aplanado se pierde
+o se inventa información.
+
+Una serie de tiempo es **estructurada**, y sin embargo no se comporta como una tabla. La
+diferencia es una sola y lo condiciona todo: **las filas están ordenadas y no son
+intercambiables**.
+
+En una tabla de clientes, mezclar el orden de las filas no cambia nada: cada fila es una
+observación independiente de las demás. En una serie, el orden *es* la información. La
+observación de marzo depende de la de febrero, y por eso:
+
+- No se puede partir en entrenamiento y prueba al azar. Hay que cortar por tiempo, y el
+  @sec-particiones mide cuánto optimismo se compra al no hacerlo.
+- Cada observación es a la vez entrada y salida, según la fila que se esté armando. El
+  @sec-supervisado convierte la serie en tabla con esa idea.
+- Dos observaciones cercanas traen casi la misma información, así que **el largo de la serie
+  engaña**: mil observaciones autocorrelacionadas valen mucho menos que mil filas
+  independientes.
+
+::: {.callout-tip}
+## Dónde encaja el pronóstico en el mapa
+
+Esa lista es la razón por la que el pronóstico tiene su propia tradición, sus propias
+métricas y sus propias competencias, en vez de ser una aplicación más del aprendizaje
+supervisado. Casi todo lo que la Parte II toma prestado del aprendizaje automático hay que
+adaptarlo, y el capítulo que sigue —el @sec-supervisado— es exactamente ese trabajo de
+traducción.
+
+También explica por qué este libro insiste tanto con los datos. En un problema tabular, más
+filas es más información. En una serie, más observaciones pueden ser casi nada de información
+nueva, y el @sec-intro-ml midió la consecuencia: la mediana de las series mensuales de M4
+tiene 202 observaciones, que con doce rezagos son 190 filas para estimar cualquier cosa.
+:::
 
 ## Qué es M4 {#sec-que-es-m4}
 
