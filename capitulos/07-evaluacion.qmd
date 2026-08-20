@@ -632,10 +632,10 @@ propio de seis meses atrás.
 
 ## Ejercicios
 
-Las soluciones están en el @sec-soluciones-07.
+Las soluciones están en la @sec-soluciones-07.
 
 **1.** Ajusta un `ExponentialSmoothing` a `Q22252` y calcula el MAE dentro y fuera
-de la muestra. ¿Cuál es el cociente? Compara con el de `M35927` en el
+de la muestra. ¿Cuál es el cociente? Compara con el de `M35927` en la
 @sec-fuera-de-muestra.
 
 **2.** Toma `M3007` y calcula el MAPE del naive dos veces: una como está definido

@@ -219,7 +219,7 @@ erraría el naive— baja a `{python} f"{COTA.loc['c = 0 (rango observado)', 'MA
 El sMAPE también mejora, pero mucho menos, y la razón importa: **el sMAPE no distingue un pronóstico
 absurdo de uno malo.** Cuando el pronóstico se va muy lejos del valor real, el cociente
 $2|\hat y - y| / (|y| + |\hat y|)$ tiende a 2 y ahí se queda, sea el pronóstico el doble de lo
-razonable o mil veces. El @sec-h366 encontró el mismo efecto en la tesis, y es el argumento más
+razonable o mil veces. La @sec-h366 encontró el mismo efecto en la tesis, y es el argumento más
 fuerte del libro a favor de reportar siempre las dos métricas.
 
 ::: {.callout-warning}
@@ -508,7 +508,7 @@ justamente para admitirlos.
 ::: {.callout-tip}
 ## La cota del punto y la cota del intervalo son distintas
 
-Sobre el pronóstico puntual, la cota apretada gana: el @sec-cota-cordura midió que recortar al rango
+Sobre el pronóstico puntual, la cota apretada gana: la @sec-cota-cordura midió que recortar al rango
 observado —con la corrección por tendencia— mejora todo.
 
 Sobre el intervalo, la cota apretada pierde: recortar al rango observado le saca
@@ -706,7 +706,7 @@ mostró que tampoco gana en precisión.
 
 ## Cuánto tarda {#sec-latencia}
 
-El @sec-costo midió el pipeline de la tesis en 16,6 horas y encontró que el 83 % se lo lleva
+La @sec-costo midió el pipeline de la tesis en 16,6 horas y encontró que el 83 % se lo lleva
 `sample_entropy`, con 19,7 segundos en una serie de 4.000 puntos. Para una aplicación la pregunta no
 es el total sino la latencia por serie: cuánto espera alguien que acaba de subir un archivo.
 
@@ -808,7 +808,7 @@ dos, y es cero en las cuatro series— y difieren en un factor que crece
 con la longitud: `{python} f"{LATENCIA['factor'].min():.0f}"` veces en la serie más corta y
 `{python} f"{LATENCIA['factor'].max():.0f}"` en la más larga.
 
-Eso **contesta el pendiente que dejó el @sec-costo**, y lo contesta distinto de lo que ese capítulo
+Eso **contesta el pendiente que dejó la @sec-costo**, y lo contesta distinto de lo que ese capítulo
 anticipaba. La conclusión de allá fue que el índice, para calcularse en línea, había que vectorizarlo
 o precomputarlo. Medido acá: vectorizarlo alcanza. Los
 `{python} f"{LATENCIA.loc['M17144', 'entropía con bucles (ms)'] / 1000:.1f}"` segundos de la serie de
@@ -854,7 +854,7 @@ recortar resuelve la cola.** Un tope de 4.000 puntos deja el cálculo en
 `{python} f"{LARGA.loc['recortada a 4.000', 'milisegundos']:.0f}"` ms para cualquier serie, y es
 exactamente lo que la tesis hizo por razones de costo total.
 
-Y hay una salida mejor todavía, que el @sec-que-importa ya había medido sin buscarla: el clasificador
+Y hay una salida mejor todavía, que la @sec-que-importa ya había medido sin buscarla: el clasificador
 que aprende a elegir método **no pierde nada** al quedarse sin `sample_entropy`. Para decidir no hace
 falta; para diagnosticar se puede calcular después de responder.
 
@@ -1042,10 +1042,10 @@ recurrentes la dispersión que midió la tesis es mayor que la del perceptrón d
 **El tamaño serializado es otro.** La @tbl-almacenamiento muestra que un perceptrón de 100 neuronas
 ya pesa `{python} f"{ALMACEN.loc['perceptrón (100 neuronas)', 'recursiva (kB)']:.0f}"` kB por serie.
 Una LSTM por serie, con estrategia directa, es un sistema de almacenamiento antes que un sistema de
-pronóstico —y es justamente el argumento del @sec-modelo-global a favor de un modelo global.
+pronóstico —y es justamente el argumento de la @sec-modelo-global a favor de un modelo global.
 
 **El aparato de defensa no cambia.** La cota de la @eq-cota-condicional, la validación de entrada
-del @sec-casos-limite y el presupuesto de latencia del @sec-latencia son independientes del modelo.
+de la @sec-casos-limite y el presupuesto de latencia de la @sec-latencia son independientes del modelo.
 Una red no necesita menos defensas: necesita las mismas, y con más urgencia, porque falla de maneras
 que no se anticipan leyendo sus parámetros.
 
@@ -1095,12 +1095,12 @@ mediciones sea cuestión de cambiar una celda.
 
 De lo que falta, tres cosas quedan explícitamente sin resolver.
 
-**El enfoque global no está demostrado acá.** El @sec-modelo-global lo explica: un catálogo de 34 series
+**El enfoque global no está demostrado acá.** La @sec-modelo-global lo explica: un catálogo de 34 series
 curadas no puede mostrar la ventaja de entrenar un modelo sobre miles. La tesis lo midió y este
 libro lo cita, pero no lo ejecuta.
 
 **Las redes profundas se citan, no se corren.** Es una consecuencia de la decisión de que todo
-compile en el navegador, y el @sec-entorno dice cómo salirse de ella.
+compile en el navegador, y la @sec-entorno dice cómo salirse de ella.
 
 **Y la aplicación es otro proyecto.** Lo que este capítulo midió son sus cimientos: la cota de la
 @eq-cota-condicional, el ensamble de la @eq-ensamble-semillas, la selección condicionada a la
@@ -1112,7 +1112,7 @@ publicar un número sin haberlo medido, y de publicar el que salió.
 
 ## Ejercicios
 
-Las soluciones están en el @sec-soluciones-25.
+Las soluciones están en la @sec-soluciones-25.
 
 **1.** La @tbl-cota-condicional usa el umbral $F_T > 0{,}8$ de la @eq-cota-condicional. Bárrelo
 entre 0 y 1 y mira cómo cambian el sMAPE medio y el peor daño. ¿Hay un umbral mejor, y qué tan

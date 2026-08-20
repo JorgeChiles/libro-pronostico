@@ -145,7 +145,7 @@ y 31,06 con treinta y seis. El mínimo está en 12, que para las series mensuale
 exactamente el período estacional.
 
 **Y la mediana no dibuja ninguna U**: baja de manera monótona hasta 7,74 en veinticuatro rezagos y
-apenas sube en treinta y seis. Es el mismo patrón del @sec-que-compra y ya conviene tenerlo como
+apenas sube en treinta y seis. Es el mismo patrón de la @sec-que-compra y ya conviene tenerlo como
 reflejo: cuando la media y la mediana discrepan, el efecto vive en la cola. Acá significa que
 **agregar rezagos mejora la serie típica y destruye unas pocas**, y las pocas destruidas pesan más
 que las muchas mejoradas.
@@ -320,7 +320,7 @@ $K = m/2$ son dos bases del mismo subespacio, y mínimos cuadrados encuentra la 
 importar en qué base se la escriba.
 
 **Con penalización no coinciden.** La diferencia media es 0,24 y la máxima 1,12. La razón es
-exactamente la del aviso del @sec-regularizacion: la @eq-ridge penaliza $\sum \beta_j^2$, y esa
+exactamente la del aviso de la @sec-regularizacion: la @eq-ridge penaliza $\sum \beta_j^2$, y esa
 suma **no es invariante ante un cambio de base**. Las mismas funciones, escritas en otra base,
 tienen otros coeficientes y por lo tanto otra penalización, así que el modelo regularizado que sale
 es otro.
@@ -433,7 +433,7 @@ El ejercicio 4 mide las tres.
 
 ## Regularización con grupos de rezagos {#sec-grupos-rezagos}
 
-El @sec-regularizacion dejó una cuenta pendiente. Lasso, sobre una tabla de rezagos consecutivos,
+La @sec-regularizacion dejó una cuenta pendiente. Lasso, sobre una tabla de rezagos consecutivos,
 se queda con un representante de cada grupo correlacionado de manera bastante arbitraria, y la
 *elastic net* [@zou2005] existe justamente para eso.
 
@@ -477,14 +477,14 @@ La respuesta a la cuenta pendiente es un **sí muy modesto**. La elastic net con
 —o sea casi Ridge— da el mejor sMAPE medio de la tabla, 13,68, apenas por debajo de los 13,81 de no
 regularizar nada. Y Lasso es la peor de las cinco, con 15,25.
 
-Eso confirma el aviso del @sec-regularizacion en su parte negativa: **con grupos de rezagos
+Eso confirma el aviso de la @sec-regularizacion en su parte negativa: **con grupos de rezagos
 correlacionados, la selección dura de Lasso hace daño.** Lo que no confirma es que la elastic net
 sea la solución: la mejora sobre no regularizar es de 0,13 puntos de sMAPE en 25 series, que es
 ruido.
 
 Lo interesante es que **sin regularizar gana en 10 de las 25 series**, más que cualquier
 alternativa. Con 24 columnas y una mediana de más de 150 filas, estas series no están en el régimen
-donde la regularización paga, y el @sec-regularizacion-no-ayuda ya había medido lo mismo en el caso
+donde la regularización paga, y la @sec-regularizacion-no-ayuda ya había medido lo mismo en el caso
 extremo. La regularización es una respuesta a un exceso de capacidad, y acá el exceso lo produce el
 número de rezagos, no la falta de penalización: la @fig-curva-rezagos dice que la solución es usar
 doce columnas, no penalizar veinticuatro.
@@ -514,9 +514,9 @@ va exactamente en la dirección contraria a la @fig-curva-rezagos.
 
 ## Ejercicios
 
-Las soluciones están en el @sec-soluciones-18.
+Las soluciones están en la @sec-soluciones-18.
 
-**1.** Repite la @fig-curva-rezagos separando las series por $n/h$, como en el
+**1.** Repite la @fig-curva-rezagos separando las series por $n/h$, como en la
 @sec-cuando-directa. ¿El mínimo de la U se corre a la derecha en las series largas?
 
 **2.** Barre $K$ de 1 a $m/2$ en los términos de Fourier de la @eq-fourier y busca el mejor. ¿Está
@@ -525,12 +525,12 @@ en $m/2$ o antes? Explica el resultado en términos de cuántas columnas agrega 
 **3.** La selección por correlograma se queda con los seis rezagos de mayor $|r_k|$. Prueba con
 tres, seis y doce, y con el criterio de quedarse con **todos** los significativos. ¿Cuál gana?
 
-**4.** Implementa las tres soluciones del recuadro del @sec-trampa-ventana —estrategia directa,
+**4.** Implementa las tres soluciones del recuadro de la @sec-trampa-ventana —estrategia directa,
 característica congelada y entrada acotada— y mide cuál recupera el error de `H272`.
 
 **5.** Construye la característica "cuántos períodos pasaron desde el máximo de la historia" y
 agrégala a los doce rezagos. ¿Ayuda? ¿Se puede calcular sobre predicciones sin caer en el problema
-del @sec-trampa-ventana?
+de la @sec-trampa-ventana?
 
 **6.** Con la tabla de 24 rezagos y Lasso, lista qué rezagos sobreviven en cada serie del catálogo
 y cuenta cuántas veces sobrevive cada uno. ¿Los rezagos 1 y $m$ aparecen más que el resto?

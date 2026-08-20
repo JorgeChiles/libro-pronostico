@@ -53,7 +53,7 @@ jobs:
         run: shinylive assets download
 
       # Si los datos del libro están mal, no se publica.
-      - name: Probar el módulo de datos
+      - name: Probar el módulo de datos y la prosa
         env:
           PYTHONPATH: ${{ github.workspace }}
           LIBRO_SIN_DESCARGA: "1"

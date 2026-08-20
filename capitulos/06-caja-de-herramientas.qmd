@@ -96,7 +96,7 @@ def deriva(y, h, m=1):
     return y[-1] + pendiente * np.arange(1, h + 1)
 ```
 
-Los cuatro tienen equivalente ARIMA, lo que los conecta con el @sec-modelo-arima:
+Los cuatro tienen equivalente ARIMA, lo que los conecta con la @sec-modelo-arima:
 el naive es un ARIMA(0,1,0), la deriva es un ARIMA(0,1,0) con constante, y la media
 es un ARIMA(0,0,0) con constante. No son atajos heurísticos: son modelos con
 especificación mínima.
@@ -165,7 +165,7 @@ $$ {#eq-test-estacionalidad}
 
 El 1,645 es el cuantil del 95 % de la normal para una prueba de una cola, es decir
 un nivel del 90 % en dos colas. La banda es una versión de la
-@eq-banda del @sec-autocorrelacion, corregida por la autocorrelación acumulada de
+@eq-banda de la @sec-autocorrelacion, corregida por la autocorrelación acumulada de
 los rezagos anteriores.
 
 ::: {.callout-note}
@@ -328,7 +328,7 @@ $$
 \sqrt{h\left(1 + \frac{h}{T-1}\right)}
 $$ {#eq-intervalo-deriva}
 
-El @sec-intervalos midió que el intervalo del naive cubre menos de lo que promete.
+La @sec-intervalos midió que el intervalo del naive cubre menos de lo que promete.
 Con las tres fórmulas se puede comparar entre métodos:
 
 ```{python}
@@ -407,7 +407,7 @@ en orden de cuánto importan:
    información desperdiciada.
 2. **Sin autocorrelación.** Si los residuos están correlacionados, quedó estructura
    sin modelar. Se verifica con la prueba de @ljungbox1978, preferible a mirar
-   rezago por rezago por el problema de comparaciones múltiples del
+   rezago por rezago por el problema de comparaciones múltiples de la
    @sec-autocorrelacion.
 3. **Varianza constante.** Si el gráfico de residuos se abre como un embudo, falta
    una transformación: logaritmo o Box-Cox [@boxcox1964].
@@ -515,7 +515,7 @@ benchmark es exigente, y superarlo dice algo.
 
 **Pero gana en menos series que otros métodos.** El reparto de victorias está
 bastante distribuido, y ningún método domina. Es la misma tensión entre promedio,
-mediana y conteo del @sec-agregacion: los tres resúmenes responden preguntas
+mediana y conteo de la @sec-agregacion: los tres resúmenes responden preguntas
 distintas y no tienen por qué coincidir.
 
 **La media es el peor de los cinco por lejos**, y sigue ganando en algunas series.
@@ -585,7 +585,7 @@ else:
 
 ## Ejercicios
 
-Las soluciones están en el @sec-soluciones-06.
+Las soluciones están en la @sec-soluciones-06.
 
 **1.** Verifica que los residuos de la media sobre `Q1915` tienen media cero pero
 autocorrelación fuerte. ¿Qué te dice cada una de las dos cosas?
@@ -605,7 +605,7 @@ a $h=18$ para una serie de 100 observaciones. ¿Cuándo importa el término extr
 ¿Cuál gana? Explica en dos frases por qué la media es especialmente mala ahí.
 
 **6.** Los residuos del naive son las diferencias de la serie. Usando eso, muestra
-que el denominador del MASE del @sec-metricas con $m = 1$ es exactamente el error
+que el denominador del MASE de la @sec-metricas con $m = 1$ es exactamente el error
 absoluto medio del naive dentro de la muestra. Después calcula también la desviación
 estándar de esos mismos residuos: ¿por qué no es el mismo número?
 

@@ -128,7 +128,7 @@ Muchas veces la serie simplemente no contiene la información que se le está
 pidiendo.
 
 Comparemos tres series del catálogo del libro, cada una con un comportamiento
-distinto. Son las mismas que vas a poder manipular en el widget del
+distinto. Son las mismas que vas a poder manipular en el widget de la
 @sec-widget, así que vale la pena mirarlas con atención ahora:
 
 ```{python}
@@ -264,7 +264,7 @@ oficio, y volvemos sobre él en el @sec-evaluacion.
 **En la serie de tendencia clara, el naive y el naive estacional dan
 exactamente lo mismo.** No es coincidencia: `D1` es una serie diaria, y M4
 declara las series diarias no estacionales, con `m = 1`. Repetir el último ciclo
-de largo 1 es repetir la última observación. Sobre esa convención volvemos en el
+de largo 1 es repetir la última observación. Sobre esa convención volvemos en la
 @sec-horizonte.
 
 ## La misma pregunta, sobre 99.935 series {#sec-a-escala}
@@ -610,13 +610,13 @@ contra la que se mide todo lo demás.
 
 ## Ejercicios
 
-Las soluciones están en el @sec-soluciones-01.
+Las soluciones están en la @sec-soluciones-01.
 
 **1.** Carga la serie `Y10884` y grafica su período de entrenamiento. Describe
 en una frase qué comportamiento tiene. Después mira `serie.fenomeno` y comparalo
 con tu descripción.
 
-**2.** Aplica los cuatro métodos del @sec-metodos-simples a la serie `Q1915` y
+**2.** Aplica los cuatro métodos de la @sec-metodos-simples a la serie `Q1915` y
 calcula el sMAPE de cada uno. ¿Cuál gana? ¿Coincide con lo que esperabas mirando
 el gráfico?
 
@@ -636,7 +636,7 @@ Escribe en un párrafo por qué esa conclusión no se sigue, y qué habría que 
 para sostenerla o descartarla.
 
 **6.** Elige una decisión concreta de tu trabajo o tu campo que dependa de un
-pronóstico. Responde las tres preguntas del @sec-utilidad. ¿Qué horizonte
+pronóstico. Responde las tres preguntas de la @sec-utilidad. ¿Qué horizonte
 necesita? ¿Es simétrico el costo del error? ¿Alcanza un número?
 
 ## Referencias {.unnumbered}

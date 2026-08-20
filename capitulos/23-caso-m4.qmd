@@ -15,7 +15,7 @@ from libro.graficos import COLORES, mostrar
 warnings.simplefilter("ignore")
 ```
 
-La Parte II terminó con una deuda. El @sec-modelo-global no pudo demostrar el enfoque global
+La Parte II terminó con una deuda. La @sec-modelo-global no pudo demostrar el enfoque global
 porque el catálogo tiene 34 series elegidas para ser distintas entre sí; el @sec-ensambles no pudo
 mostrar una combinación que le gane al mejor miembro porque sus nueve métodos no eran ni diversos ni
 parejos; y el @sec-aprendizaje-profundo tuvo que citar resultados en vez de entrenar redes.
@@ -32,7 +32,7 @@ estudio.
 
 **Los datos y el corte estaban dados.** Cada serie venía partida en entrenamiento y prueba, con el
 horizonte fijado por frecuencia. Nadie eligió dónde cortar, así que la comparación entre 61
-participantes no depende de esa decisión. Es la partición del @sec-particion, impuesta por el
+participantes no depende de esa decisión. Es la partición de la @sec-particion, impuesta por el
 organizador.
 
 **El benchmark estaba definido.** `Naive2` —naive sobre la serie desestacionalizada— es el
@@ -55,7 +55,7 @@ Un OWA de 1 empata con el benchmark y menos de 1 le gana. El ganador de la compe
 ::: {.callout-note}
 ## Las dos trampas de la @eq-owa-m4, otra vez
 
-El @sec-agregacion midió las dos y conviene recordarlas antes de leer cualquier tabla de este
+La @sec-agregacion midió las dos y conviene recordarlas antes de leer cualquier tabla de este
 capítulo.
 
 **Los promedios van arriba y abajo, no la razón.** La @eq-owa-m4 divide el sMAPE **promedio** por el
@@ -63,7 +63,7 @@ del benchmark, no promedia razones serie por serie. Las dos cuentas dan números
 primera es la oficial.
 
 **El denominador tiene que ser el de las mismas series.** Si un modelo no pudo ajustarse en 200
-series, su OWA se calcula contra el `Naive2` de las series que sí pudo, no contra el global. El
+series, su OWA se calcula contra el `Naive2` de las series que sí pudo, no contra el global. La
 @sec-denominador midió cuánto se distorsiona si no.
 :::
 
@@ -157,7 +157,7 @@ qué.
 ::: {.callout-warning}
 ## Un ranking de 27 puestos es en realidad unos pocos grupos
 
-El @sec-soluciones-22 contó cuántos pares de los 27 modelos **no** se distinguen con esta distancia
+La @sec-soluciones-22 contó cuántos pares de los 27 modelos **no** se distinguen con esta distancia
 crítica: **72 de 351, el 21 %**. Y no están repartidos al azar: se concentran en el pelotón del medio,
 donde catorce modelos comparten rangos entre 12,1 y 14,4.
 
@@ -362,7 +362,7 @@ mismo que el benchmark.
 
 ### El sMAPE que disimula y el MASE que no {#sec-h366}
 
-El @sec-saturacion lo midió con el catálogo; acá está el caso que lo originó.
+La @sec-saturacion lo midió con el catálogo; acá está el caso que lo originó.
 
 La serie `H366` con SARIMA(1,1,1)(1,1,1,24) da **sMAPE 199,99 —saturado— y MASE 127.224**. Una sola
 serie explica el 100 % del MASE promedio de la frecuencia horaria.
@@ -479,14 +479,14 @@ elegir sin mirar cada serie, y qué hace falta para que eso funcione en producci
 
 ## Ejercicios
 
-Las soluciones están en el @sec-soluciones-23.
+Las soluciones están en la @sec-soluciones-23.
 
 **1.** La @tbl-correlacion-global usa el sMAPE del naive. Repítela con el del `snaive` y con el de
 ARIMA, que también están en `metadatos()`. ¿El índice correlaciona mejor con el error de un método
 mejor o peor?
 
 **2.** El cociente entre cuartiles de la @tbl-cuartiles es 3,27 con la media y otro valor con la
-mediana. Calcula los dos y explica la diferencia con lo que el @sec-agregacion dice sobre promediar
+mediana. Calcula los dos y explica la diferencia con lo que la @sec-agregacion dice sobre promediar
 razones.
 
 **3.** La @fig-correlacion-frecuencia ordena las frecuencias por correlación. Comprueba si ese orden
@@ -500,7 +500,7 @@ frecuencia** y compara los $R^2$. ¿La frecuencia explica más que el índice?
 afirmación calculando el `Naive2` del @sec-caja-de-herramientas sobre las series anuales del catálogo
 y comparándolo con el naive simple.
 
-**6.** El @sec-truncamiento cuenta que 16.384 es $2^{14}$. Busca en `metadatos()` si algún conteo del
+**6.** La @sec-truncamiento cuenta que 16.384 es $2^{14}$. Busca en `metadatos()` si algún conteo del
 conjunto completo es una potencia de dos o un número redondo sospechoso, y decide si hay que
 investigarlo.
 

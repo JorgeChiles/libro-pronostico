@@ -210,7 +210,7 @@ pd.DataFrame({
 Antes de combinar conviene mirar quiénes son, porque ahí está la explicación de todo el capítulo.
 **Holt da 49,86 y `extra trees` 12,62: el peor miembro es cuatro veces peor que el mejor.**
 
-El desastre de Holt no es nuevo. El @sec-saturacion ya lo había documentado: Holt extrapola una
+El desastre de Holt no es nuevo. La @sec-saturacion ya lo había documentado: Holt extrapola una
 tendencia lineal a 48 pasos y en las series horarias llega a valores negativos, en series que solo
 tienen valores positivos. Se queda en la lista a propósito, porque es exactamente el tipo de
 miembro que un ensamble mal armado incluye sin mirar.
@@ -414,7 +414,7 @@ pd.DataFrame(filas).set_index("enfoque").round(2)
 ```
 
 **El modelo global pierde: 19,02 contra 15,90.** Y normalizar por la media de cada serie no lo
-arregla —19,31—, exactamente como el @sec-muchas-series ya había medido con siete series
+arregla —19,31—, exactamente como la @sec-muchas-series ya había medido con siete series
 trimestrales.
 
 Once series mensuales dan 4.636 filas apiladas, que suena a mucho y no lo es. El enfoque global
@@ -430,7 +430,7 @@ Y esto es un límite del libro, no del método, así que conviene decirlo sin ad
 
 El catálogo curado tiene 34 series elegidas para **cubrir fenómenos distintos**, que es lo contrario
 de lo que un modelo global necesita. Con 4.636 filas de once series heterogéneas, el enfoque global
-está condenado a perder, y las dos mediciones —acá y en el @sec-muchas-series— dicen lo mismo.
+está condenado a perder, y las dos mediciones —acá y en la @sec-muchas-series— dicen lo mismo.
 
 El resultado de M4 fue el opuesto: el ganador [@smyl2020] entrenó un modelo global sobre decenas de
 miles de series, y el segundo [@monteromanso2020] usó características por serie para decidir cómo
@@ -463,7 +463,7 @@ da 13,14 contra los 12,50 del promedio simple de los dos mejores.
 
 ## Ejercicios
 
-Las soluciones están en el @sec-soluciones-20.
+Las soluciones están en la @sec-soluciones-20.
 
 **1.** Saca a Holt de los nueve métodos y recalcula la @tbl-combinaciones. ¿Cuánto sube el promedio
 simple en el ranking? ¿Le gana ahora a elegir uno?

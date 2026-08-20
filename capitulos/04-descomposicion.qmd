@@ -150,7 +150,7 @@ def tendencia_movil(y: pd.Series, m: int) -> pd.Series:
 ```
 
 Acá la ventana **tiene** que ser centrada, y vale la pena subrayarlo después de la
-advertencia del @sec-rezagos. En el capítulo 2 vimos que una media móvil centrada
+advertencia de la @sec-rezagos. En el capítulo 2 vimos que una media móvil centrada
 usa valores futuros y que eso arruina un modelo de pronóstico. Pero descomponer no
 es pronosticar: acá la serie ya está completa y el objetivo es describirla lo mejor
 posible, así que usar el futuro es correcto porque el futuro ya ocurrió. **La misma
@@ -333,7 +333,7 @@ Tres cosas que vale la pena buscar:
 
 - Con **amplitud creciente** (`Q15481`), activa el logaritmo y mira el residuo.
 - Con **quiebre de nivel** (`M32692`), fíjate que la fuerza de tendencia queda baja
-  con cualquier ventana: es la razón de lo que discutimos en el
+  con cualquier ventana: es la razón de lo que discutimos en la
   @sec-ft-no-es-tendencia.
 - Con **estacionalidad débil** (`M3007`), lleva la ventana al mínimo y mira cómo la
   componente estacional se pone irregular. Eso no es estacionalidad: es ruido
@@ -469,7 +469,7 @@ ruido, como se ve moviendo el widget sobre la serie de estacionalidad débil.
 
 ## Ejercicios
 
-Las soluciones están en el @sec-soluciones-04.
+Las soluciones están en la @sec-soluciones-04.
 
 **1.** Descompón `Q22252` con STL y verifica que la suma de las tres componentes
 reproduce la serie original. ¿Con qué precisión?

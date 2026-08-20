@@ -140,7 +140,7 @@ pd.DataFrame({"método elegido": regla_frecuencia}).rename_axis("frecuencia")
 
 El cero merece explicación porque es un resultado negativo sobre una herramienta del propio
 proyecto. El clustering del @sec-caso-m4 separa las series en un grupo regular y uno complejo, y esa
-separación describe muy bien la **dificultad**: el @sec-indice-complejidad midió que el error difiere
+separación describe muy bien la **dificultad**: la @sec-indice-complejidad midió que el error difiere
 por un factor de 3,27 entre cuartiles del índice. Pero **ARIMA es el mejor método en los dos
 grupos**, así que la regla elige ARIMA siempre y no cambia nada.
 
@@ -264,8 +264,8 @@ Un método que acierta menos veces y pierde menos cuando se equivoca es mejor. L
 regresión no sabe cuál gana con tanta precisión, y en cambio sabe **cuánto se pierde** con cada
 opción, así que cuando se equivoca lo hace entre dos métodos parecidos y nunca elige el desastre.
 
-Es el mismo argumento que el @sec-largo-validacion encontró midiendo largos de validación —donde la
-tasa de aciertos iba en dirección opuesta al error— y que el @sec-soluciones-19 encontró comparando
+Es el mismo argumento que la @sec-largo-validacion encontró midiendo largos de validación —donde la
+tasa de aciertos iba en dirección opuesta al error— y que la @sec-soluciones-19 encontró comparando
 *extra trees* con el bosque. Aparece tan seguido que conviene tenerlo como reflejo: **cuando una
 tabla trae exactitud y error, la que decide es el error.**
 :::
@@ -300,7 +300,7 @@ indice = pd.DataFrame({"importancia": [orden["complexity_index"]],
 pd.concat([tabla, indice]).round(4)
 ```
 
-La figura confirma el recuadro del @sec-reglas-obvias con números y con una ironía.
+La figura confirma el recuadro de la @sec-reglas-obvias con números y con una ironía.
 
 **La característica más informativa es la fuerza de la estacionalidad**, con una importancia de 0,155:
 casi el doble que la segunda. Tiene todo el sentido, porque es exactamente la señal que distingue
@@ -390,7 +390,7 @@ pd.DataFrame(filas).set_index("características").astype(float).round(
 
 **Sacar `sample_entropy` no empeora nada: mejora de 40,9 % a 41,8 %.**
 
-Es el resultado más útil del capítulo para la fase siguiente del proyecto. El @sec-costo midió que
+Es el resultado más útil del capítulo para la fase siguiente del proyecto. La @sec-costo midió que
 esa característica concentra el 83 % del costo de calcular los descriptores —16,6 de 20 horas para
 las 100.000 series, con complejidad $O(n^2)$— y acá resulta que **no aporta a la selección de
 método**. Con las siete características más baratas se recupera el 31,8 %, que es tres cuartas partes
@@ -449,7 +449,7 @@ entrenar ningún meta-modelo**.
 Si el hueco es chico —como en las horarias, con 0,0015— no hay nada que hacer y conviene fijar un
 método. Si es grande —como en las semanales o las mensuales— vale invertir en la selección.
 
-Es el mismo razonamiento que el @sec-regularizacion-no-ayuda aplicó a la regularización: **medir
+Es el mismo razonamiento que la @sec-regularizacion-no-ayuda aplicó a la regularización: **medir
 primero si existe el problema que la técnica resuelve.**
 :::
 
@@ -471,7 +471,7 @@ Y una reserva sobre el alcance de todo el capítulo, porque el número del 41 % 
 
 Este experimento elige entre **tres** métodos, y dos de ellos son benchmarks. Con los 26 modelos de
 la evaluación completa el hueco sería mayor y el problema de selección más difícil: más clases, menos
-ejemplos por clase, y la mayoría de los pares indistinguibles entre sí según el @sec-los-26. Lo que
+ejemplos por clase, y la mayoría de los pares indistinguibles entre sí según la @sec-los-26. Lo que
 el capítulo sostiene es que **el meta-aprendizaje sobre características funciona y es barato**, no un
 porcentaje transferible a otro conjunto de candidatos.
 
@@ -481,7 +481,7 @@ característica más cara aporta algo.
 
 ## Ejercicios
 
-Las soluciones están en el @sec-soluciones-24.
+Las soluciones están en la @sec-soluciones-24.
 
 **1.** El clasificador se evaluó con una partición aleatoria estratificada por frecuencia. Repítelo
 particionando **por frecuencia entera** —entrenar en cinco frecuencias y evaluar en la sexta— y mira

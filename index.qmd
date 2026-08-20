@@ -1,6 +1,4 @@
----
-title: "Prefacio"
----
+# Prefacio {.unnumbered}
 
 Este libro enseña a pronosticar series de tiempo con Python. Empieza donde
 empieza cualquiera —mirar una serie y preguntarse qué va a pasar después— y
@@ -33,6 +31,83 @@ demanda, finanzas, macroeconomía y demografía, con la partición de
 entrenamiento y prueba que fijó la competencia. Nada de datos inventados, salvo
 en los pocos lugares donde ilustrar un punto teórico con un dato artificial es
 más claro; ahí se dice.
+
+## Cómo está organizado
+
+Son tres partes y crecen en dificultad, pero cada una se puede leer sola.
+
+**Parte I · Fundamentos del pronóstico** (capítulos 1 a 10). Qué es pronosticar,
+cómo mirar una serie, cómo descomponerla, cómo medir un error sin engañarse, y
+los métodos que siguen siendo el estándar de comparación: los benchmarks, la
+regresión, el suavizado exponencial y ARIMA. Si solo vas a leer una parte, es
+esta.
+
+**Parte II · Aprendizaje automático** (capítulos 11 a 22). Cómo se convierte una
+serie en una tabla supervisada y qué se rompe al hacerlo: fuga de información,
+sobreajuste, particiones que mienten, validación cruzada temporal, estrategias
+multipaso, ingeniería de características, modelos basados en árboles, ensambles,
+intervalos por bootstrap y aprendizaje profundo. Cada capítulo mide lo que
+afirma sobre las mismas series, y varias veces el resultado contradice lo que la
+práctica corriente da por sentado.
+
+**Parte III · Práctica** (capítulos 23 a 25). La competencia M4 como caso de
+estudio completo, cómo elegir método cuando hay cien mil series y qué hace falta
+para que un pronóstico se use de verdad.
+
+Al final hay tres apéndices: las soluciones de todos los ejercicios, la
+bibliografía completa y un laboratorio que prueba la capa interactiva.
+
+## Las tres capas interactivas
+
+El libro se puede leer sin tocar nada, pero está armado para que lo toques.
+
+**Los gráficos son interactivos.** Se generan cuando el libro se compila. Pasa
+el cursor por encima para ver valores, haz zoom, o haz clic en la leyenda para
+ocultar una serie.
+
+**Algunas celdas de código son editables.** Tienen un botón que dice *Run Code*:
+cambia lo que quieras y vuelve a ejecutarlo. Corren Python **en tu navegador**, sin
+instalar nada. La primera vez la página descarga el intérprete y las bibliotecas
+—entre diez y veinte segundos, una vez por sesión— y después responde de
+inmediato. Ahí adentro hay `numpy`, `pandas`, `scipy`, `matplotlib`, `statsmodels`
+y `scikit-learn`; no hay PyTorch ni TensorFlow, y el @sec-produccion explica qué
+hacer si los necesitas.
+
+**Ocho capítulos traen un widget con controles.** Mueve el parámetro y el modelo
+se reajusta a la vista: comparar métodos sobre la serie que elijas en el
+@sec-que-es-pronosticar, la fuerza de la descomposición en el @sec-descomposicion,
+el corte de entrenamiento y prueba en el @sec-evaluacion, los parámetros del
+suavizado en el @sec-suavizado, el orden del ARIMA en el @sec-arima, el grado del
+polinomio en el @sec-sobreajuste, los pliegues de la validación cruzada en el
+@sec-validacion-cruzada y las trayectorias del bootstrap en el
+@sec-bootstrapping.
+
+## Los ejercicios
+
+Cada capítulo cierra con seis ejercicios y **todos tienen su solución escrita**,
+con el código que la produce, en el apéndice de soluciones. No son ejercicios de
+repetición: casi todos piden medir algo que el capítulo no midió, y en varios
+casos la respuesta es que no se puede medir con los datos que hay, que también es
+una respuesta.
+
+## Qué mide este libro y qué no
+
+Todo lo que este libro afirma sobre qué método funciona mejor es una **medición
+sobre las series de M4**, no un teorema. El @sec-los-datos explica por qué M4 no
+es una muestra del mundo: filtró por longitud mínima, así que las series cortas
+que existen en la realidad quedaron afuera por construcción.
+
+Cuando una medición contradice lo que suele afirmarse, este libro reporta lo que
+midió y lo dice con esas palabras. La @sec-cierre-libro junta esos casos en una
+lista.
+
+## Cómo correrlo en tu máquina
+
+Todo el libro —el texto, el código, los datos curados— vive en
+[github.com/JorgeChiles/libro-pronostico](https://github.com/JorgeChiles/libro-pronostico).
+Con Quarto y Python instalados, `make entorno` y después `make libro` lo compilan
+completo. El apéndice del laboratorio muestra las tres capas interactivas
+funcionando, y sirve para verificar que tu instalación quedó bien.
 
 :::: {.absorbe-bibliografia}
 ::: {#refs}

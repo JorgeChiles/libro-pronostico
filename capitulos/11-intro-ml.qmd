@@ -30,7 +30,7 @@ leerse, y es mejor decirlo al principio que descubrirlo en el capítulo 22.
 
 ## El mismo problema, otra formulación {#sec-otra-formulacion}
 
-El puente ya está construido: lo armó el @sec-rezagos-predictores. Una serie se
+El puente ya está construido: lo armó la @sec-rezagos-predictores. Una serie se
 convierte en un problema **supervisado** eligiendo un conjunto de rezagos y armando
 una tabla donde cada fila es una observación:
 
