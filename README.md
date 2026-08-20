@@ -115,3 +115,10 @@ interactiva funcione.
 
 - Capítulo 1 escrito y publicado.
 - Capítulos 2 a 25: esqueleto con título y alcance.
+
+## Licencia
+
+El libro —texto, figuras y tablas— está bajo
+[CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/deed.es).
+El código está bajo licencia MIT. Las series son de la competencia M4 y
+conservan las condiciones de sus organizadores. Ver [LICENSE](LICENSE).
