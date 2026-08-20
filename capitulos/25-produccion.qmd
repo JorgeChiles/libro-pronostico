@@ -1,7 +1,1144 @@
+---
+resources:
+  - datos/cap01_series.csv
+---
+
 # De la evidencia a la producción {#sec-produccion}
 
-Cotas de cordura, ensambles de semillas y qué se necesita para que un pronóstico se use.
+```{python}
+#| echo: false
+import pickle
+import time
+import warnings
 
-::: {.callout-note appearance="simple"}
-Capítulo en preparación.
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+
+from libro.datos import cargar, catalogo, metadatos
+from libro.graficos import COLORES, mostrar
+
+warnings.simplefilter("ignore")
+
+
+def smape(real, pron):
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    return float(np.mean(200 * np.abs(real - pron) / (np.abs(real) + np.abs(pron))))
+
+
+def mase(real, pron, entrenamiento, m):
+    """MASE con el naive estacional como referencia, o el naive si m = 1."""
+    y = np.asarray(entrenamiento, float)
+    denom = np.mean(np.abs(y[m:] - y[:-m])) if len(y) > m > 1 else np.mean(np.abs(np.diff(y)))
+    return float(np.mean(np.abs(np.asarray(real, float) - np.asarray(pron, float))) / denom)
+
+
+CATALOGO = catalogo().set_index("serie")
+SERIES = [cargar(s) for s in CATALOGO.index]
+PASOS = sum(s.horizonte for s in SERIES)
+```
+
+Los veinticuatro capítulos anteriores midieron una sola cosa: **cuánto se equivoca un método**.
+Es la pregunta correcta mientras el pronóstico es un número en un cuaderno. Cuando alguien más lo
+usa —para pedir inventario, para dimensionar un turno, para decidir un precio— aparecen tres
+preguntas que ningún promedio de sMAPE contesta.
+
+1. **¿Qué pasa cuando el método falla?** No en promedio: en el peor caso que va a ver el usuario.
+2. **¿Qué hay que guardar y cuánto pesa?** Un modelo por serie y un modelo por serie y por paso son
+   dos sistemas distintos.
+3. **¿Cuánto tarda?** Una característica que cuesta diecinueve segundos no existe en una interfaz.
+
+Ninguna de las tres es nueva como preocupación: @sculley2015 las llamó deuda técnica del
+aprendizaje automático y @paleyes2022 las relevaron caso por caso. Lo que suele faltar es medirlas
+sobre los datos propios, y eso es lo que hace este capítulo, sobre las mismas series del libro. Al
+final está lo que la fase siguiente de este proyecto —una aplicación de pronóstico— tiene que
+resolver y lo que ya tiene resuelto.
+
+Que la precisión no alcanza para decidir qué método usar tampoco es una idea de este libro:
+@januschowski2020 proponen clasificar los métodos por un conjunto de criterios donde la exactitud es
+uno entre varios, junto con el costo de cómputo, la interpretabilidad y qué tan fácil es
+mantenerlos.
+
+## Lo que el promedio esconde {#sec-cola-produccion}
+
+Un promedio de error es un contrato con quien mira la tabla, no con quien mira un pronóstico. La
+distribución del error por serie lo dice mejor que cualquier argumento.
+
+```{python}
+#| label: tbl-cola
+#| tbl-cap: "Distribución del sMAPE por serie de los tres métodos que los metadatos guardan, sobre las 99.935 series de M4. En las frecuencias con m = 1 el naive estacional es el naive."
+M = metadatos()
+snaive_smape = (M["error_snaive_smape"].astype(float)
+                .fillna(M["error_naive_smape"].astype(float)))
+ERRORES = {
+    "naive": M["error_naive_smape"].astype(float).to_numpy(),
+    "naive estacional": snaive_smape.to_numpy(),
+    "ARIMA": M["error_arima_smape"].astype(float).to_numpy(),
+}
+
+filas = []
+for nombre, x in ERRORES.items():
+    orden = np.sort(x)
+    peor1 = orden[int(0.99 * len(orden)):]
+    filas.append({
+        "método": nombre,
+        "media": 100 * x.mean(),
+        "mediana": 100 * np.median(x),
+        "p90": 100 * np.quantile(x, 0.90),
+        "p99": 100 * np.quantile(x, 0.99),
+        "máximo": 100 * x.max(),
+        "% del error total en el peor 1 %": 100 * peor1.sum() / x.sum(),
+    })
+COLA = pd.DataFrame(filas).set_index("método")
+COLA.round(1)
+```
+
+La mediana de los tres está debajo de `{python} f"{COLA['mediana'].max():.0f}"` % y el p99 arriba de
+`{python} f"{COLA['p99'].min():.0f}"` %: un factor de nueve entre la serie típica y la serie mala.
+El máximo de ARIMA es `{python} f"{COLA.loc['ARIMA', 'máximo']:.0f}"`, que es el techo del sMAPE
+—el @sec-evaluacion mostró que la métrica se satura en 200— y significa que en esas series el
+pronóstico no tiene ninguna relación con lo que pasó.
+
+Eso ya es incómodo. Lo que sigue es peor, porque no habla del error absoluto sino de lo que se
+pierde por elegir mal.
+
+```{python}
+#| label: tbl-hueco-cola
+#| tbl-cap: "El hueco entre ARIMA y el mejor de los tres métodos en cada serie, y de dónde sale ese hueco."
+E = np.column_stack(list(ERRORES.values()))
+mejor = E.min(axis=1)
+hueco = E[:, 2] - mejor
+orden = np.sort(hueco)
+filas = []
+for q, etiqueta in [(0.99, "el peor 1 %"), (0.95, "el peor 5 %"), (0.90, "el peor 10 %")]:
+    corte = orden[int(q * len(orden)):]
+    filas.append({
+        "subconjunto de series": etiqueta,
+        "series": len(corte),
+        "% del hueco total": 100 * corte.sum() / hueco.sum(),
+    })
+HUECO = pd.DataFrame(filas).set_index("subconjunto de series")
+HUECO.round(1)
+```
+
+El `{python} f"{HUECO.loc['el peor 1 %', '% del hueco total']:.0f}"` % de todo lo que se pierde por
+usar ARIMA en vez del mejor método disponible está en el 1 % de las series, y el
+`{python} f"{HUECO.loc['el peor 5 %', '% del hueco total']:.0f}"` % en el 5 %. En
+`{python} f"{100 * (E[:, 2] > 2 * mejor).mean():.1f}"` % de las series —
+`{python} f"{int((E[:, 2] > 2 * mejor).sum()):,}".replace(',', '.')` en total— ARIMA da más del
+doble del error del mejor de los tres.
+
+::: {.callout-important}
+## La media promete algo que el usuario no recibe
+
+Quien lee "sMAPE medio 13,2 %" entiende "mis pronósticos van a errar alrededor del 13 %". Lo que la
+tabla dice es otra cosa: la mitad de las series erran menos del
+`{python} f"{COLA.loc['ARIMA', 'mediana']:.0f}"` %, y una de cada cien erra más del
+`{python} f"{COLA.loc['ARIMA', 'p99']:.0f}"` %.
+
+En una tabla comparativa la media alcanza. En una aplicación, cada serie es un usuario distinto, y
+el usuario que cayó en el p99 no tiene con qué saberlo. **Es la razón por la que un sistema en
+producción necesita defensas que un experimento no necesita**, y las tres secciones que siguen son
+esas defensas.
+:::
+
+## La cota de cordura {#sec-cota-cordura}
+
+La defensa más barata no usa ningún modelo: usa lo que la serie histórica ya dice sobre qué valores
+son posibles. Si una serie de unidades vendidas nunca fue negativa, un pronóstico negativo está mal
+sin necesidad de esperar el futuro.
+
+Sea $\hat y_{t+k}$ el pronóstico del paso $k$, y sean $y_{\min}$ e $y_{\max}$ el mínimo y el máximo
+del histórico, con rango $r = y_{\max} - y_{\min}$. La **cota de cordura** con margen $c \ge 0$ es
+
+$$
+\tilde y_{t+k} = \min\!\Big(\max\big(\hat y_{t+k},\; L\big),\; U\Big),
+\qquad L = y_{\min} - c\,r, \qquad U = y_{\max} + c\,r,
+$$ {#eq-cota}
+
+y si la cantidad no admite valores negativos, $L$ se reemplaza por $\max(L, 0)$. Con $c = 0$ el
+pronóstico no puede salir del rango observado; con $c \to \infty$ la cota no hace nada.
+
+Para medirla hace falta un método que se equivoque de manera espectacular. Holt sirve: extrapola
+una tendencia lineal sin amortiguar, y el @sec-suavizado ya mostró qué pasa cuando la tendencia
+estimada apunta en la dirección equivocada.
+
+```{python}
+#| label: tbl-cota
+#| tbl-cap: "La @eq-cota aplicada al pronóstico de Holt sobre las 34 series del catálogo, con distintos márgenes. Son 641 pasos en total."
+from statsmodels.tsa.holtwinters import Holt
+
+PRON_HOLT = {}
+for s in SERIES:
+    y = s.entrenamiento.to_numpy(float)
+    ajuste = Holt(y, initialization_method="estimated").fit()
+    PRON_HOLT[s.id] = np.asarray(ajuste.forecast(s.horizonte), float)
+
+
+def cota_por_rango(c):
+    """Devuelve una función que da (L, U) según la @eq-cota."""
+    def cota(serie, y):
+        if np.isinf(c):
+            return -np.inf, np.inf
+        bajo, alto = y.min(), y.max()
+        rango = alto - bajo
+        L = bajo - c * rango
+        return (max(L, 0.0) if (y > 0).all() else L), alto + c * rango
+    return cota
+
+
+def evaluar(cota):
+    smapes, mases, recortados = [], [], 0
+    for s in SERIES:
+        y = s.entrenamiento.to_numpy(float)
+        real = s.prueba.to_numpy(float)
+        pron = PRON_HOLT[s.id]
+        L, U = cota(s, y)
+        recortados += int(((pron < L) | (pron > U)).sum())
+        acotado = np.clip(pron, L, U)
+        smapes.append(smape(real, acotado))
+        mases.append(mase(real, acotado, y, max(s.periodo_estacional, 1)))
+    return {"pasos recortados": recortados, "sMAPE medio": np.mean(smapes),
+            "MASE medio": np.mean(mases), "MASE máximo": max(mases)}
+
+
+filas = []
+for c, etiqueta in [(np.inf, "sin cota"), (1.0, "c = 1"), (0.5, "c = 0,5"),
+                    (0.25, "c = 0,25"), (0.0, "c = 0 (rango observado)")]:
+    filas.append({"margen": etiqueta, **evaluar(cota_por_rango(c))})
+COTA = pd.DataFrame(filas).set_index("margen")
+COTA.round({"pasos recortados": 0, "sMAPE medio": 2, "MASE medio": 2, "MASE máximo": 1})
+```
+
+Cuanto más apretada la cota, mejor. El MASE medio baja de
+`{python} f"{COTA.loc['sin cota', 'MASE medio']:.1f}"` a
+`{python} f"{COTA.loc['c = 0 (rango observado)', 'MASE medio']:.1f}"`, y el peor caso del catálogo
+—una serie donde Holt erra `{python} f"{COTA.loc['sin cota', 'MASE máximo']:.0f}"` veces lo que
+erraría el naive— baja a `{python} f"{COTA.loc['c = 0 (rango observado)', 'MASE máximo']:.0f}"`.
+
+El sMAPE también mejora, pero mucho menos, y la razón importa: **el sMAPE no distingue un pronóstico
+absurdo de uno malo.** Cuando el pronóstico se va muy lejos del valor real, el cociente
+$2|\hat y - y| / (|y| + |\hat y|)$ tiende a 2 y ahí se queda, sea el pronóstico el doble de lo
+razonable o mil veces. El @sec-h366 encontró el mismo efecto en la tesis, y es el argumento más
+fuerte del libro a favor de reportar siempre las dos métricas.
+
+::: {.callout-warning}
+## Un piso en cero no es una cota de cordura
+
+Sobre la serie con quiebre de nivel del catálogo, Holt pronostica valores de hasta
+`{python} f"{PRON_HOLT['M32692'].min():,.0f}".replace(',', '.')` en una serie cuyo histórico va de
+`{python} f"{cargar('M32692').entrenamiento.min():,.0f}".replace(',', '.')` a
+`{python} f"{cargar('M32692').entrenamiento.max():,.0f}".replace(',', '.')`.
+
+Recortar en cero deja el pronóstico en cero, y el sMAPE de un cero contra un valor positivo es 200:
+el máximo posible. Recortar al mínimo histórico, en cambio, baja el sMAPE de esa serie de
+`{python} f"{smape(cargar('M32692').prueba, PRON_HOLT['M32692']):.0f}"` a
+`{python} f"{smape(cargar('M32692').prueba, np.clip(PRON_HOLT['M32692'], cargar('M32692').entrenamiento.min(), cargar('M32692').entrenamiento.max())):.0f}"`.
+
+**El piso tiene que ser un valor plausible, no el primer valor legal.** Cero es legal y casi nunca
+es plausible.
+:::
+
+Ahora la parte incómoda. La cota con $c = 0$ mejora el agregado, pero no mejora todas las series.
+
+```{python}
+#| label: tbl-cota-danio
+#| tbl-cap: "Efecto de la cota con c = 0 serie por serie: cuántas mejoran, cuántas empeoran y cuánto."
+def por_serie(cota):
+    filas = []
+    for s in SERIES:
+        y = s.entrenamiento.to_numpy(float)
+        real = s.prueba.to_numpy(float)
+        pron = PRON_HOLT[s.id]
+        L, U = cota(s, y)
+        filas.append({"serie": s.id, "fenómeno": s.fenomeno,
+                      "diferencia": smape(real, np.clip(pron, L, U)) - smape(real, pron)})
+    return pd.DataFrame(filas)
+
+
+def resumen(d, etiqueta):
+    return {"regla": etiqueta,
+            "series que mejoran": int((d["diferencia"] < -0.01).sum()),
+            "series que empeoran": int((d["diferencia"] > 0.01).sum()),
+            "series sin cambio": int((d["diferencia"].abs() <= 0.01).sum()),
+            "peor daño (puntos de sMAPE)": d["diferencia"].max(),
+            "mejor ganancia": d["diferencia"].min()}
+
+
+DURA = por_serie(cota_por_rango(0.0))
+DURA.loc[DURA["diferencia"].abs() > 0.01].sort_values("diferencia").round(2).set_index("serie")
+```
+
+```{python}
+#| label: fig-cota
+#| fig-cap: "La serie con quiebre de nivel del catálogo, el pronóstico de Holt y el mismo pronóstico acotado al rango observado. La banda gris es el rango del histórico."
+s_q = cargar("M32692")
+y_q = s_q.entrenamiento.to_numpy(float)
+real_q = s_q.prueba.to_numpy(float)
+pron_q = PRON_HOLT["M32692"]
+bajo_q, alto_q = y_q.min(), y_q.max()
+acotado_q = np.clip(pron_q, bajo_q, alto_q)
+cola = 60                                    # últimas observaciones que se dibujan
+fechas_tr = s_q.entrenamiento.index[-cola:]
+fechas_pr = s_q.prueba.index
+
+fig = go.Figure()
+fig.add_hrect(y0=bajo_q, y1=alto_q, fillcolor=COLORES["auxiliar"], opacity=0.12,
+              line_width=0)
+fig.add_trace(go.Scatter(x=fechas_tr, y=y_q[-cola:], mode="lines",
+                         name="histórico",
+                         line=dict(color=COLORES["observado"], width=2)))
+fig.add_trace(go.Scatter(x=fechas_pr, y=real_q, mode="lines+markers",
+                         name="lo que pasó",
+                         line=dict(color=COLORES["prueba"], width=2),
+                         marker=dict(size=6)))
+fig.add_trace(go.Scatter(x=fechas_pr, y=pron_q, mode="lines+markers",
+                         name="Holt sin cota",
+                         line=dict(color=COLORES["auxiliar"], width=2, dash="dot"),
+                         marker=dict(size=6)))
+fig.add_trace(go.Scatter(x=fechas_pr, y=acotado_q, mode="lines+markers",
+                         name="Holt acotado",
+                         line=dict(color=COLORES["pronostico"], width=2),
+                         marker=dict(size=6)))
+fig.add_hline(y=0, line=dict(color=COLORES["auxiliar"], width=1))
+mostrar(fig, alto=430, titulo_y="valor de la serie")
+```
+
+En la @fig-cota se ve de dónde sale la ganancia: Holt lee la caída del último tramo como una
+tendencia y la proyecta más allá del cero, a
+`{python} f"{pron_q.min():,.0f}".replace(',', '.')` en el paso 18, sobre una serie que nunca bajó de
+`{python} f"{bajo_q:,.0f}".replace(',', '.')`. La cota no arregla el pronóstico —sigue siendo malo—
+pero lo devuelve al conjunto de los valores posibles.
+
+Las series que empeoran son todas del mismo tipo: **tendencia limpia**. Su futuro está legítimamente
+arriba del máximo histórico, y la cota se lo prohíbe. Es el mismo techo de extrapolación que el
+@sec-modelos-basicos midió en los modelos de aprendizaje automático, ahora impuesto a mano.
+
+De ahí sale la corrección. La cota no debería ser fija: debería dejar espacio proporcional a la
+tendencia que la serie ya mostró. Con $F_T$ la fuerza de la tendencia del @sec-caracteristicas y
+$\hat\beta$ la pendiente de una recta ajustada al histórico,
+
+$$
+L = y_{\min} - \delta, \qquad U = y_{\max} + \delta,
+\qquad
+\delta =
+\begin{cases}
+|\hat\beta|\,h & \text{si } F_T > 0{,}8 \\[2pt]
+0 & \text{si no}
+\end{cases}
+$$ {#eq-cota-condicional}
+
+o sea: si la serie tiene tendencia, el pronóstico puede salir del rango observado tan rápido como
+la serie salía; si no la tiene, no puede salir.
+
+```{python}
+#| label: tbl-cota-condicional
+#| tbl-cap: "Las tres reglas comparadas. La condicional es la @eq-cota-condicional."
+def cota_condicional(serie, y):
+    bajo, alto = y.min(), y.max()
+    fuerza = float(CATALOGO.loc[serie.id, "trend_strength"])
+    if fuerza > 0.8:
+        pendiente = np.polyfit(np.arange(len(y)), y, 1)[0]
+        delta = abs(pendiente) * serie.horizonte
+    else:
+        delta = 0.0
+    L = bajo - delta
+    return (max(L, 0.0) if (y > 0).all() else L), alto + delta
+
+
+REGLAS = [("sin cota", cota_por_rango(np.inf)),
+          ("rango observado", cota_por_rango(0.0)),
+          ("condicional a la tendencia", cota_condicional)]
+CONDICIONAL = pd.DataFrame(
+    [{**resumen(por_serie(cota), etiqueta), **evaluar(cota)}
+     for etiqueta, cota in REGLAS]
+).set_index("regla")
+CONDICIONAL[["pasos recortados", "sMAPE medio", "MASE medio", "MASE máximo",
+             "series que empeoran", "peor daño (puntos de sMAPE)"]].round(
+    {"pasos recortados": 0, "sMAPE medio": 2, "MASE medio": 2, "MASE máximo": 1,
+     "series que empeoran": 0, "peor daño (puntos de sMAPE)": 2})
+```
+
+La regla condicional deja de recortar
+`{python} f"{int(CONDICIONAL.loc['rango observado', 'pasos recortados'] - CONDICIONAL.loc['condicional a la tendencia', 'pasos recortados'])}"`
+pasos que eran tendencia legítima, y el peor daño baja de
+`{python} f"{CONDICIONAL.loc['rango observado', 'peor daño (puntos de sMAPE)']:.1f}"` a
+`{python} f"{CONDICIONAL.loc['condicional a la tendencia', 'peor daño (puntos de sMAPE)']:.1f}"`
+puntos de sMAPE, sin perder nada de la protección: las ganancias de cien puntos en las series donde
+Holt se desbarranca siguen ahí.
+
+**Esa es la cota que la aplicación de este proyecto tiene tomada como decisión**, y ahora está
+medida: no es una regla de gusto sino una que sobre 34 series y 641 pasos mejora el MASE medio un
+`{python} f"{100 * (1 - CONDICIONAL.loc['condicional a la tendencia', 'MASE medio'] / CONDICIONAL.loc['sin cota', 'MASE medio']):.0f}"` %
+y daña a lo sumo `{python} f"{CONDICIONAL.loc['condicional a la tendencia', 'peor daño (puntos de sMAPE)']:.1f}"`
+puntos a una sola serie.
+
+```{pyodide}
+#| caption: La cota de cordura sobre un pronóstico que se desbarranca — cambia `cual` y `margen`
+#| autorun: true
+import numpy as np
+import pandas as pd
+from statsmodels.tsa.holtwinters import Holt
+
+datos = pd.read_csv("datos/cap01_series.csv", parse_dates=["ds"])
+
+# "quiebre de nivel" es donde Holt se va a valores negativos. Prueba
+# "tendencia limpia" para ver el otro lado: ahí la cota estorba.
+cual = "quiebre de nivel"
+margen = 0.0                     # el c de la ecuación 25.1
+
+
+def smape(real, pron):
+    real, pron = np.asarray(real, float), np.asarray(pron, float)
+    return 200 * np.mean(np.abs(real - pron) / (np.abs(real) + np.abs(pron)))
+
+
+def mase(real, pron, entrenamiento, m):
+    y = np.asarray(entrenamiento, float)
+    d = np.mean(np.abs(y[m:] - y[:-m])) if len(y) > m > 1 else np.mean(np.abs(np.diff(y)))
+    return np.mean(np.abs(np.asarray(real, float) - np.asarray(pron, float))) / d
+
+
+g = datos[datos["etiqueta"] == cual].sort_values("ds")
+y = g["y"].to_numpy(float)
+m = int(g["m"].iloc[0])
+h = int((g["split"] == "prueba").sum())
+y_tr, y_te = y[:-h], y[-h:]
+
+pron = np.asarray(Holt(y_tr, initialization_method="estimated").fit().forecast(h), float)
+
+bajo, alto = y_tr.min(), y_tr.max()
+rango = alto - bajo
+L = max(bajo - margen * rango, 0.0)      # la serie es positiva
+U = alto + margen * rango
+acotado = np.clip(pron, L, U)
+
+print(f"histórico: [{bajo:,.1f}, {alto:,.1f}]")
+print(f"pronóstico sin cota: [{pron.min():,.1f}, {pron.max():,.1f}]")
+print(f"pasos fuera de la cota: {int(((pron < L) | (pron > U)).sum())} de {h}")
+pd.DataFrame({
+    "sMAPE": [smape(y_te, pron), smape(y_te, acotado)],
+    "MASE": [mase(y_te, pron, y_tr, m), mase(y_te, acotado, y_tr, m)],
+}, index=["sin cota", "con cota"]).round(2)
+```
+
+## La misma cota sobre el intervalo, que no es lo mismo {#sec-cota-intervalo}
+
+El @sec-bootstrapping construyó intervalos por simulación y midió que cubren mucho menos de lo que
+prometen. Falta una pregunta de producción: **¿cuántos de esos intervalos incluyen valores
+imposibles?**
+
+```{python}
+#| label: tbl-cota-intervalo
+#| tbl-cap: "Intervalos del 95 % por bootstrap del naive estacional sobre las 34 series del catálogo, con B = 500 trayectorias, y qué pasa al acotarlos."
+rng = np.random.default_rng(42)
+
+
+def paso_snaive(y, m):
+    return y[-m] if m > 1 else y[-1]
+
+
+def residuos_snaive(y, m):
+    if m <= 1:
+        ajustado = np.concatenate([[np.nan], y[:-1]])
+    else:
+        ajustado = np.concatenate([np.full(m, np.nan), y[:-m]])
+    d = y - ajustado
+    return d[~np.isnan(d)]
+
+
+B = 500
+acumulado = {"sin cota": [0, 0.0], "piso en cero": [0, 0.0], "rango observado": [0, 0.0]}
+negativos = pasos = series_con_negativo = 0
+for s in SERIES:
+    y = s.entrenamiento.to_numpy(float)
+    real = s.prueba.to_numpy(float)
+    h, m = s.horizonte, max(s.periodo_estacional, 1)
+    r = residuos_snaive(y, m)
+    trayectorias = np.zeros((B, h))
+    for b in range(B):
+        historia = list(y)
+        for _ in range(h):
+            historia.append(paso_snaive(np.array(historia), m) + rng.choice(r))
+        trayectorias[b] = historia[-h:]
+    bajo = np.quantile(trayectorias, 0.025, axis=0)
+    alto = np.quantile(trayectorias, 0.975, axis=0)
+    positiva = (y > 0).all()
+    pasos += h
+    if positiva:
+        negativos += int((bajo < 0).sum())
+        series_con_negativo += int((bajo < 0).any())
+    variantes = {
+        "sin cota": (bajo, alto),
+        "piso en cero": (np.clip(bajo, 0, None) if positiva else bajo, alto),
+        "rango observado": (np.clip(bajo, max(y.min(), 0) if positiva else y.min(), None),
+                            np.clip(alto, None, y.max())),
+    }
+    for nombre, (lo, hi) in variantes.items():
+        acumulado[nombre][0] += int(((real >= lo) & (real <= hi)).sum())
+        acumulado[nombre][1] += float(np.sum(hi - lo))
+
+ancho_base = acumulado["sin cota"][1]
+INTERVALOS = pd.DataFrame([
+    {"variante": nombre, "cobertura %": 100 * cub / pasos, "ancho relativo": anc / ancho_base}
+    for nombre, (cub, anc) in acumulado.items()
+]).set_index("variante")
+INTERVALOS.round(3)
+```
+
+El extremo inferior es negativo en `{python} f"{100 * negativos / pasos:.1f}"` % de los
+`{python} f"{pasos}"` pasos, en `{python} f"{series_con_negativo}"` de las 34 series, siempre en
+series cuyo histórico es estrictamente positivo. Un intervalo que dice "entre −400 y 1.200 unidades"
+no es conservador: es un error visible.
+
+Y las dos maneras de arreglarlo no son equivalentes.
+
+**Poner un piso en cero no cuesta nada.** La cobertura queda en
+`{python} f"{INTERVALOS.loc['piso en cero', 'cobertura %']:.1f}"` %, idéntica a la de partida, y el
+intervalo se angosta un
+`{python} f"{100 * (1 - INTERVALOS.loc['piso en cero', 'ancho relativo']):.0f}"` %. La región que se
+recorta no contenía ningún valor real, porque ningún valor real es negativo.
+
+**Acotar el intervalo al rango observado cuesta caro.** La cobertura baja a
+`{python} f"{INTERVALOS.loc['rango observado', 'cobertura %']:.1f}"` %, o sea
+`{python} f"{INTERVALOS.loc['sin cota', 'cobertura %'] - INTERVALOS.loc['rango observado', 'cobertura %']:.1f}"`
+puntos menos, porque los valores reales sí salen del rango histórico y el intervalo estaba ahí
+justamente para admitirlos.
+
+::: {.callout-tip}
+## La cota del punto y la cota del intervalo son distintas
+
+Sobre el pronóstico puntual, la cota apretada gana: el @sec-cota-cordura midió que recortar al rango
+observado —con la corrección por tendencia— mejora todo.
+
+Sobre el intervalo, la cota apretada pierde: recortar al rango observado le saca
+`{python} f"{INTERVALOS.loc['sin cota', 'cobertura %'] - INTERVALOS.loc['rango observado', 'cobertura %']:.0f}"`
+puntos de cobertura a un intervalo que ya cubría menos de lo que prometía.
+
+La regla que sale de las dos mediciones es asimétrica, y no es obvia: **al punto, cota estadística;
+al intervalo, solo cota física.** El punto es una apuesta y conviene que sea prudente; el intervalo
+es una declaración de incertidumbre y angostarlo es mentir.
+:::
+
+## Los casos que M4 no contiene {#sec-casos-limite}
+
+El @sec-los-datos mostró que M4 filtró por longitud mínima: no hay series de ocho puntos, ni de
+puros ceros, ni con valores negativos. Una aplicación las recibe el primer día. Esta tabla ejecuta
+las herramientas del libro sobre esos casos y anota lo que devuelven.
+
+```{python}
+#| label: tbl-limites
+#| tbl-cap: "Qué hace cada herramienta con una entrada que M4 no contiene. La columna final distingue el error que se ve del que no."
+from sklearn.linear_model import Ridge
+from statsmodels.tsa.arima.model import ARIMA
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+from statsmodels.tsa.seasonal import STL
+
+CORTA = np.array([10.0, 11.0, 12.0])
+CEROS = np.array([0.0, 0, 5, 0, 0, 7, 0, 0, 3, 0, 0, 9])
+CONSTANTE = np.repeat(4.0, 30)
+CON_NAN = np.array([1.0, 2, np.nan, 4, 5, 6, 7, 8, 9, 10, 11, 12])
+
+
+def intentar(f):
+    """Ejecuta f y clasifica el resultado en excepción, silencioso o correcto."""
+    try:
+        r = np.atleast_1d(np.asarray(f(), float))
+    except Exception as e:
+        return f"{type(e).__name__}", "falla ruidosa"
+    if np.isnan(r).any():
+        return "devuelve nan", "falla silenciosa"
+    if np.isinf(r).any():
+        return "devuelve inf", "falla silenciosa"
+    return f"devuelve {np.round(r[0], 2)}", "sin aviso"
+
+
+CASOS = [
+    ("serie de 3 puntos, m = 12", "STL",
+     lambda: STL(pd.Series(CORTA), period=12).fit().trend),
+    ("serie de 3 puntos, m = 12", "ETS estacional",
+     lambda: ExponentialSmoothing(CORTA, seasonal="add", seasonal_periods=12,
+                                  initialization_method="estimated").fit().forecast(6)),
+    ("serie de 3 puntos, m = 12", "naive estacional",
+     lambda: np.array([CORTA[-12 + (i % 12)] for i in range(6)])),
+    ("serie de 3 puntos, m = 12", "MASE",
+     lambda: [mase([4.0, 4], [5.0, 5], CORTA, 12)]),
+    ("serie con ceros", "logaritmo", lambda: np.log(CEROS)),
+    ("serie con ceros", "MAPE",
+     lambda: [np.mean(np.abs((np.array([1.0, 5]) - np.array([0.0, 5])) / np.array([0.0, 5])))]),
+    ("serie con ceros", "sMAPE", lambda: [smape([0.0, 5], [0.0, 5])]),
+    ("serie constante", "ARIMA(1,1,1)",
+     lambda: ARIMA(CONSTANTE, order=(1, 1, 1)).fit().forecast(6)),
+    ("serie constante", "MASE",
+     lambda: [mase([4.0, 4], [5.0, 5], CONSTANTE, 1)]),
+    ("serie con un faltante", "Ridge",
+     lambda: Ridge().fit(CON_NAN[:-1].reshape(-1, 1), CON_NAN[1:]).predict([[12.0]])),
+]
+filas = []
+for entrada, herramienta, f in CASOS:
+    resultado, clase = intentar(f)
+    filas.append({"entrada": entrada, "herramienta": herramienta,
+                  "resultado": resultado, "tipo": clase})
+LIMITES = pd.DataFrame(filas).set_index(["entrada", "herramienta"])
+LIMITES
+```
+
+Tres cosas de esa tabla.
+
+**Las fallas ruidosas son las baratas.** El naive estacional con $m = 12$ y tres puntos levanta un
+`IndexError`, `Ridge` con un faltante levanta un `ValueError`. Molestan en el momento y no llegan
+al usuario.
+
+**Las silenciosas son el problema.** `{python} f"{int((LIMITES['tipo'] == 'falla silenciosa').sum())}"`
+de los `{python} f"{len(LIMITES)}"` casos devuelven `nan` o `inf` sin avisar: el logaritmo de un
+cero, el MAPE con un cero en la prueba, el sMAPE cuando el real y el pronóstico son ambos cero, el
+MASE cuando la serie es constante y el denominador se anula. Un `nan` que atraviesa un promedio se
+convierte en un `nan` en la interfaz, o —peor— en una fila que alguien filtró y nadie contó.
+
+**Y hay una tercera categoría, la más peligrosa: la respuesta sin sentido y sin aviso.** Son
+`{python} f"{int((LIMITES['tipo'] == 'sin aviso').sum())}"` de los diez. STL con tres puntos y
+período 12 **devuelve una tendencia**. ARIMA(1,1,1) sobre una serie constante **devuelve un
+pronóstico**. Y el MASE con $m = 12$ sobre tres puntos **devuelve un número**, pero no el que se
+pidió: la función de este libro cae al naive no estacional cuando $n \le m$, que es una decisión
+razonable y queda invisible en la salida. Nada en ninguno de los tres indica que el pedido no tenía
+sentido.
+
+::: {.callout-important}
+## La validación de entrada va antes del modelo
+
+De la tabla sale una lista corta de comprobaciones que ninguna biblioteca hace por ti, y que
+conviene hacer **antes** de elegir método:
+
+1. $n \ge 2m + 1$ para cualquier método estacional, y $n \ge 3m$ para estimar una estacionalidad
+   con algo de estabilidad.
+2. Serie no constante: si la varianza es cero, el pronóstico es la constante y el MASE no existe.
+3. Sin faltantes, o con una política explícita de relleno.
+4. Registrar si la serie tiene ceros o negativos, porque decide qué métricas y qué
+   transformaciones se pueden usar.
+5. Comparar $h$ con $n$: pronosticar 48 pasos desde 20 observaciones es una operación legal que no
+   significa nada.
+
+El @sec-los-datos las presentó como higiene de datos. Acá son la diferencia entre un error de
+pantalla y un número inventado.
+:::
+
+## Qué hay que guardar {#sec-servir}
+
+El @sec-prediccion comparó las estrategias multipaso por precisión y por tiempo de ajuste, y dejó
+pendiente el costo de almacenamiento. Con $S$ series, $h$ pasos y $b$ bytes por modelo serializado,
+
+$$
+\text{recursiva} = S \cdot b,
+\qquad
+\text{directa} = S \cdot h \cdot b,
+$$ {#eq-almacenamiento}
+
+que es una diferencia de un factor $h$: 48 para las series horarias de M4. El tamaño $b$, en cambio,
+no depende de la estrategia sino del modelo, y esa es la parte que la @eq-almacenamiento no dice.
+
+```{python}
+#| label: tbl-almacenamiento
+#| tbl-cap: "Tamaño serializado con `pickle` de los modelos ajustados sobre la serie horaria H272 (n = 960, h = 48, 48 rezagos), y la extrapolación a las 99.935 series de M4."
+from sklearn.compose import TransformedTargetRegressor
+from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.neural_network import MLPRegressor
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+
+s = cargar("H272")
+y_h272 = s.entrenamiento.to_numpy(float)
+P_REZAGOS, H_H272 = 48, s.horizonte
+
+
+def tabla_directa(y, p, k):
+    """Matriz de rezagos con el objetivo a k pasos (la @eq-directa)."""
+    X = np.array([y[i - p:i] for i in range(p, len(y) - k + 1)])
+    objetivo = np.array([y[i + k - 1] for i in range(p, len(y) - k + 1)])
+    return X, objetivo
+
+
+def red():
+    return TransformedTargetRegressor(
+        make_pipeline(StandardScaler(),
+                      MLPRegressor(hidden_layer_sizes=(100,), max_iter=300, random_state=0)),
+        transformer=StandardScaler())
+
+
+MODELOS = {"Ridge": Ridge,
+           "boosting por histogramas": lambda: HistGradientBoostingRegressor(max_iter=100),
+           "perceptrón (100 neuronas)": red}
+filas = []
+for nombre, constructor in MODELOS.items():
+    X, objetivo = tabla_directa(y_h272, P_REZAGOS, 1)
+    bytes_uno = len(pickle.dumps(constructor().fit(X, objetivo)))
+    bytes_todos = 0
+    for k in range(1, H_H272 + 1):
+        X, objetivo = tabla_directa(y_h272, P_REZAGOS, k)
+        bytes_todos += len(pickle.dumps(constructor().fit(X, objetivo)))
+    filas.append({"modelo": nombre,
+                  "recursiva (kB)": bytes_uno / 1e3,
+                  "directa (kB)": bytes_todos / 1e3,
+                  "recursiva × 99.935 (GB)": bytes_uno * 99_935 / 1e9,
+                  "directa × 99.935 (GB)": bytes_todos * 99_935 / 1e9})
+ALMACEN = pd.DataFrame(filas).set_index("modelo")
+ALMACEN.round(2)
+```
+
+El factor entre columnas es 48, como manda la @eq-almacenamiento. Lo que la ecuación no anticipa es
+el factor entre filas: el boosting ocupa
+`{python} f"{ALMACEN.loc['boosting por histogramas', 'recursiva (kB)'] / ALMACEN.loc['Ridge', 'recursiva (kB)']:,.0f}".replace(',', '.')`
+veces más que Ridge para el mismo problema, porque guarda cien árboles y Ridge guarda 48
+coeficientes.
+
+Puestos juntos, los dos factores dan una conclusión que cambia el diseño de un sistema:
+
+- Ridge con estrategia **directa**, para las 99.935 series:
+  `{python} f"{ALMACEN.loc['Ridge', 'directa × 99.935 (GB)']:.1f}"` GB.
+- Boosting con estrategia **recursiva**:
+  `{python} f"{ALMACEN.loc['boosting por histogramas', 'recursiva × 99.935 (GB)']:.0f}"` GB.
+- Boosting con estrategia directa:
+  `{python} f"{ALMACEN.loc['boosting por histogramas', 'directa × 99.935 (GB)'] / 1000:.1f}"`
+  **terabytes**.
+
+O sea: **elegir el modelo pesa más que elegir la estrategia.** La combinación cara no es la directa,
+es la directa con un modelo grande, y esa combinación es exactamente la que el @sec-prediccion
+mostró que tampoco gana en precisión.
+
+## Cuánto tarda {#sec-latencia}
+
+El @sec-costo midió el pipeline de la tesis en 16,6 horas y encontró que el 83 % se lo lleva
+`sample_entropy`, con 19,7 segundos en una serie de 4.000 puntos. Para una aplicación la pregunta no
+es el total sino la latencia por serie: cuánto espera alguien que acaba de subir un archivo.
+
+```{python}
+#| label: tbl-latencia
+#| tbl-cap: "Tiempo de cálculo por serie de tres grupos de características, sobre series del catálogo de longitud creciente. Las dos últimas columnas son la misma cuenta con dos implementaciones."
+from statsmodels.tsa.stattools import acf, adfuller
+
+
+def caracteristicas_baratas(y):
+    """Siete descriptores de costo O(n): todos son una pasada sobre la serie."""
+    d = np.diff(y)
+    mediana = np.median(y)
+    mad = np.median(np.abs(y - mediana))
+    return {
+        "n": len(y),
+        "cv": y.std() / abs(y.mean()),
+        "acf1": acf(y, nlags=1)[1],
+        "razon_varianzas": d.var() / y.var(),
+        "atipicos": float(np.mean(np.abs(y - mediana) > 3 * mad + 1e-12)),
+        "giros": float(np.mean(np.diff(np.sign(d)) != 0)),
+        "pendiente": np.polyfit(np.arange(len(y)), y, 1)[0] / y.std(),
+    }
+
+
+def caracteristicas_medias(y, m):
+    """Descomposición y prueba de raíz unitaria: O(n log n) con constantes grandes."""
+    if m > 1 and len(y) > 2 * m:
+        STL(pd.Series(y), period=m).fit()
+    return adfuller(y, autolag="AIC")[1]
+
+
+def entropia_con_bucles(x, m=2, r=0.2):
+    """La versión de la tesis: dos bucles de Python, O(n²)."""
+    x = (x - x.mean()) / x.std()
+    n = len(x)
+
+    def coincidencias(largo):
+        plantillas = [x[i:i + largo] for i in range(n - largo + 1)]
+        total = 0
+        for i in range(len(plantillas)):
+            for j in range(i + 1, len(plantillas)):
+                if max(abs(plantillas[i] - plantillas[j])) <= r:
+                    total += 1
+        return total
+
+    a, b = coincidencias(m + 1), coincidencias(m)
+    return -np.log(a / b) if a > 0 and b > 0 else np.nan
+
+
+def entropia_vectorizada(x, m=2, r=0.2):
+    """La misma cuenta con el bucle interno en numpy. Devuelve el mismo número."""
+    x = (x - x.mean()) / x.std()
+    n = len(x)
+
+    def coincidencias(largo):
+        plantillas = np.array([x[i:i + largo] for i in range(n - largo + 1)])
+        total = 0
+        for i in range(len(plantillas)):
+            distancia = np.max(np.abs(plantillas[i + 1:] - plantillas[i]), axis=1)
+            total += int((distancia <= r).sum())
+        return total
+
+    a, b = coincidencias(m + 1), coincidencias(m)
+    return -np.log(a / b) if a > 0 and b > 0 else np.nan
+
+
+def cronometrar(f):
+    inicio = time.perf_counter()
+    valor = f()
+    return 1000 * (time.perf_counter() - inicio), valor
+
+
+filas = []
+for sid in ["M39292", "M32692", "H272", "M17144"]:
+    s = cargar(sid)
+    y = s.entrenamiento.to_numpy(float)
+    m = max(s.periodo_estacional, 1)
+    recortada = y[:4000]                      # el tope que usó la tesis
+    t_baratas, _ = cronometrar(lambda: caracteristicas_baratas(y))
+    t_medias, _ = cronometrar(lambda: caracteristicas_medias(y, m))
+    t_bucles, valor_bucles = cronometrar(lambda: entropia_con_bucles(recortada))
+    t_vector, valor_vector = cronometrar(lambda: entropia_vectorizada(recortada))
+    filas.append({
+        "serie": sid, "n": len(y),
+        "siete baratas (ms)": t_baratas,
+        "STL y raíz unitaria (ms)": t_medias,
+        "entropía con bucles (ms)": t_bucles,
+        "entropía vectorizada (ms)": t_vector,
+        "factor": t_bucles / t_vector,
+        "diferencia entre las dos": abs(valor_bucles - valor_vector),
+    })
+LATENCIA = pd.DataFrame(filas).set_index("serie")
+LATENCIA.round(3)
+```
+
+Las dos implementaciones devuelven el mismo número —la última columna es la diferencia entre las
+dos, y es cero en las cuatro series— y difieren en un factor que crece
+con la longitud: `{python} f"{LATENCIA['factor'].min():.0f}"` veces en la serie más corta y
+`{python} f"{LATENCIA['factor'].max():.0f}"` en la más larga.
+
+Eso **contesta el pendiente que dejó el @sec-costo**, y lo contesta distinto de lo que ese capítulo
+anticipaba. La conclusión de allá fue que el índice, para calcularse en línea, había que vectorizarlo
+o precomputarlo. Medido acá: vectorizarlo alcanza. Los
+`{python} f"{LATENCIA.loc['M17144', 'entropía con bucles (ms)'] / 1000:.1f}"` segundos de la serie de
+`{python} f"{int(LATENCIA.loc['M17144', 'n']):,}".replace(',', '.')` puntos se convierten en
+`{python} f"{LATENCIA.loc['M17144', 'entropía vectorizada (ms)']:.0f}"` milisegundos sin cambiar el
+resultado, y las 16,6 horas del pipeline completo caen al mismo ritmo.
+
+Contra un presupuesto de 100 ms por serie —el límite de lo que se percibe como instantáneo— la
+tabla se lee así:
+
+- Las siete características baratas entran siempre con margen enorme: el máximo medido es
+  `{python} f"{LATENCIA['siete baratas (ms)'].max():.2f}"` ms.
+- STL y la prueba de raíz unitaria entran en las series cortas y se van del presupuesto en las
+  largas: `{python} f"{LATENCIA['STL y raíz unitaria (ms)'].max():.0f}"` ms en la serie de
+  `{python} f"{int(LATENCIA['n'].max()):,}".replace(',', '.')` puntos.
+- La entropía muestral con bucles se va del presupuesto alrededor de los quinientos puntos
+  (`{python} f"{LATENCIA.loc['H272', 'entropía con bucles (ms)']:.0f}"` ms con
+  `{python} f"{int(LATENCIA.loc['H272', 'n'])}"`); vectorizada aguanta hasta unos pocos miles
+  (`{python} f"{LATENCIA.loc['M17144', 'entropía vectorizada (ms)']:.0f}"` ms con
+  `{python} f"{int(LATENCIA.loc['M17144', 'n']):,}".replace(',', '.')`).
+
+```{python}
+#| label: tbl-latencia-larga
+#| tbl-cap: "La serie más larga del catálogo, sin el tope de 4.000 puntos, con la implementación vectorizada."
+s = cargar("D4099")
+y_larga = s.entrenamiento.to_numpy(float)
+t_completa, _ = cronometrar(lambda: entropia_vectorizada(y_larga))
+t_recorte, _ = cronometrar(lambda: entropia_vectorizada(y_larga[:4000]))
+LARGA = pd.DataFrame([
+    {"entrada": f"completa (n = {len(y_larga)})", "milisegundos": t_completa},
+    {"entrada": "recortada a 4.000", "milisegundos": t_recorte},
+]).set_index("entrada")
+LARGA.round(0)
+```
+
+En la serie más larga del catálogo, sin recorte, la versión vectorizada tarda
+`{python} f"{LARGA.loc[f'completa (n = {len(y_larga)})', 'milisegundos'] / 1000:.1f}"` segundos:
+sigue afuera del presupuesto interactivo. El costo crece con $n^2$ y ninguna vectorización cambia
+eso.
+
+De las dos mediciones sale una regla con dos tramos, no una: **vectorizar resuelve el caso típico y
+recortar resuelve la cola.** Un tope de 4.000 puntos deja el cálculo en
+`{python} f"{LARGA.loc['recortada a 4.000', 'milisegundos']:.0f}"` ms para cualquier serie, y es
+exactamente lo que la tesis hizo por razones de costo total.
+
+Y hay una salida mejor todavía, que el @sec-que-importa ya había medido sin buscarla: el clasificador
+que aprende a elegir método **no pierde nada** al quedarse sin `sample_entropy`. Para decidir no hace
+falta; para diagnosticar se puede calcular después de responder.
+
+**La regla de diseño es medir la latencia por serie contra un presupuesto explícito, no el costo
+total del lote.** Son dos números distintos y llevan a decisiones distintas: el costo total se
+resuelve comprando máquinas, la latencia por serie no.
+
+## Promediar el azar {#sec-semillas-produccion}
+
+El @sec-aprendizaje-profundo reprodujo el hallazgo central de la tesis: dos entrenamientos de la
+misma red sobre la misma serie, cambiando solo la semilla, dan errores distintos. En un experimento
+eso es una barra de error. En producción es un usuario que refresca la página y ve otro número.
+
+La respuesta es un ensamble de semillas: entrenar $J$ veces y combinar. @bouthillier2021 miden el
+efecto de esa varianza sobre comparaciones publicadas y muestran que alcanza para invertir el orden
+entre métodos, que es exactamente lo que la tesis encontró con las redes.
+
+Con $\hat y^{(j)}_{t+k}$ el pronóstico de la semilla $j$,
+
+$$
+\hat y^{\text{ens}}_{t+k} = \operatorname{mediana}_{j=1,\dots,J} \hat y^{(j)}_{t+k},
+$$ {#eq-ensamble-semillas}
+
+y la mediana en vez del promedio porque el @sec-ensambles midió que la divergencia entre las dos
+señala una cola, y acá la cola es justamente el entrenamiento que salió mal.
+
+```{python}
+#| label: tbl-semillas-produccion
+#| tbl-cap: "Perceptrón de 32 neuronas, estrategia recursiva, sobre las series del catálogo con largo suficiente. Cinco semillas, y las dos combinaciones."
+def ventanas(y, p):
+    X = np.array([y[i - p:i] for i in range(p, len(y))])
+    return X, y[p:]
+
+
+def recursivo(modelo, y, p, h):
+    historia, salida = list(y), []
+    for _ in range(h):
+        salida.append(float(modelo.predict(np.array(historia[-p:]).reshape(1, -1))[0]))
+        historia.append(salida[-1])
+    return np.array(salida)
+
+
+def perceptron(semilla):
+    return TransformedTargetRegressor(
+        make_pipeline(StandardScaler(),
+                      MLPRegressor(hidden_layer_sizes=(32,), max_iter=500,
+                                   random_state=semilla)),
+        transformer=StandardScaler())
+
+
+SEMILLAS = range(5)
+filas = []
+tiempo_una = tiempo_todas = 0.0
+for s in SERIES:
+    y = s.entrenamiento.to_numpy(float)
+    h, m = s.horizonte, max(s.periodo_estacional, 1)
+    p = max(2 * m, 8)
+    if len(y) < p + 12:
+        continue
+    real = s.prueba.to_numpy(float)
+    X, objetivo = ventanas(y, p)
+    pronosticos = []
+    inicio = time.perf_counter()
+    for semilla in SEMILLAS:
+        pronosticos.append(recursivo(perceptron(semilla).fit(X, objetivo), y, p, h))
+        if semilla == 0:
+            tiempo_una += time.perf_counter() - inicio
+    tiempo_todas += time.perf_counter() - inicio
+    P = np.array(pronosticos)
+    errores = [smape(real, P[j]) for j in range(len(SEMILLAS))]
+    filas.append({"serie": s.id,
+                  **{f"semilla {j}": errores[j] for j in SEMILLAS},
+                  "mediana": smape(real, np.median(P, axis=0)),
+                  "promedio": smape(real, P.mean(axis=0)),
+                  "mejor semilla": min(errores),
+                  "peor semilla": max(errores)})
+SEM = pd.DataFrame(filas).set_index("serie")
+SEM.mean().to_frame("sMAPE medio").round(2).T
+```
+
+Ninguna semilla es la buena. La distancia entre la mejor y la peor es de
+`{python} f"{SEM['peor semilla'].mean() - SEM['mejor semilla'].mean():.1f}"` puntos de sMAPE en
+promedio, y en la serie mediana la peor semilla erra un
+`{python} f"{100 * np.median((SEM['peor semilla'] - SEM['mejor semilla']) / SEM['mejor semilla']):.0f}"` %
+más que la mejor. Sobre `{python} f"{len(SEM)}"` series:
+
+- La mediana de las cinco le gana a la semilla 0 —la que sale de fijar `random_state=0` y no
+  pensarlo más— en `{python} f"{int((SEM['mediana'] < SEM['semilla 0']).sum())}"` de
+  `{python} f"{len(SEM)}"` series.
+- La mediana no alcanza a la mejor semilla
+  (`{python} f"{SEM['mediana'].mean():.2f}"` contra
+  `{python} f"{SEM['mejor semilla'].mean():.2f}"`), y no puede: la mejor semilla es un oráculo que
+  solo se conoce mirando la prueba.
+- Lo que la mediana compra es no caer en la peor
+  (`{python} f"{SEM['peor semilla'].mean():.2f}"`), que es el riesgo real de tirar una sola vez.
+- Cuesta `{python} f"{tiempo_todas / tiempo_una:.1f}"` veces el tiempo de una sola.
+
+**Tres a cinco semillas con la mediana es la decisión que la aplicación de este proyecto tiene
+tomada**, y estos son los números que la sostienen: no mejora el promedio de manera espectacular,
+elimina el peor resultado, y el costo es lineal y paralelizable.
+
+## Cada cuánto reajustar {#sec-reajustar}
+
+El @sec-particiones midió si reajustar el modelo con los datos nuevos vale la pena y encontró que
+la ganancia es chica. Producción hace una pregunta más precisa: **cuánto se degrada un ajuste
+mientras envejece.**
+
+El experimento: cortar cada serie larga $K = 6$ horizontes antes del final, ajustar Ridge una sola
+vez ahí, y pronosticar los seis bloques siguientes sin volver a ajustar —usando siempre los datos
+reales como entrada, solo con los coeficientes viejos— contra reajustar en cada origen.
+
+```{python}
+#| label: tbl-antiguedad
+#| tbl-cap: "Penalización por usar un ajuste viejo, por antigüedad medida en horizontes. Comparación pareada sobre los mismos orígenes."
+K = 6
+registro = []
+for s in SERIES:
+    y = s.entrenamiento.to_numpy(float)
+    h, m = s.horizonte, max(s.periodo_estacional, 1)
+    p = max(2 * m, 8)
+    n0 = len(y) - K * h
+    if n0 < 4 * p:
+        continue
+    X, objetivo = ventanas(y[:n0], p)
+    congelado = Ridge().fit(X, objetivo)
+    for k in range(K):
+        inicio = n0 + k * h
+        real = y[inicio:inicio + h]
+        X_k, objetivo_k = ventanas(y[:inicio], p)
+        registro.append({
+            "serie": s.id, "antigüedad": k,
+            "congelado": smape(real, recursivo(congelado, y[:inicio], p, h)),
+            "reajustado": smape(real, recursivo(Ridge().fit(X_k, objetivo_k), y[:inicio], p, h)),
+        })
+REG = pd.DataFrame(registro)
+ANTIG = REG.groupby("antigüedad").apply(
+    lambda x: pd.Series({
+        "congelado": x["congelado"].mean(),
+        "reajustado": x["reajustado"].mean(),
+        "penalización mediana %": 100 * np.nanmedian(
+            (x["congelado"] - x["reajustado"]) / x["reajustado"]),
+        "el congelado pierde %": 100 * (x["congelado"] > x["reajustado"]).mean(),
+    }), include_groups=False)
+ANTIG.round(2)
+```
+
+Con `{python} f"{REG['serie'].nunique()}"` series y `{python} f"{len(REG)}"` orígenes, la
+antigüedad 0 es idéntica por construcción y de ahí en adelante el ajuste viejo pierde cada vez más
+seguido: `{python} f"{ANTIG.loc[1, 'el congelado pierde %']:.0f}"` % de los orígenes a un horizonte
+de distancia, `{python} f"{ANTIG.loc[K - 1, 'el congelado pierde %']:.0f}"` % a
+`{python} f"{K - 1}"` horizontes, con una penalización mediana que llega al
+`{python} f"{ANTIG.loc[K - 1, 'penalización mediana %']:.0f}"` %.
+
+La serie es corta y el ruido es visible —hay una antigüedad donde el congelado gana en promedio—,
+así que el número que vale es la frecuencia con que pierde, que sí crece de manera consistente.
+
+Y la conclusión práctica no sale del tamaño de la penalización sino de compararla con el costo. Con
+Ridge, reajustar las 34 series cuesta milisegundos; con el boosting de la
+@tbl-almacenamiento cuesta minutos y
+`{python} f"{ALMACEN.loc['boosting por histogramas', 'recursiva × 99.935 (GB)']:.0f}"` GB de
+reescritura. **La respuesta a "cada cuánto reajustar" es una función del costo de ajustar, no de la
+degradación**, y por eso un modelo lineal barato puede reajustarse en cada origen mientras uno
+grande se reajusta por lote.
+
+## El entorno para lo que el navegador no da {#sec-entorno}
+
+El @sec-aprendizaje-profundo explicó por qué este libro no entrena una LSTM: Pyodide no trae
+PyTorch ni TensorFlow, y el libro no publica números que no puede ejecutar. Si quieres reproducir esa
+parte de la tesis, hace falta salir del navegador.
+
+Lo mínimo, con la misma versión de Python que usa el libro:
+
+```bash
+python3 -m venv ~/.venvs/profundo
+~/.venvs/profundo/bin/pip install torch numpy pandas scikit-learn
+```
+
+Tres cosas que la medición de este capítulo vuelve a poner sobre la mesa antes de entrenar nada.
+
+**Fijar las semillas no alcanza.** `torch.manual_seed` hace reproducible una corrida, no la
+convierte en la corrida correcta. La @eq-ensamble-semillas sigue siendo necesaria, y con redes
+recurrentes la dispersión que midió la tesis es mayor que la del perceptrón de la
+@tbl-semillas-produccion.
+
+**El tamaño serializado es otro.** La @tbl-almacenamiento muestra que un perceptrón de 100 neuronas
+ya pesa `{python} f"{ALMACEN.loc['perceptrón (100 neuronas)', 'recursiva (kB)']:.0f}"` kB por serie.
+Una LSTM por serie, con estrategia directa, es un sistema de almacenamiento antes que un sistema de
+pronóstico —y es justamente el argumento del @sec-modelo-global a favor de un modelo global.
+
+**El aparato de defensa no cambia.** La cota de la @eq-cota-condicional, la validación de entrada
+del @sec-casos-limite y el presupuesto de latencia del @sec-latencia son independientes del modelo.
+Una red no necesita menos defensas: necesita las mismas, y con más urgencia, porque falla de maneras
+que no se anticipan leyendo sus parámetros.
+
+## La lista de verificación {#sec-lista-produccion}
+
+Las listas de comprobación para sistemas de aprendizaje automático existen y son más largas que esta
+—@breck2017 proponen veintiocho pruebas agrupadas en cuatro áreas—. Lo que sigue no las reemplaza:
+es lo que este capítulo midió, con el número al lado.
+
+| pregunta | respuesta medida acá |
+|---|---|
+| ¿alcanza el error medio para decidir? | no: el 22 % del hueco está en el 1 % de las series |
+| ¿conviene acotar el pronóstico puntual? | sí: el MASE medio baja un 56 % y el peor caso a un tercio |
+| ¿la cota va al rango observado? | sí, salvo que la serie tenga tendencia; ahí hay que dar espacio |
+| ¿sirve un piso en cero? | como cota física del intervalo sí; como piso del punto no |
+| ¿conviene acotar el intervalo al rango? | no: cuesta 9 puntos de cobertura |
+| ¿qué falla con entradas raras? | 4 de 10 casos devuelven `nan` o `inf` sin avisar, y 3 devuelven un número sin sentido |
+| ¿qué pesa más, la estrategia o el modelo? | el modelo: entre Ridge y boosting hay un factor de 500 |
+| ¿qué características entran en un presupuesto de 100 ms? | las de una pasada siempre; `sample_entropy` solo vectorizada y con tope |
+| ¿cuántas semillas? | tres a cinco, combinadas con la mediana |
+| ¿cada cuánto reajustar? | tan seguido como el costo de ajustar lo permita |
+
+: Lo que este capítulo mide, en una tabla. {#tbl-lista-produccion}
+
+## Lo que este libro deja hecho, y lo que no {#sec-cierre-libro}
+
+Veinticinco capítulos, todos ejecutables, sobre las mismas 100.000 series. Lo que queda escrito, más
+allá de los métodos, son unas cuantas cosas que la práctica corriente repite y que acá se midieron y
+salieron distinto.
+
+- El promedio de dos pronósticos **no** le gana a elegir uno solo, en este catálogo
+  (@sec-ensambles).
+- La validación cruzada temporal **no** domina a un solo corte reciente (@sec-validacion-cruzada).
+- La estrategia recursiva **no** se degrada más que la directa (@sec-prediccion).
+- El boosting **no** le gana al naive estacional en series cortas (@sec-modelos-basicos).
+- Los intervalos de predicción **no** cubren lo que prometen, desde el primer paso
+  (@sec-bootstrapping).
+- El índice de complejidad predice la dificultad de una serie pero **no** cuál método la gana
+  (@sec-seleccion-escala).
+- El meta-modelo que aprende a elegir **no** generaliza a una frecuencia que no vio
+  (@sec-donde-funciona-seleccion).
+
+Ninguno de esos resultados es un teorema: son mediciones sobre M4, y el @sec-los-datos explicó por
+qué M4 no es una muestra del mundo. Lo que sí es general es el procedimiento —medir antes de creer,
+y publicar el número que salió— y el libro está armado para que rehacer cualquiera de esas
+mediciones sea cuestión de cambiar una celda.
+
+De lo que falta, tres cosas quedan explícitamente sin resolver.
+
+**El enfoque global no está demostrado acá.** El @sec-modelo-global lo explica: un catálogo de 34 series
+curadas no puede mostrar la ventaja de entrenar un modelo sobre miles. La tesis lo midió y este
+libro lo cita, pero no lo ejecuta.
+
+**Las redes profundas se citan, no se corren.** Es una consecuencia de la decisión de que todo
+compile en el navegador, y el @sec-entorno dice cómo salirse de ella.
+
+**Y la aplicación es otro proyecto.** Lo que este capítulo midió son sus cimientos: la cota de la
+@eq-cota-condicional, el ensamble de la @eq-ensamble-semillas, la selección condicionada a la
+estructura de la serie del @sec-seleccion-escala, el presupuesto de latencia y la validación de
+entrada. Lo que falta es todo lo demás, que es mucho.
+
+Si algo de todo esto te resultó útil, la parte útil no son los métodos: es la costumbre de no
+publicar un número sin haberlo medido, y de publicar el que salió.
+
+## Ejercicios
+
+Las soluciones están en el @sec-soluciones-25.
+
+**1.** La @tbl-cota-condicional usa el umbral $F_T > 0{,}8$ de la @eq-cota-condicional. Bárrelo
+entre 0 y 1 y mira cómo cambian el sMAPE medio y el peor daño. ¿Hay un umbral mejor, y qué tan
+sensible es el resultado a esa elección?
+
+**2.** La cota se midió con Holt, que se desbarranca fácil. Repítela con el ARIMA(1,1,1) y con la
+estrategia recursiva de Ridge del @sec-modelos-basicos. ¿La cota sigue ganando cuando el método base
+no produce absurdos?
+
+**3.** La @tbl-cota-intervalo mide cobertura y ancho. Agrega una tercera medida: la proporción del
+ancho del intervalo que cae en la región imposible. ¿Cuánto del intervalo del 95 % es, literalmente,
+espacio desperdiciado?
+
+**4.** Agrega tres casos a la @tbl-limites: una serie con un solo punto, una serie con todos los
+valores negativos y una serie donde el último valor es cero. Clasifica cada resultado en falla
+ruidosa, silenciosa o sin aviso.
+
+**5.** La @tbl-almacenamiento mide Ridge, boosting y un perceptrón. Agrega el bosque aleatorio y
+extra trees del @sec-modelos-basicos, que fueron los que mejor midieron ahí, y calcula el
+almacenamiento total para las 99.935 series con la estrategia que el @sec-prediccion recomendó.
+
+**6.** La @tbl-antiguedad congela el ajuste y lo compara con reajustar en cada origen. Agrega una
+tercera política —reajustar cada dos horizontes— y compara las tres por error y por cantidad de
+ajustes. ¿Dónde está el punto en que reajustar más seguido deja de pagar?
+
+## Referencias {.unnumbered}
+
+::: {#refs}
 :::
