@@ -366,6 +366,55 @@ Mientras no se haga, el defecto está explicado en el capítulo 12 a la vista de
 lector, con la medición de cuánto cuesta: Holt-Winters pasa de 2,799 a 7,634 de
 sMAPE por entrenar con el relleno, y `naive` no se entera.
 
+## Las tres defensas de la aplicación, ahora medidas
+
+El capítulo 25 mide las tres decisiones de la fase 2 que estaban tomadas sin
+número. Los resultados están sobre 34 series y 641 pasos del catálogo, y quedan
+acá porque son decisiones de producto, no solo de libro.
+
+**La cota de cordura es condicional a la tendencia, no fija.** Recortar el
+pronóstico al rango observado del histórico mejora el MASE medio de 36,7 a 16,2 y
+el peor caso de 356 a 116, pero daña las series con tendencia limpia —hasta 5,7
+puntos de sMAPE en una— porque su futuro está legítimamente arriba del máximo
+histórico. La regla que se queda deja espacio proporcional a la pendiente cuando
+la fuerza de la tendencia pasa de 0,8: mismo beneficio, peor daño de 0,7 puntos.
+El barrido del umbral está en las soluciones del capítulo y muestra que la regla
+no necesita calibración fina.
+
+**Al punto, cota estadística; al intervalo, solo cota física.** Es asimétrico y
+no era obvio. Sobre el pronóstico puntual la cota apretada gana. Sobre el
+intervalo del 95 % por bootstrap, acotarlo al rango observado cuesta 9,5 puntos
+de cobertura, sobre una cobertura que ya era del 81 % en vez del 95 %. Un piso en
+cero, en cambio, no cuesta nada: la cobertura queda idéntica y el intervalo se
+angosta un 23 %, porque el 23 % de su ancho estaba debajo de cero en series
+estrictamente positivas.
+
+**Tres a cinco semillas con la mediana.** Con el perceptrón que sí se puede
+entrenar en el navegador, la dispersión entre la mejor y la peor semilla es del
+54 % en la serie mediana. La mediana de cinco le gana a fijar `random_state=0` en
+21 de 31 series, no alcanza a la mejor semilla —que es un oráculo— y sobre todo
+evita caer en la peor. Cuesta 4,6 veces el tiempo de una sola y es paralelizable.
+
+---
+
+## El costo de `sample_entropy` era de implementación, no de algoritmo
+
+El capítulo 23 dejó dicho que el índice de complejidad, para calcularse en línea,
+había que vectorizarlo o precomputarlo. El capítulo 25 lo midió: **vectorizar el
+bucle interno alcanza.** La misma cuenta, con el mismo resultado hasta el último
+decimal, pasa de 4.095 ms a 104 ms en una serie de 2.794 puntos —un factor 39 que
+crece con la longitud— y las 16,6 horas del pipeline de la tesis caen al mismo
+ritmo.
+
+Lo que la vectorización no arregla es la complejidad $O(n^2)$: en la serie de
+9.919 puntos del catálogo la versión rápida todavía tarda 1,2 segundos. Para eso
+sigue haciendo falta el tope de 4.000 puntos que usó la tesis, que deja cualquier
+serie en unos 200 ms.
+
+Para la aplicación hay una salida mejor: el capítulo 24 midió que el clasificador
+que elige método **no pierde nada** al quedarse sin `sample_entropy`. Se calcula
+después de responder, o no se calcula.
+
 ---
 
 ## Lo que queda por decidir

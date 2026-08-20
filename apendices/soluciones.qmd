@@ -7774,3 +7774,440 @@ así que hay una selección de características apoyada en datos que después se
 efecto acá es chico —el hueco entre los dos conjuntos es de un punto y medio— pero es exactamente el
 tipo de fuga que el @sec-trampa advierte: **seleccionar variables es una decisión, y las decisiones se
 toman con el conjunto de validación.**
+
+## Capítulo 25 · De la evidencia a la producción {#sec-soluciones-25}
+
+```{python}
+#| echo: false
+import pickle
+import warnings
+
+from sklearn.ensemble import ExtraTreesRegressor as _ETR25
+from sklearn.ensemble import RandomForestRegressor as _RFR25
+from sklearn.linear_model import Ridge as _Ridge25
+from statsmodels.tsa.arima.model import ARIMA as _ARIMA25
+from statsmodels.tsa.holtwinters import Holt as _Holt25
+
+from libro.datos import catalogo as _catalogo25
+
+warnings.simplefilter("ignore")
+
+CAT25 = _catalogo25().set_index("serie")
+SERIES25 = [cargar(s) for s in CAT25.index]
+
+
+def mase25(real, pron, entrenamiento, m):
+    y = np.asarray(entrenamiento, float)
+    denom = (np.mean(np.abs(y[m:] - y[:-m])) if len(y) > m > 1
+             else np.mean(np.abs(np.diff(y))))
+    return float(np.mean(np.abs(np.asarray(real, float) - np.asarray(pron, float))) / denom)
+
+
+def ventanas25(y, p):
+    return np.array([y[i - p:i] for i in range(p, len(y))]), y[p:]
+
+
+def recursivo25(modelo, y, p, h):
+    historia, salida = list(y), []
+    for _ in range(h):
+        salida.append(float(modelo.predict(np.array(historia[-p:]).reshape(1, -1))[0]))
+        historia.append(salida[-1])
+    return np.array(salida)
+
+
+def rezagos25(serie):
+    return max(2 * max(serie.periodo_estacional, 1), 8)
+
+
+def pron_holt25(s):
+    y = s.entrenamiento.to_numpy(float)
+    return np.asarray(_Holt25(y, initialization_method="estimated").fit()
+                      .forecast(s.horizonte), float)
+
+
+def pron_arima25(s):
+    y = s.entrenamiento.to_numpy(float)
+    try:
+        return np.asarray(_ARIMA25(y, order=(1, 1, 1)).fit().forecast(s.horizonte), float)
+    except Exception:
+        return np.repeat(y[-1], s.horizonte)
+
+
+def pron_ridge25(s):
+    y = s.entrenamiento.to_numpy(float)
+    p = rezagos25(s)
+    if len(y) < p + 12:
+        return np.repeat(y[-1], s.horizonte)
+    X, objetivo = ventanas25(y, p)
+    return recursivo25(_Ridge25().fit(X, objetivo), y, p, s.horizonte)
+
+
+PRON25 = {nombre: {s.id: f(s) for s in SERIES25}
+          for nombre, f in [("Holt", pron_holt25),
+                            ("ARIMA(1,1,1)", pron_arima25),
+                            ("Ridge recursivo", pron_ridge25)]}
+
+
+def cota25(serie, y, umbral):
+    """La @eq-cota-condicional con el umbral como parámetro. None = sin cota."""
+    if umbral is None:
+        return -np.inf, np.inf
+    bajo, alto = y.min(), y.max()
+    delta = 0.0
+    if float(CAT25.loc[serie.id, "trend_strength"]) > umbral:
+        delta = abs(np.polyfit(np.arange(len(y)), y, 1)[0]) * serie.horizonte
+    L = bajo - delta
+    return (max(L, 0.0) if (y > 0).all() else L), alto + delta
+```
+
+### Ejercicio 1
+
+```{python}
+#| label: tbl-sol-25-1
+#| tbl-cap: "Barrido del umbral de fuerza de tendencia de la @eq-cota-condicional, con el pronóstico de Holt. El umbral 1,01 no se alcanza nunca: es la cota dura del rango observado."
+filas = []
+for umbral, etiqueta in [(0.0, "0,0"), (0.2, "0,2"), (0.4, "0,4"), (0.6, "0,6"),
+                         (0.8, "0,8"), (0.9, "0,9"), (0.95, "0,95"),
+                         (1.01, "1,01 (cota dura)")]:
+    smapes, danos, recortados = [], [], 0
+    for s in SERIES25:
+        y = s.entrenamiento.to_numpy(float)
+        real = s.prueba.to_numpy(float)
+        pron = PRON25["Holt"][s.id]
+        L, U = cota25(s, y, umbral)
+        acotado = np.clip(pron, L, U)
+        recortados += int(((pron < L) | (pron > U)).sum())
+        smapes.append(smape(real, acotado))
+        danos.append(smape(real, acotado) - smape(real, pron))
+    filas.append({"umbral": etiqueta, "pasos recortados": recortados,
+                  "sMAPE medio": np.mean(smapes), "peor daño": max(danos),
+                  "series que empeoran": int(sum(d > 0.01 for d in danos))})
+SOL25_1 = pd.DataFrame(filas).set_index("umbral")
+SOL25_1.round({"pasos recortados": 0, "sMAPE medio": 3, "peor daño": 2,
+               "series que empeoran": 0})
+```
+
+**El resultado es insensible al umbral en casi todo el rango, y salta solo en el extremo.** Entre 0 y
+0,95 el sMAPE medio se mueve
+`{python} f"{SOL25_1.loc['0,0':'0,95', 'sMAPE medio'].max() - SOL25_1.loc['0,0':'0,95', 'sMAPE medio'].min():.3f}"`
+puntos y el peor daño no cambia. Con el umbral en 1,01 —que ninguna serie supera, o sea la cota dura
+del rango observado— el peor daño se multiplica por
+`{python} f"{SOL25_1.loc['1,01 (cota dura)', 'peor daño'] / SOL25_1.loc['0,8', 'peor daño']:.1f}"`.
+
+Eso pasa porque la fuerza de la tendencia del catálogo no está repartida: `{python} f"{int((CAT25['trend_strength'] > 0.9).sum())}"`
+de las `{python} f"{len(CAT25)}"` series tienen fuerza arriba de 0,9 y
+`{python} f"{int((CAT25['trend_strength'] < 0.4).sum())}"` la tienen debajo de 0,4. Es una variable
+casi binaria, y cualquier umbral en el medio parte igual el conjunto.
+
+La conclusión práctica es cómoda: **la regla no necesita calibración fina.** Lo que importa es
+distinguir "tiene tendencia" de "no tiene", no dónde exactamente se pone el corte. Si en otro
+conjunto la fuerza estuviera repartida de manera continua, esto habría que rehacerlo, y la
+@tbl-sol-25-1 es la manera de comprobarlo.
+
+### Ejercicio 2
+
+```{python}
+#| label: tbl-sol-25-2
+#| tbl-cap: "La cota condicional con tres métodos base distintos, sobre las 34 series del catálogo."
+filas = []
+for nombre in PRON25:
+    for etiqueta, umbral in [("sin cota", None), ("condicional", 0.8)]:
+        smapes, mases, recortados = [], [], 0
+        for s in SERIES25:
+            y = s.entrenamiento.to_numpy(float)
+            real = s.prueba.to_numpy(float)
+            pron = PRON25[nombre][s.id]
+            L, U = cota25(s, y, umbral)
+            recortados += int(((pron < L) | (pron > U)).sum())
+            acotado = np.clip(pron, L, U)
+            smapes.append(smape(real, acotado))
+            mases.append(mase25(real, acotado, y, max(s.periodo_estacional, 1)))
+        filas.append({"método": nombre, "regla": etiqueta,
+                      "pasos recortados": recortados,
+                      "sMAPE medio": np.mean(smapes), "MASE medio": np.mean(mases),
+                      "MASE máximo": max(mases)})
+SOL25_2 = pd.DataFrame(filas).set_index(["método", "regla"])
+SOL25_2.round({"pasos recortados": 0, "sMAPE medio": 2, "MASE medio": 2,
+               "MASE máximo": 1})
+```
+
+**El valor de la cota es proporcional a cuánto puede desbarrancarse el método base, y con un método
+acotado no cambia nada.** Los números lo dicen mejor:
+
+- Con **Holt**, que extrapola tendencias sin freno, recorta
+  `{python} f"{int(SOL25_2.loc[('Holt', 'condicional'), 'pasos recortados'])}"` de 641 pasos y baja el
+  MASE medio de `{python} f"{SOL25_2.loc[('Holt', 'sin cota'), 'MASE medio']:.1f}"` a
+  `{python} f"{SOL25_2.loc[('Holt', 'condicional'), 'MASE medio']:.1f}"`.
+- Con **ARIMA(1,1,1)** recorta `{python} f"{int(SOL25_2.loc[('ARIMA(1,1,1)', 'condicional'), 'pasos recortados'])}"`
+  pasos y la mejora es del
+  `{python} f"{100 * (1 - SOL25_2.loc[('ARIMA(1,1,1)', 'condicional'), 'MASE medio'] / SOL25_2.loc[('ARIMA(1,1,1)', 'sin cota'), 'MASE medio']):.0f}"` %.
+- Con **Ridge recursivo** recorta
+  `{python} f"{int(SOL25_2.loc[('Ridge recursivo', 'condicional'), 'pasos recortados'])}"` pasos, el
+  sMAPE mejora `{python} f"{SOL25_2.loc[('Ridge recursivo', 'sin cota'), 'sMAPE medio'] - SOL25_2.loc[('Ridge recursivo', 'condicional'), 'sMAPE medio']:.2f}"`
+  puntos y el MASE empeora
+  `{python} f"{SOL25_2.loc[('Ridge recursivo', 'condicional'), 'MASE medio'] - SOL25_2.loc[('Ridge recursivo', 'sin cota'), 'MASE medio']:.2f}"`:
+  las dos métricas se mueven en el segundo decimal y en direcciones opuestas, que es la manera
+  numérica de decir que no pasó nada.
+
+Ridge recursivo no necesita la cota porque **ya la tiene incorporada**: el @sec-techo mostró que
+todos los modelos acotados de aprendizaje automático no pueden pronosticar fuera del rango que
+vieron en el entrenamiento. Lo que en el @sec-modelos-basicos era una limitación acá es una defensa
+gratis.
+
+Eso reformula la recomendación del capítulo. La cota no es una mejora universal: **es un seguro cuyo
+valor depende de cuánto puede desbarrancarse el método base.** Con métodos extrapolativos vale
+mucho, con métodos acotados no vale nada, y como no cuesta nada donde no hace falta, conviene
+ponerla siempre.
+
+### Ejercicio 3
+
+```{python}
+#| label: tbl-sol-25-3
+#| tbl-cap: "Qué parte del ancho del intervalo del 95 % del naive estacional cae debajo de cero, en las series de histórico estrictamente positivo."
+rng = np.random.default_rng(42)
+
+
+def paso_snaive25(y, m):
+    return y[-m] if m > 1 else y[-1]
+
+
+def residuos25(y, m):
+    if m <= 1:
+        ajustado = np.concatenate([[np.nan], y[:-1]])
+    else:
+        ajustado = np.concatenate([np.full(m, np.nan), y[:-m]])
+    d = y - ajustado
+    return d[~np.isnan(d)]
+
+
+B = 500
+filas, ancho_total, imposible_total = [], 0.0, 0.0
+for s in SERIES25:
+    y = s.entrenamiento.to_numpy(float)
+    if not (y > 0).all():
+        continue
+    h, m = s.horizonte, max(s.periodo_estacional, 1)
+    r = residuos25(y, m)
+    trayectorias = np.zeros((B, h))
+    for b in range(B):
+        historia = list(y)
+        for _ in range(h):
+            historia.append(paso_snaive25(np.array(historia), m) + rng.choice(r))
+        trayectorias[b] = historia[-h:]
+    bajo = np.quantile(trayectorias, 0.025, axis=0)
+    alto = np.quantile(trayectorias, 0.975, axis=0)
+    ancho = float(np.sum(alto - bajo))
+    imposible = float(np.sum(np.clip(-bajo, 0, None)))
+    ancho_total += ancho
+    imposible_total += imposible
+    filas.append({"serie": s.id, "% del ancho debajo de cero": 100 * imposible / ancho})
+SOL25_3 = pd.DataFrame(filas).set_index("serie").sort_values(
+    "% del ancho debajo de cero", ascending=False)
+SOL25_3.head(8).round(1)
+```
+
+**El `{python} f"{100 * imposible_total / ancho_total:.0f}"` % del ancho total del intervalo del
+95 % está en la región imposible**, y en la peor serie del catálogo es el
+`{python} f"{SOL25_3['% del ancho debajo de cero'].max():.0f}"` %: más de la mitad del intervalo
+cubre valores que la cantidad no puede tomar.
+
+Puesto junto con la @tbl-cota-intervalo del capítulo, el cálculo cierra: recortar en cero angosta el
+intervalo un `{python} f"{100 * imposible_total / ancho_total:.0f}"` % sin perder ni un punto de
+cobertura, porque lo que se recorta es exactamente espacio donde nunca cayó una observación.
+
+Y hay una lectura menos cómoda. Un intervalo que dedica un cuarto de su ancho a valores imposibles
+está mal calibrado por construcción, no por mala suerte: **el bootstrap del @sec-bootstrapping
+simula sobre la escala original y nada en el procedimiento sabe que la serie es positiva.** La
+alternativa de fondo es simular en escala logarítmica, donde la restricción es automática porque
+$\exp$ de cualquier cosa es positivo, y no recortar nada. Este libro no la mide —el
+@sec-bootstrapping simula siempre en la escala original— y queda como la manera correcta de resolver
+lo que el recorte tapa.
+
+### Ejercicio 4
+
+```{python}
+#| label: tbl-sol-25-4
+#| tbl-cap: "Tres entradas más que M4 no contiene, con la misma clasificación de la @tbl-limites."
+UNO = np.array([7.0])
+NEGATIVOS = np.array([-3.0, -5, -2, -8, -4, -6, -1, -9, -3, -7, -2, -5])
+TERMINA_EN_CERO = np.array([5.0, 6, 4, 7, 5, 6, 4, 7, 5, 6, 4, 0])
+
+
+def intentar25(f):
+    try:
+        r = np.atleast_1d(np.asarray(f(), float))
+    except Exception as e:
+        return f"{type(e).__name__}", "falla ruidosa"
+    if np.isnan(r).any():
+        return "devuelve nan", "falla silenciosa"
+    if np.isinf(r).any():
+        return "devuelve inf", "falla silenciosa"
+    return f"devuelve {np.round(r[0], 2)}", "sin aviso"
+
+
+CASOS25 = [
+    ("un solo punto", "Holt",
+     lambda: _Holt25(UNO, initialization_method="estimated").fit().forecast(3)),
+    ("un solo punto", "naive", lambda: np.repeat(UNO[-1], 3)),
+    ("un solo punto", "coeficiente de variación", lambda: [UNO.std() / abs(UNO.mean())]),
+    ("todos negativos", "logaritmo", lambda: np.log(NEGATIVOS)),
+    ("todos negativos", "sMAPE", lambda: [smape([-4.0, -5], [-4.5, -5.5])]),
+    ("todos negativos", "piso en cero", lambda: np.clip(np.array([-4.0, -5]), 0, None)),
+    ("último valor cero", "naive", lambda: np.repeat(TERMINA_EN_CERO[-1], 3)),
+    ("último valor cero", "sMAPE del naive",
+     lambda: [smape([5.0, 6, 4], np.repeat(TERMINA_EN_CERO[-1], 3))]),
+    ("último valor cero", "MASE del naive",
+     lambda: [mase25([5.0, 6, 4], np.repeat(TERMINA_EN_CERO[-1], 3), TERMINA_EN_CERO, 1)]),
+]
+SOL25_4 = pd.DataFrame([
+    {"entrada": e, "herramienta": h, "resultado": intentar25(f)[0],
+     "tipo": intentar25(f)[1]}
+    for e, h, f in CASOS25
+]).set_index(["entrada", "herramienta"])
+SOL25_4
+```
+
+Los tres casos agregan algo que la tabla del capítulo no tenía.
+
+**Un solo punto.** Holt levanta un `IndexError` —no puede estimar una tendencia con una
+observación— y el naive contesta `{python} f"{UNO[-1]:.0f}"`, que es la respuesta correcta: con un
+dato, el mejor pronóstico es ese dato. Lo peligroso es el coeficiente de variación, que devuelve
+`{python} f"{UNO.std() / abs(UNO.mean()):.1f}"`: **declara que la serie no tiene variabilidad**,
+cuando lo que pasa es que no hay con qué medirla. Una característica calculada sobre un punto es un
+número inventado con formato de dato.
+
+**Todos negativos.** El logaritmo devuelve `nan`, esperable. El sMAPE, en cambio, **funciona**:
+`{python} f"{smape([-4.0, -5], [-4.5, -5.5]):.1f}"`, porque usa valores absolutos y la serie es
+consistentemente negativa. Y el piso en cero destruye el pronóstico: lo lleva a cero en una serie
+que nunca fue positiva. Es la confirmación de lo que el capítulo advierte sobre el piso: **cero es una
+cota física solo para las cantidades que no pueden ser negativas**, y saber si esta lo es requiere
+saber qué mide la serie, no mirarla.
+
+**Último valor cero.** El naive pronostica cero, el sMAPE da
+`{python} f"{smape([5.0, 6, 4], np.repeat(TERMINA_EN_CERO[-1], 3)):.0f}"` —el máximo, saturado— y el
+MASE da `{python} f"{mase25([5.0, 6, 4], np.repeat(TERMINA_EN_CERO[-1], 3), TERMINA_EN_CERO, 1):.1f}"`.
+Otra vez la asimetría del @sec-cota-cordura: el sMAPE dice "lo peor posible" y el MASE dice "dos
+veces y media el naive". El segundo número es el informativo.
+
+### Ejercicio 5
+
+```{python}
+#| label: tbl-sol-25-5
+#| tbl-cap: "Almacenamiento de los modelos que mejor midieron en el @sec-modelos-basicos, sobre la serie H272, y extrapolado a las 99.935 series de M4."
+s25 = cargar("H272")
+y25 = s25.entrenamiento.to_numpy(float)
+P25, H25 = 48, s25.horizonte
+X25, obj25 = ventanas25(y25, P25)
+
+filas = []
+for nombre, constructor in [
+    ("Ridge", _Ridge25),
+    ("bosque aleatorio", lambda: _RFR25(n_estimators=60, random_state=0)),
+    ("extra trees", lambda: _ETR25(n_estimators=60, random_state=0)),
+]:
+    bytes_uno = len(pickle.dumps(constructor().fit(X25, obj25)))
+    filas.append({"modelo": nombre,
+                  "un modelo (kB)": bytes_uno / 1e3,
+                  "recursiva, 99.935 series (GB)": bytes_uno * 99_935 / 1e9,
+                  "directa, 99.935 series (GB)": bytes_uno * H25 * 99_935 / 1e9})
+SOL25_5 = pd.DataFrame(filas).set_index("modelo")
+SOL25_5.round(2)
+```
+
+**Extra trees, que fue el que mejor midió en el @sec-modelos-basicos, es el más caro de guardar por
+un factor de siete mil contra Ridge.** Con la estrategia recursiva —la que el @sec-prediccion
+recomendó— las 99.935 series de M4 piden
+`{python} f"{SOL25_5.loc['extra trees', 'recursiva, 99.935 series (GB)']:.0f}"` GB, contra
+`{python} f"{SOL25_5.loc['Ridge', 'recursiva, 99.935 series (GB)'] * 1000:.0f}"` MB de Ridge.
+
+La razón es estructural: un bosque guarda la estructura de sus árboles, y con
+`{python} f"{len(X25)}"` filas de entrenamiento los árboles de extra trees crecen hasta las hojas
+puras. Ridge guarda `{python} f"{P25}"` coeficientes y un intercepto, sin importar cuántos datos vio.
+
+Puesto junto con el resultado de precisión del @sec-modelos-basicos, queda un intercambio explícito:
+**el modelo más preciso del libro cuesta cuatro órdenes de magnitud más en almacenamiento que el
+segundo, y la diferencia en sMAPE era de pocos puntos.** Para un sistema que sirve pronósticos, esa
+comparación no la decide la métrica de error sola.
+
+Y hay una salida que este libro no puede medir pero conviene nombrar: un **modelo global** —uno solo
+para todas las series, como el del @sec-modelo-global— convierte el almacenamiento de $S \cdot b$ en
+$b$. Con extra trees eso sería un archivo de
+`{python} f"{SOL25_5.loc['extra trees', 'un modelo (kB)'] / 1000:.1f}"` MB en lugar de
+`{python} f"{SOL25_5.loc['extra trees', 'recursiva, 99.935 series (GB)']:.0f}"` GB.
+
+### Ejercicio 6
+
+```{python}
+#| label: tbl-sol-25-6
+#| tbl-cap: "Tres políticas de reajuste comparadas sobre los mismos orígenes, con Ridge y estrategia recursiva."
+K25 = 6
+registro, ajustes = [], {"congelado": 0, "cada dos horizontes": 0, "cada origen": 0}
+for s in SERIES25:
+    y = s.entrenamiento.to_numpy(float)
+    h, p = s.horizonte, rezagos25(s)
+    n0 = len(y) - K25 * h
+    if n0 < 4 * p:
+        continue
+    X, objetivo = ventanas25(y[:n0], p)
+    congelado = _Ridge25().fit(X, objetivo)
+    ajustes["congelado"] += 1
+    cada_dos = congelado
+    ajustes["cada dos horizontes"] += 1
+    for k in range(K25):
+        inicio = n0 + k * h
+        real = y[inicio:inicio + h]
+        X_k, objetivo_k = ventanas25(y[:inicio], p)
+        if k > 0 and k % 2 == 0:
+            cada_dos = _Ridge25().fit(X_k, objetivo_k)
+            ajustes["cada dos horizontes"] += 1
+        nuevo = _Ridge25().fit(X_k, objetivo_k)
+        ajustes["cada origen"] += 1
+        registro.append({
+            "antigüedad": k,
+            "congelado": smape(real, recursivo25(congelado, y[:inicio], p, h)),
+            "cada dos horizontes": smape(real, recursivo25(cada_dos, y[:inicio], p, h)),
+            "cada origen": smape(real, recursivo25(nuevo, y[:inicio], p, h)),
+        })
+REG25 = pd.DataFrame(registro)
+POLITICAS = ["congelado", "cada dos horizontes", "cada origen"]
+SOL25_6 = pd.DataFrame({
+    "sMAPE medio": REG25[POLITICAS].mean(),
+    "ajustes": pd.Series(ajustes),
+})
+SOL25_6["puntos ganados contra el congelado"] = (
+    SOL25_6.loc["congelado", "sMAPE medio"] - SOL25_6["sMAPE medio"])
+SOL25_6.round(2)
+```
+
+```{python}
+#| label: tbl-sol-25-6b
+#| tbl-cap: "Las mismas tres políticas por antigüedad del ajuste."
+REG25.groupby("antigüedad")[POLITICAS].mean().round(2)
+```
+
+**El punto en que reajustar más seguido deja de pagar está entre las dos primeras políticas.**
+Reajustar cada dos horizontes cuesta
+`{python} f"{int(SOL25_6.loc['cada dos horizontes', 'ajustes'] - SOL25_6.loc['congelado', 'ajustes'])}"`
+ajustes extra y recupera
+`{python} f"{SOL25_6.loc['congelado', 'sMAPE medio'] - SOL25_6.loc['cada dos horizontes', 'sMAPE medio']:.2f}"`
+puntos de sMAPE. Pasar de ahí a reajustar en cada origen cuesta
+`{python} f"{int(SOL25_6.loc['cada origen', 'ajustes'] - SOL25_6.loc['cada dos horizontes', 'ajustes'])}"`
+ajustes más y recupera solo
+`{python} f"{SOL25_6.loc['cada dos horizontes', 'sMAPE medio'] - SOL25_6.loc['cada origen', 'sMAPE medio']:.2f}"`
+puntos: la mitad más de ajustes para
+`{python} f"{(SOL25_6.loc['congelado', 'sMAPE medio'] - SOL25_6.loc['cada dos horizontes', 'sMAPE medio']) / (SOL25_6.loc['cada dos horizontes', 'sMAPE medio'] - SOL25_6.loc['cada origen', 'sMAPE medio']):.0f}"`
+veces menos ganancia.
+
+O sea que **la mayor parte del beneficio de reajustar se consigue reajustando poco**, y eso vale más
+de lo que parece: con el boosting de la @tbl-almacenamiento, donde cada ajuste cuesta segundos y
+cientos de kilobytes, la política intermedia captura casi todo el beneficio a la mitad del costo.
+
+La @tbl-sol-25-6b muestra de dónde sale la diferencia. Con el ajuste recién hecho las tres políticas
+son iguales, y la brecha se abre en las antigüedades altas, donde el congelado ya perdió el contacto
+con los datos. La política intermedia nunca acumula más de dos horizontes de antigüedad, y eso
+alcanza.
+
+Una advertencia sobre este experimento, la misma que el capítulo hace sobre la @tbl-antiguedad:
+`{python} f"{REG25['antigüedad'].count() // K25}"` series y `{python} f"{len(REG25)}"` orígenes son
+pocos, y el promedio de sMAPE mezcla series de escalas distintas. El orden de las tres políticas es
+estable, pero los tamaños de las diferencias no hay que tomarlos como definitivos.
