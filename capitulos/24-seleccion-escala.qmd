@@ -1,7 +1,510 @@
 # Selección de modelos a escala {#sec-seleccion-escala}
 
-Cómo elegir un modelo cuando hay miles de series y el ranking depende del azar.
+```{python}
+#| echo: false
+import warnings
 
-::: {.callout-note appearance="simple"}
-Capítulo en preparación.
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+from sklearn.dummy import DummyClassifier
+from sklearn.ensemble import ExtraTreesClassifier, ExtraTreesRegressor
+from sklearn.model_selection import train_test_split
+
+from libro.datos import metadatos
+from libro.graficos import COLORES, mostrar
+
+warnings.simplefilter("ignore")
+```
+
+El @sec-particiones resolvió cómo elegir un método para **una** serie: apartar validación, comparar
+candidatos, reajustar. Y midió lo que cuesta: el optimismo de la @eq-optimismo, y $K$ ajustes por
+serie más $K$ de validación.
+
+Este capítulo trata la otra situación, que es la de cualquier trabajo real: **hay 99.935 series y no
+alcanza el presupuesto para probar todos los métodos en cada una.** La pregunta es si se puede
+decidir mirando la serie en vez de probando.
+
+```{python}
+#| echo: false
+ERRORES = {"naive": "error_naive_smape",
+           "snaive": "error_snaive_smape",
+           "ARIMA": "error_arima_smape"}
+NOMBRES = list(ERRORES)
+POSICION = {n: i for i, n in enumerate(NOMBRES)}
+
+_md = metadatos()
+# En las frecuencias con m = 1 el naive estacional es el naive: M4 declara anual,
+# semanal y diaria no estacionales (@sec-datos-temporales).
+_md = _md.assign(
+    error_snaive_smape=_md["error_snaive_smape"].fillna(_md["error_naive_smape"]))
+D = _md.dropna(subset=list(ERRORES.values())).copy()
+
+E = D[list(ERRORES.values())].to_numpy().astype(float)
+D["ganador"] = [NOMBRES[i] for i in E.argmin(axis=1)]
+D["oráculo"] = E.min(axis=1)
+
+
+def error_de(eleccion, matriz=E):
+    """sMAPE que se obtiene al elegir un método por serie.
+
+    Se convierte a float64 porque los metadatos guardan float32 para ahorrar
+    espacio, y redondear un float32 deja decimales espurios en las tablas.
+    """
+    filas = np.arange(len(matriz))
+    return matriz[filas, [POSICION[m] for m in eleccion]].astype(float)
+```
+
+## El techo y el piso {#sec-techo-piso}
+
+Los metadatos que viajan en el repositorio traen el sMAPE de tres métodos para las 99.935 series:
+el naive, el naive estacional y un ARIMA. Con eso se puede acotar el problema antes de intentar
+resolverlo.
+
+```{python}
+#| label: tbl-techo-piso
+#| tbl-cap: "Las tres estrategias fijas y el oráculo, sobre las 99.935 series de M4."
+filas = []
+for nombre, columna in ERRORES.items():
+    filas.append({"estrategia": f"siempre {nombre}",
+                  "sMAPE medio": D[columna].mean(),
+                  "sMAPE mediano": D[columna].median()})
+filas.append({"estrategia": "oráculo: el mejor de los tres en cada serie",
+              "sMAPE medio": D["oráculo"].mean(),
+              "sMAPE mediano": D["oráculo"].median()})
+
+techo_piso = pd.DataFrame(filas).set_index("estrategia")
+techo_piso.round(4)
+```
+
+```{python}
+#| label: tbl-ganadores
+#| tbl-cap: "Cuál de los tres métodos gana en cada serie."
+ganadores = D["ganador"].value_counts().rename("series").to_frame()
+ganadores["% de las series"] = (100 * ganadores["series"] / len(D)).round(1)
+ganadores
+```
+
+Los dos números que definen el problema son **0,1320 y 0,1092**.
+
+El primero es el mejor que se consigue **sin elegir**: usar siempre ARIMA. El segundo es el oráculo,
+que elige el mejor método en cada serie con el error de prueba a la vista. La diferencia es del
+**17,3 %**, y todo lo que sigue es un intento de recuperar parte de ese hueco.
+
+Vale mirar la @tbl-ganadores antes de seguir, porque acota la expectativa. ARIMA gana en el 43,5 %
+de las series, el naive en el 33,6 % y el naive estacional en el 22,9 %. **No hay un método que
+domine**: en más de la mitad de las series el mejor no es el que uno elegiría por omisión.
+
+## Las reglas obvias no alcanzan {#sec-reglas-obvias}
+
+El primer intento razonable es una regla por grupos: elegir el mejor método dentro de cada
+frecuencia, o dentro de cada grupo del clustering del @sec-caso-m4.
+
+```{python}
+#| label: tbl-reglas
+#| tbl-cap: "Reglas de grupo, ajustadas sobre las mismas series donde se evalúan. Son optimistas por construcción y aun así ganan poco."
+def mejor_por_grupo(columna_grupo):
+    eleccion = {}
+    for grupo, sub in D.groupby(columna_grupo):
+        medias = {n: sub[ERRORES[n]].mean() for n in NOMBRES}
+        eleccion[grupo] = min(medias, key=medias.get)
+    return eleccion
+
+
+regla_frecuencia = mejor_por_grupo("frecuencia")
+regla_cluster = mejor_por_grupo("cluster")
+
+mejor_fijo = min(D[c].mean() for c in ERRORES.values())
+filas = [
+    {"regla": "siempre ARIMA (la mejor fija)", "sMAPE medio": mejor_fijo},
+    {"regla": "el mejor método de cada frecuencia",
+     "sMAPE medio": error_de([regla_frecuencia[f] for f in D["frecuencia"]]).mean()},
+    {"regla": "el mejor método de cada grupo del clustering",
+     "sMAPE medio": error_de([regla_cluster[c] for c in D["cluster"]]).mean()},
+    {"regla": "oráculo", "sMAPE medio": D["oráculo"].mean()},
+]
+reglas = pd.DataFrame(filas).set_index("regla")
+reglas["% del hueco recuperado"] = (
+    100 * (mejor_fijo - reglas["sMAPE medio"]) / (mejor_fijo - D["oráculo"].mean())
+).round(1)
+reglas.round(4)
+```
+
+```{python}
+#| label: tbl-regla-frecuencia
+#| tbl-cap: "Qué método elige la regla por frecuencia."
+pd.DataFrame({"método elegido": regla_frecuencia}).rename_axis("frecuencia")
+```
+
+**La regla por frecuencia recupera el 7 % del hueco y la del clustering, cero.**
+
+El cero merece explicación porque es un resultado negativo sobre una herramienta del propio
+proyecto. El clustering del @sec-caso-m4 separa las series en un grupo regular y uno complejo, y esa
+separación describe muy bien la **dificultad**: el @sec-indice-complejidad midió que el error difiere
+por un factor de 3,27 entre cuartiles del índice. Pero **ARIMA es el mejor método en los dos
+grupos**, así que la regla elige ARIMA siempre y no cambia nada.
+
+Y la regla por frecuencia gana poco por el mismo motivo: elige ARIMA en cuatro de las seis
+frecuencias.
+
+::: {.callout-important}
+## Predecir la dificultad y predecir el ganador son dos problemas distintos
+
+Es la idea central de este capítulo y conviene enunciarla antes de las mediciones que la sostienen.
+
+Un índice que ordena las series por **cuánto error van a tener** —lo que el @sec-caso-m4 mostró que
+el índice de complejidad hace bien, con $R^2$ de 0,54 en la frecuencia horaria— no dice nada sobre
+**cuál método va a andar mejor**. Una serie difícil es difícil para todos los métodos.
+
+Elegir método requiere una señal distinta: no cuánta estructura tiene la serie, sino **de qué tipo
+es**. Una serie con estacionalidad fuerte favorece a un método estacional; una caminata aleatoria
+favorece al naive. Las dos pueden tener el mismo índice de complejidad.
+:::
+
+## Aprender a elegir {#sec-aprender-a-elegir}
+
+La alternativa es tratar la elección como un problema de aprendizaje supervisado: **una fila por
+serie, las características como entrada y el nombre del método ganador como respuesta.** Es lo que
+@monteromanso2020 hicieron para quedar segundos en M4 y lo que @talagala2023 formalizaron como
+meta-aprendizaje.
+
+La diferencia con el resto del libro es que acá la unidad de observación **es la serie**, no el
+período. Y como hay 99.935 series, hay datos de sobra: es el único experimento del libro que está en
+el régimen donde el aprendizaje automático funciona.
+
+```{python}
+#| echo: false
+CARACTERISTICAS = [c for c in D.columns
+                   if c.startswith("z_")
+                   or c in ("complexity_index", "trend_strength", "seasonal_strength",
+                            "adf_pvalue", "kpss_pvalue", "diff_var_ratio",
+                            "change_points_per_length", "dominant_energy_ratio",
+                            "perm_entropy", "sample_entropy", "lz_complexity",
+                            "n_entrenamiento", "periodo_estacional", "horizonte")]
+
+X = D[CARACTERISTICAS].fillna(D[CARACTERISTICAS].median())
+ENTRENA, PRUEBA = train_test_split(np.arange(len(D)), test_size=0.3,
+                                   random_state=42, stratify=D["frecuencia"])
+E_PRUEBA = E[PRUEBA]
+GANADOR_PRUEBA = D["ganador"].iloc[PRUEBA].to_numpy()
+MEJOR_FIJO_PRUEBA = min(D[c].iloc[PRUEBA].mean() for c in ERRORES.values())
+ORACULO_PRUEBA = E_PRUEBA.min(axis=1).mean()
+HUECO = MEJOR_FIJO_PRUEBA - ORACULO_PRUEBA
+
+
+def recupera(errores):
+    return 100 * (MEJOR_FIJO_PRUEBA - np.mean(errores)) / HUECO
+
+
+CLASIFICADOR = ExtraTreesClassifier(n_estimators=200, random_state=0, n_jobs=1,
+                                    min_samples_leaf=5)
+CLASIFICADOR.fit(X.iloc[ENTRENA], D["ganador"].iloc[ENTRENA])
+PRED = CLASIFICADOR.predict(X.iloc[PRUEBA])
+ERR_CLASIFICADOR = error_de(PRED, E_PRUEBA)
+
+_regresores = {}
+for _n, _c in ERRORES.items():
+    _regresores[_n] = ExtraTreesRegressor(n_estimators=100, random_state=0, n_jobs=1,
+                                          min_samples_leaf=5)
+    _regresores[_n].fit(X.iloc[ENTRENA], D[_c].iloc[ENTRENA])
+_predichos = np.column_stack([_regresores[_n].predict(X.iloc[PRUEBA])
+                              for _n in NOMBRES])
+ELECCION_REGRESION = [NOMBRES[i] for i in _predichos.argmin(axis=1)]
+ERR_REGRESION = error_de(ELECCION_REGRESION, E_PRUEBA)
+```
+
+```{python}
+#| label: tbl-meta
+#| tbl-cap: "Dos maneras de aprender a elegir, evaluadas sobre el 30 % de las series que el modelo no vio. La partición está estratificada por frecuencia."
+mayoria = DummyClassifier(strategy="most_frequent").fit(
+    X.iloc[ENTRENA], D["ganador"].iloc[ENTRENA])
+
+filas = []
+for nombre, columna in ERRORES.items():
+    filas.append({"estrategia": f"siempre {nombre}",
+                  "sMAPE medio": D[columna].iloc[PRUEBA].mean(),
+                  "acierta el ganador %": 100 * np.mean(
+                      GANADOR_PRUEBA == nombre)})
+filas += [
+    {"estrategia": "clasificar el ganador",
+     "sMAPE medio": ERR_CLASIFICADOR.mean(),
+     "acierta el ganador %": 100 * np.mean(PRED == GANADOR_PRUEBA)},
+    {"estrategia": "predecir el error de cada método y tomar el menor",
+     "sMAPE medio": ERR_REGRESION.mean(),
+     "acierta el ganador %": 100 * np.mean(
+         np.array(ELECCION_REGRESION) == GANADOR_PRUEBA)},
+    {"estrategia": "oráculo", "sMAPE medio": ORACULO_PRUEBA,
+     "acierta el ganador %": 100.0},
+]
+meta = pd.DataFrame(filas).set_index("estrategia")
+meta["% del hueco recuperado"] = (
+    100 * (MEJOR_FIJO_PRUEBA - meta["sMAPE medio"]) / HUECO)
+meta.astype(float).round({"sMAPE medio": 4, "acierta el ganador %": 1,
+                          "% del hueco recuperado": 1})
+```
+
+Dos resultados, y el segundo es el interesante.
+
+**Aprender a elegir funciona.** El clasificador acierta el ganador en el 55,6 % de las series contra
+el 43,3 % de la clase mayoritaria, y baja el sMAPE de 0,1314 a 0,1223: **recupera el 40,9 % del
+hueco** entre la mejor estrategia fija y el oráculo.
+
+**Y predecir el error funciona un poco mejor mientras acierta bastante menos.** La segunda variante
+ajusta un regresor por método, predice los tres errores y toma el menor. Acierta el ganador en solo
+el 49,2 % de las series —seis puntos menos que el clasificador— y consigue un sMAPE de 0,1219, que
+recupera el 42,8 % del hueco.
+
+::: {.callout-tip}
+## Acertar el ganador no es el objetivo
+
+La @tbl-meta contiene una lección que se generaliza a cualquier problema de selección: **la
+exactitud al identificar al mejor candidato no es la métrica que importa.**
+
+Un método que acierta menos veces y pierde menos cuando se equivoca es mejor. La variante de
+regresión no sabe cuál gana con tanta precisión, y en cambio sabe **cuánto se pierde** con cada
+opción, así que cuando se equivoca lo hace entre dos métodos parecidos y nunca elige el desastre.
+
+Es el mismo argumento que el @sec-largo-validacion encontró midiendo largos de validación —donde la
+tasa de aciertos iba en dirección opuesta al error— y que el @sec-soluciones-19 encontró comparando
+*extra trees* con el bosque. Aparece tan seguido que conviene tenerlo como reflejo: **cuando una
+tabla trae exactitud y error, la que decide es el error.**
+:::
+
+## Qué características importan {#sec-que-importa}
+
+```{python}
+#| label: fig-importancias
+#| fig-cap: "Importancia de cada característica en el clasificador. El índice de complejidad, que el @sec-caso-m4 mostró que predice la dificultad, queda en el puesto 18 de 21."
+importancias = (pd.Series(CLASIFICADOR.feature_importances_,
+                          index=CARACTERISTICAS)
+                .sort_values(ascending=True))
+
+fig = go.Figure(go.Bar(
+    x=importancias.to_numpy(), y=importancias.index, orientation="h",
+    marker_color=[COLORES["prueba"] if n == "complexity_index"
+                  else COLORES["observado"] for n in importancias.index],
+))
+fig.update_xaxes(title="importancia en el clasificador")
+mostrar(fig, alto=560)
+```
+
+```{python}
+#| label: tbl-importancias
+#| tbl-cap: "Las siete características más informativas y el lugar donde queda el índice de complejidad."
+orden = importancias.sort_values(ascending=False)
+tabla = orden.head(7).rename("importancia").to_frame()
+tabla["puesto"] = range(1, 8)
+indice = pd.DataFrame({"importancia": [orden["complexity_index"]],
+                       "puesto": [list(orden.index).index("complexity_index") + 1]},
+                      index=["complexity_index"])
+pd.concat([tabla, indice]).round(4)
+```
+
+La figura confirma el recuadro del @sec-reglas-obvias con números y con una ironía.
+
+**La característica más informativa es la fuerza de la estacionalidad**, con una importancia de 0,155:
+casi el doble que la segunda. Tiene todo el sentido, porque es exactamente la señal que distingue
+cuándo conviene un método estacional de cuándo conviene el naive. Le siguen la entropía de
+permutación, el coeficiente de Hurst y el cociente de puntos de giro: **medidas de qué tipo de serie
+es, no de cuán difícil es.**
+
+**Y el índice de complejidad queda en el puesto 18 de 21**, con una importancia de 0,033: menos de la
+cuarta parte de la primera.
+
+Eso no contradice el @sec-caso-m4, lo complementa. El índice es un buen predictor de la **magnitud**
+del error —ahí explicaba el 54 % de la varianza en la frecuencia horaria— y un mal predictor del
+**ganador**. Son dos preguntas distintas y el índice fue construido para la primera: su definición,
+por componentes principales sobre 29 descriptores, lo hace un resumen escalar de dificultad, y un
+escalar no puede distinguir *tipos* de serie.
+
+::: {.callout-warning}
+## Consecuencia para la aplicación de pronóstico
+
+El proyecto tiene tomada la decisión de **condicionar la selección de modelo a la estructura de la
+serie mediante el índice de complejidad**. Esta medición dice que el índice, por sí solo, no alcanza
+para eso.
+
+Lo que sí funciona es usar **los descriptores** —la fuerza de la estacionalidad en primer lugar— en
+vez del índice que los resume. El índice sigue siendo útil en la aplicación, y para otra cosa: para
+decirle al usuario **qué tan difícil es su serie** y, con eso, qué tan ancho va a ser el intervalo
+del @sec-bootstrapping y cuánta confianza merece el número.
+
+Son dos usos distintos del mismo cálculo, y conviene no confundirlos en el diseño.
+:::
+
+## El costo, que es el motivo de todo esto {#sec-costo-seleccion}
+
+```{python}
+#| label: tbl-costo-seleccion
+#| tbl-cap: "Ajustes de modelo que exige cada estrategia sobre las 99.935 series, con tres métodos candidatos."
+n = len(D)
+K = len(NOMBRES)
+pd.DataFrame([
+    {"estrategia": "siempre el mismo método", "ajustes": n,
+     "qué recupera del hueco": "0 %"},
+    {"estrategia": "meta-aprendizaje sobre características", "ajustes": n,
+     "qué recupera del hueco": "41 %"},
+    {"estrategia": "probar los tres y quedarse con el mejor en prueba",
+     "ajustes": K * n, "qué recupera del hueco": "100 %, y es inalcanzable"},
+    {"estrategia": "elegir por validación serie por serie (@sec-particiones)",
+     "ajustes": 2 * K * n, "qué recupera del hueco": "parte, con el optimismo de la @eq-optimismo"},
+]).set_index("estrategia")
+```
+
+Ahí está el argumento completo. **El meta-aprendizaje recupera el 41 % del hueco con el mismo número
+de ajustes que no elegir nada**, porque las características ya están calculadas y el clasificador se
+entrena una sola vez para todas las series.
+
+La comparación con la alternativa del @sec-particiones es la que importa a escala. Elegir por
+validación serie por serie exige seis veces más ajustes —tres candidatos por dos, uno para validar y
+uno para el modelo final— y encima trae el optimismo que ese capítulo midió en 3,45 puntos de sMAPE
+con diez candidatos. Con tres métodos y cien mil series, la diferencia entre 100.000 y 600.000
+ajustes es la diferencia entre un experimento que corre en una tarde y uno que no corre.
+
+```{python}
+#| label: tbl-baratas
+#| tbl-cap: "El mismo clasificador con menos características. `sample_entropy` es la que el @sec-costo mostró que concentra el 83 % del costo de calcular los descriptores."
+BARATAS = [c for c in CARACTERISTICAS if c != "sample_entropy"]
+MINIMAS = ["n_entrenamiento", "periodo_estacional", "horizonte",
+           "seasonal_strength", "trend_strength", "z_acf1", "adf_pvalue"]
+
+filas = []
+for etiqueta, columnas in (("las 21", CARACTERISTICAS),
+                           ("sin sample_entropy", BARATAS),
+                           ("solo siete baratas", MINIMAS)):
+    modelo = ExtraTreesClassifier(n_estimators=200, random_state=0, n_jobs=1,
+                                  min_samples_leaf=5)
+    modelo.fit(X[columnas].iloc[ENTRENA], D["ganador"].iloc[ENTRENA])
+    prediccion = modelo.predict(X[columnas].iloc[PRUEBA])
+    errores = error_de(prediccion, E_PRUEBA)
+    filas.append({
+        "características": f"{etiqueta} ({len(columnas)})",
+        "sMAPE medio": errores.mean(),
+        "acierta el ganador %": 100 * np.mean(prediccion == GANADOR_PRUEBA),
+        "% del hueco recuperado": recupera(errores),
+    })
+
+pd.DataFrame(filas).set_index("características").astype(float).round(
+    {"sMAPE medio": 4, "acierta el ganador %": 1, "% del hueco recuperado": 1})
+```
+
+**Sacar `sample_entropy` no empeora nada: mejora de 40,9 % a 41,8 %.**
+
+Es el resultado más útil del capítulo para la fase siguiente del proyecto. El @sec-costo midió que
+esa característica concentra el 83 % del costo de calcular los descriptores —16,6 de 20 horas para
+las 100.000 series, con complejidad $O(n^2)$— y acá resulta que **no aporta a la selección de
+método**. Con las siete características más baratas se recupera el 31,8 %, que es tres cuartas partes
+del beneficio con una fracción del costo.
+
+Para una aplicación web donde alguien sube una serie y espera un pronóstico, eso convierte un cálculo
+de diecinueve segundos en uno de milisegundos.
+
+## Dónde funciona y dónde no {#sec-donde-funciona-seleccion}
+
+```{python}
+#| label: tbl-por-frecuencia-seleccion
+#| tbl-cap: "El clasificador por frecuencia, sobre las series de prueba."
+prueba = D.iloc[PRUEBA].assign(
+    error_clasificador=ERR_CLASIFICADOR,
+    acierta=(PRED == GANADOR_PRUEBA),
+)
+
+filas = []
+for frecuencia, grupo in prueba.groupby("frecuencia"):
+    fijo = min(grupo[c].mean() for c in ERRORES.values())
+    oraculo = grupo["oráculo"].mean()
+    hueco = fijo - oraculo
+    filas.append({
+        "frecuencia": frecuencia, "series": len(grupo),
+        "mejor fija": fijo,
+        "clasificador": grupo["error_clasificador"].mean(),
+        "oráculo": oraculo,
+        "acierta %": 100 * grupo["acierta"].mean(),
+        "% del hueco": 100 * (fijo - grupo["error_clasificador"].mean()) / hueco
+        if hueco > 1e-9 else np.nan,
+    })
+
+pd.DataFrame(filas).set_index("frecuencia").astype(float).round(4)
+```
+
+La tabla trae el contraejemplo más claro de que la exactitud no es el objetivo.
+
+**En la frecuencia horaria el clasificador acierta el ganador en el 96,8 % de las series y no
+recupera nada: 0 %.** No es una contradicción. En esas 124 series la mejor estrategia fija da 0,1380
+y el oráculo 0,1365, así que el hueco entero es de 0,0015: **no hay nada que ganar eligiendo**, porque
+los tres métodos andan casi igual. El clasificador acierta y el acierto no paga.
+
+Y en el otro extremo, **en las semanales acierta apenas el 52,3 % y recupera el 52 % del hueco**. Ahí
+los tres métodos difieren mucho, así que hasta una elección mediocre vale.
+
+De ahí sale la manera correcta de decidir si vale la pena montar esto:
+
+::: {.callout-tip}
+## Antes de aprender a elegir, medir el hueco
+
+El beneficio de cualquier procedimiento de selección está acotado por la diferencia entre la mejor
+estrategia fija y el oráculo. Ese número se puede calcular con los errores que ya se tengan, **sin
+entrenar ningún meta-modelo**.
+
+Si el hueco es chico —como en las horarias, con 0,0015— no hay nada que hacer y conviene fijar un
+método. Si es grande —como en las semanales o las mensuales— vale invertir en la selección.
+
+Es el mismo razonamiento que el @sec-regularizacion-no-ayuda aplicó a la regularización: **medir
+primero si existe el problema que la técnica resuelve.**
+:::
+
+## Cómo queda la receta {#sec-receta-seleccion}
+
+| pregunta | respuesta medida acá |
+|---|---|
+| ¿cuánto se puede ganar eligiendo? | 17,3 % sobre la mejor estrategia fija, y es un techo inalcanzable |
+| ¿alcanza una regla por frecuencia? | recupera el 7 %; la del clustering, 0 % |
+| ¿sirve aprender a elegir? | sí: el 41 % del hueco con el mismo número de ajustes |
+| ¿conviene clasificar al ganador o predecir errores? | predecir errores: acierta menos y pierde menos |
+| ¿qué característica manda? | la fuerza de la estacionalidad; el índice de complejidad queda 18.º de 21 |
+| ¿hace falta la característica más cara? | no: sacarla mejora el resultado |
+| ¿cuándo no vale la pena? | cuando el hueco entre la mejor fija y el oráculo es chico |
+
+: Selección de modelos a escala, según lo medido sobre las 99.935 series. {#tbl-receta-seleccion}
+
+Y una reserva sobre el alcance de todo el capítulo, porque el número del 41 % es fácil de citar mal.
+
+Este experimento elige entre **tres** métodos, y dos de ellos son benchmarks. Con los 26 modelos de
+la evaluación completa el hueco sería mayor y el problema de selección más difícil: más clases, menos
+ejemplos por clase, y la mayoría de los pares indistinguibles entre sí según el @sec-los-26. Lo que
+el capítulo sostiene es que **el meta-aprendizaje sobre características funciona y es barato**, no un
+porcentaje transferible a otro conjunto de candidatos.
+
+Lo que sí transfiere es el procedimiento: medir el hueco, elegir características que describan el
+tipo de serie y no su dificultad, predecir errores en vez de clasificar ganadores, y verificar si la
+característica más cara aporta algo.
+
+## Ejercicios
+
+Las soluciones están en el @sec-soluciones-24.
+
+**1.** El clasificador se evaluó con una partición aleatoria estratificada por frecuencia. Repítelo
+particionando **por frecuencia entera** —entrenar en cinco frecuencias y evaluar en la sexta— y mira
+cuánto se degrada. ¿El meta-modelo generaliza a una frecuencia que no vio?
+
+**2.** Una tercera variante natural sería **combinar** los tres pronósticos con pesos
+proporcionales al inverso del error predicho, como en la @eq-combinacion. Intenta calcularlo con
+`metadatos()` y explica por qué no se puede. ¿Qué habría que guardar para poder responderlo?
+
+**3.** El hueco entre la mejor estrategia fija y el oráculo es del 17,3 %. Calcula ese hueco por
+cuartil del índice de complejidad. ¿Vale más elegir en las series difíciles o en las fáciles?
+
+**4.** El clasificador acierta el 55,6 %. Mira **en qué se equivoca**: construye la matriz de
+confusión y calcula cuánto cuesta cada tipo de error en sMAPE. ¿Hay confusiones baratas y caras?
+
+**5.** Entrena el clasificador con el 1 %, el 10 % y el 70 % de las series y compara. ¿Cuántas series
+hacen falta para que el meta-aprendizaje funcione?
+
+**6.** La @tbl-baratas usa siete características elegidas a mano. Usa en cambio las siete más
+importantes de la @fig-importancias y compara. ¿La selección por importancia le gana a la selección
+por costo?
+
+## Referencias {.unnumbered}
+
+::: {#refs}
 :::
