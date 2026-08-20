@@ -59,7 +59,33 @@ def error_de(eleccion, matriz=E):
 
 Los metadatos que viajan en el repositorio traen el sMAPE de tres métodos para las 99.935 series:
 el naive, el naive estacional y un ARIMA. Con eso se puede acotar el problema antes de intentar
-resolverlo.
+resolverlo, y conviene escribirlo con símbolos porque las tablas de todo el capítulo miden estas
+dos cantidades.
+
+Sea $e_j(i)$ el error del método $j \in \{1, \dots, J\}$ en la serie $i \in \{1, \dots, S\}$. Una
+**estrategia fija** usa el mismo método en todas las series y la mejor de ellas es el piso; el
+**oráculo** usa el mejor método de cada serie y es el techo:
+
+$$
+\bar e_{\text{fija}} = \min_{j} \; \frac{1}{S} \sum_{i=1}^{S} e_j(i),
+\qquad
+\bar e_{\text{oráculo}} = \frac{1}{S} \sum_{i=1}^{S} \min_{j} \; e_j(i).
+$$ {#eq-techo-piso}
+
+Los dos términos de la @eq-techo-piso tienen las mismas piezas y el mínimo en distinto lugar: por
+dentro elige por serie, por fuera elige una vez para todas. La distancia entre ambos es lo único que
+una regla de selección puede ganar, y conviene medirla en proporción:
+
+$$
+G = \frac{\bar e_{\text{fija}} - \bar e_{\text{oráculo}}}{\bar e_{\text{fija}}},
+\qquad
+\text{recuperado}(r) = \frac{\bar e_{\text{fija}} - \bar e_{r}}
+                             {\bar e_{\text{fija}} - \bar e_{\text{oráculo}}},
+$$ {#eq-hueco}
+
+donde $\bar e_r$ es el error medio de la regla $r$. La columna «% del hueco recuperado» de todas las
+tablas que siguen es el segundo término de la @eq-hueco: vale 0 para la mejor estrategia fija, 1
+para el oráculo, y puede ser negativa si la regla es peor que no elegir.
 
 ```{python}
 #| label: tbl-techo-piso
@@ -85,11 +111,12 @@ ganadores["% de las series"] = (100 * ganadores["series"] / len(D)).round(1)
 ganadores
 ```
 
-Los dos números que definen el problema son **0,1320 y 0,1092**.
+Los dos números que definen el problema son **0,1320 y 0,1092**: los dos términos de la
+@eq-techo-piso.
 
 El primero es el mejor que se consigue **sin elegir**: usar siempre ARIMA. El segundo es el oráculo,
-que elige el mejor método en cada serie con el error de prueba a la vista. La diferencia es del
-**17,3 %**, y todo lo que sigue es un intento de recuperar parte de ese hueco.
+que elige el mejor método en cada serie con el error de prueba a la vista. El hueco $G$ de la
+@eq-hueco es del **17,3 %**, y todo lo que sigue es un intento de recuperar parte de él.
 
 Vale mirar la @tbl-ganadores antes de seguir, porque acota la expectativa. ARIMA gana en el 43,5 %
 de las series, el naive en el 33,6 % y el naive estacional en el 22,9 %. **No hay un método que
@@ -172,6 +199,20 @@ La diferencia con el resto del libro es que acá la unidad de observación **es 
 período. Y como hay 99.935 series, hay datos de sobra: es el único experimento del libro que está en
 el régimen donde el aprendizaje automático funciona.
 
+Con $x_i$ el vector de características de la serie $i$, un **selector** es una función
+$s(x_i) \in \{1, \dots, J\}$ y hay dos maneras naturales de construirlo:
+
+$$
+s_{\text{clas}}(x_i) = \hat c(x_i),
+\qquad
+s_{\text{reg}}(x_i) = \arg\min_{j} \; \hat e_j(x_i),
+$$ {#eq-selector}
+
+donde $\hat c$ es un clasificador entrenado con el nombre del método ganador como etiqueta y
+$\hat e_j$ son $J$ regresores, uno por método, entrenados con su error. La primera aprende **quién
+gana**; la segunda aprende **cuánto se pierde** y deduce quién gana. La @eq-selector las escribe
+casi iguales, y la sección siguiente mide que no lo son.
+
 ```{python}
 #| echo: false
 CARACTERISTICAS = [c for c in D.columns
@@ -250,7 +291,8 @@ el 43,3 % de la clase mayoritaria, y baja el sMAPE de 0,1314 a 0,1223: **recuper
 hueco** entre la mejor estrategia fija y el oráculo.
 
 **Y predecir el error funciona un poco mejor mientras acierta bastante menos.** La segunda variante
-ajusta un regresor por método, predice los tres errores y toma el menor. Acierta el ganador en solo
+es la $s_{\text{reg}}$ de la @eq-selector: ajusta un regresor por método, predice los tres errores y
+toma el menor. Acierta el ganador en solo
 el 49,2 % de las series —seis puntos menos que el clasificador— y consigue un sMAPE de 0,1219, que
 recupera el 42,8 % del hueco.
 
