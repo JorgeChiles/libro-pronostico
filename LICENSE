@@ -1,0 +1,62 @@
+# Licencias de este repositorio
+
+Este repositorio contiene dos cosas con licencias distintas.
+
+## El libro: CC BY-NC-SA 4.0
+
+El texto, las figuras, las tablas y los enunciados de los ejercicios están bajo
+**Creative Commons Atribución-NoComercial-CompartirIgual 4.0 Internacional**.
+
+    © 2026 Jorge Andrés Peña Araya
+
+Puedes compartirlo y adaptarlo, con tres condiciones: atribuir la obra, no usarla
+con fines comerciales, y distribuir tus adaptaciones con esta misma licencia.
+
+- Resumen legible: https://creativecommons.org/licenses/by-nc-sa/4.0/deed.es
+- Texto legal completo: https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode.es
+
+El texto legal no se reproduce acá a propósito: la versión que rige es la que
+publica Creative Commons en esos enlaces.
+
+## El código: MIT
+
+Todo el código —el paquete `libro/`, las pruebas, las herramientas, el
+`Makefile`, la configuración de compilación y los bloques de código de los
+capítulos— está bajo licencia MIT:
+
+    MIT License
+
+    Copyright (c) 2026 Jorge Andrés Peña Araya
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
+## Los datos
+
+Las series que viajan en `libro/datos/curado/` son de la **competencia M4**,
+organizada por Spyros Makridakis y publicada por los organizadores para uso de
+investigación. No son obra de este libro y no están cubiertas por ninguna de las
+dos licencias de arriba: la fuente y sus condiciones son las de M4.
+
+- Los datos originales: https://github.com/Mcompetitions/M4-methods
+- El artículo de la competencia: Makridakis, Spiridakis y Assimakopoulos (2020),
+  *The M4 Competition: 100,000 time series and 61 forecasting methods*,
+  International Journal of Forecasting 36(1), 54–74.
+
+Las tablas de `libro/datos/tesis/` son resultados agregados de la tesis de
+maestría del autor y quedan bajo la licencia del libro.

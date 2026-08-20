@@ -101,6 +101,19 @@ Cuando una medición contradice lo que suele afirmarse, este libro reporta lo qu
 midió y lo dice con esas palabras. La @sec-cierre-libro junta esos casos en una
 lista.
 
+## Cómo se puede usar
+
+El libro está bajo licencia **Creative Commons Atribución-NoComercial-CompartirIgual
+4.0**: puedes leerlo, imprimirlo, repartirlo en un curso y adaptarlo, siempre que
+atribuyas la obra, no lo uses con fines comerciales y compartas tus adaptaciones con
+la misma licencia. El código —el paquete `libro`, las pruebas y los bloques de los
+capítulos— está bajo licencia **MIT**, que no tiene la restricción comercial: si algo
+de acá te sirve para tu trabajo, úsalo.
+
+Las series son de la competencia M4 y no son obra de este libro: la fuente y sus
+condiciones son las de los organizadores. El detalle está en el archivo `LICENSE` del
+repositorio.
+
 ## Cómo correrlo en tu máquina
 
 Todo el libro —el texto, el código, los datos curados— vive en
