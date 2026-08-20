@@ -132,7 +132,7 @@ desacuerdo = (adf_estacionaria != kpss_estacionaria).mean()
 n_desacuerdo = int((adf_estacionaria != kpss_estacionaria).sum())
 ```
 
-Las dos pruebas discrepan en `{python} f"{100 * desacuerdo:.1f}"` % de los casos:
+Las dos pruebas discrepan en `{python} f"{100 * desacuerdo:.1f}".replace(".", ",")` % de los casos:
 `{python} f"{n_desacuerdo:,}"` series donde una dice estacionaria y la otra dice
 que no. Y el desacuerdo no está repartido de manera uniforme:
 

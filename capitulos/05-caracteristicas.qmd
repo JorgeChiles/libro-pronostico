@@ -114,7 +114,7 @@ descriptor en el que no conviene confiar.
 ### $F_T$ no significa "tiene tendencia" {#sec-ft-no-es-tendencia}
 
 Mira la última fila de la tabla. `M32692` es la serie que el catálogo etiqueta como
-quiebre de nivel, y su $F_T$ es `{python} f"{filas[-1]['F_T']:.2f}"`, bajísima. Y
+quiebre de nivel, y su $F_T$ es `{python} f"{filas[-1]['F_T']:.2f}".replace(".", ",")`, bajísima. Y
 sin embargo la serie cambia de nivel de manera evidente:
 
 ```{python}

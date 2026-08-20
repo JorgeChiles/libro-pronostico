@@ -269,7 +269,7 @@ factor = error_horario / error_diario
 ```
 
 El error cae a la `{python} f"{1 / factor:.0%}"` parte: de
-`{python} f"{error_horario:.1f}"` a `{python} f"{error_diario:.1f}"`, un factor
+`{python} f"{error_horario:.1f}".replace(".", ",")` a `{python} f"{error_diario:.1f}".replace(".", ",")`, un factor
 de `{python} f"{factor:.0f}"`.
 
 Sería un error grave leer eso como "conviene pronosticar en diario". Agregar no

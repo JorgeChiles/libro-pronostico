@@ -111,7 +111,7 @@ salto = maximo_prueba / ultimo
 ```
 
 Casi nadie acierta acá. La serie venía creciendo despacio y se multiplicó por
-`{python} f"{salto:.1f}"` en menos de un año. Si tu intervalo contenía el valor
+`{python} f"{salto:.1f}".replace(".", ",")` en menos de un año. Si tu intervalo contenía el valor
 real, era un intervalo enorme; si era angosto, quedó afuera.
 
 Esto no es una serie elegida para hacerte quedar mal. Es una serie
@@ -250,7 +250,7 @@ la hay. La media es un desastre cuando hay tendencia y razonable cuando la serie
 oscila alrededor de un nivel fijo.
 
 **En la serie sin estructura, el mejor método le gana al naive por
-`{python} f"{ventaja:.2f}"` puntos de sMAPE.** Es decir: por nada. Cuando la
+`{python} f"{ventaja:.2f}".replace(".", ",")` puntos de sMAPE.** Es decir: por nada. Cuando la
 diferencia entre el mejor método y el más tonto es de centésimas, lo que la
 tabla está diciendo no es cuál método elegir, sino que en esa serie no hay nada
 que modelar.
@@ -302,7 +302,7 @@ cociente = resumen.loc["alta", "media"] / resumen.loc["baja", "media"]
 ```
 
 Las series del cuartil más complejo tienen un error
-`{python} f"{cociente:.1f}"` veces mayor que las del cuartil más simple, con el
+`{python} f"{cociente:.1f}".replace(".", ",")` veces mayor que las del cuartil más simple, con el
 mismo método aplicado a todas. El método no cambió: cambió la serie.
 
 Se puede decir lo mismo mirando la correlación directa entre el índice y el

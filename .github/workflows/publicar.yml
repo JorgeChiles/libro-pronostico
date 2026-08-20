@@ -86,9 +86,16 @@ jobs:
           du -sh _site
           du -sh _site/site_libs/* | sort -rh | head -5
 
+      # `retention-days: 1` no es una optimización: el sitio pesa unos 66 MB
+      # comprimido y con la retención por omisión —90 días— la cuota de
+      # almacenamiento de Actions se llena en una tarde de compilaciones. Cuando
+      # se llena, el paso falla con "Artifact storage quota has been hit" y no se
+      # publica nada. Pasó, y el arreglo fue borrar 1,7 GB de artefactos a mano.
+      # Para publicar solo hace falta el último.
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
+          retention-days: 1
 
   # Publicar solo cuando el repositorio esté listo para ser público. Mientras
   # sea privado, GitHub Pages no está disponible y este paso fallaría en cada

@@ -7892,10 +7892,10 @@ SOL25_1.round({"pasos recortados": 0, "sMAPE medio": 3, "peor daño": 2,
 
 **El resultado es insensible al umbral en casi todo el rango, y salta solo en el extremo.** Entre 0 y
 0,95 el sMAPE medio se mueve
-`{python} f"{SOL25_1.loc['0,0':'0,95', 'sMAPE medio'].max() - SOL25_1.loc['0,0':'0,95', 'sMAPE medio'].min():.3f}"`
+`{python} f"{SOL25_1.loc['0,0':'0,95', 'sMAPE medio'].max() - SOL25_1.loc['0,0':'0,95', 'sMAPE medio'].min():.3f}".replace(".", ",")`
 puntos y el peor daño no cambia. Con el umbral en 1,01 —que ninguna serie supera, o sea la cota dura
 del rango observado— el peor daño se multiplica por
-`{python} f"{SOL25_1.loc['1,01 (cota dura)', 'peor daño'] / SOL25_1.loc['0,8', 'peor daño']:.1f}"`.
+`{python} f"{SOL25_1.loc['1,01 (cota dura)', 'peor daño'] / SOL25_1.loc['0,8', 'peor daño']:.1f}".replace(".", ",")`.
 
 Eso pasa porque la fuerza de la tendencia del catálogo no está repartida: `{python} f"{int((CAT25['trend_strength'] > 0.9).sum())}"`
 de las `{python} f"{len(CAT25)}"` series tienen fuerza arriba de 0,9 y
@@ -7940,16 +7940,16 @@ acotado no cambia nada.** Los números lo dicen mejor:
 - Con **Holt**, que extrapola tendencias sin freno, recorta
   `{python} f"{int(SOL25_2.loc[('Holt', 'condicional'), 'pasos recortados'])}"` de
   `{python} f"{sum(s.horizonte for s in SERIES25)}"` pasos y baja el
-  MASE medio de `{python} f"{SOL25_2.loc[('Holt', 'sin cota'), 'MASE medio']:.1f}"` a
-  `{python} f"{SOL25_2.loc[('Holt', 'condicional'), 'MASE medio']:.1f}"`.
+  MASE medio de `{python} f"{SOL25_2.loc[('Holt', 'sin cota'), 'MASE medio']:.1f}".replace(".", ",")` a
+  `{python} f"{SOL25_2.loc[('Holt', 'condicional'), 'MASE medio']:.1f}".replace(".", ",")`.
 - Con **ARIMA(1,1,1)** recorta `{python} f"{int(SOL25_2.loc[('ARIMA(1,1,1)', 'condicional'), 'pasos recortados'])}"`
   pasos y la mejora es del
   `{python} f"{100 * (1 - SOL25_2.loc[('ARIMA(1,1,1)', 'condicional'), 'MASE medio'] / SOL25_2.loc[('ARIMA(1,1,1)', 'sin cota'), 'MASE medio']):.0f}"` %.
 - Con **Ridge recursivo** recorta
   `{python} f"{int(SOL25_2.loc[('Ridge recursivo', 'condicional'), 'pasos recortados'])}"` pasos, el
-  sMAPE mejora `{python} f"{SOL25_2.loc[('Ridge recursivo', 'sin cota'), 'sMAPE medio'] - SOL25_2.loc[('Ridge recursivo', 'condicional'), 'sMAPE medio']:.2f}"`
+  sMAPE mejora `{python} f"{SOL25_2.loc[('Ridge recursivo', 'sin cota'), 'sMAPE medio'] - SOL25_2.loc[('Ridge recursivo', 'condicional'), 'sMAPE medio']:.2f}".replace(".", ",")`
   puntos y el MASE empeora
-  `{python} f"{SOL25_2.loc[('Ridge recursivo', 'condicional'), 'MASE medio'] - SOL25_2.loc[('Ridge recursivo', 'sin cota'), 'MASE medio']:.2f}"`:
+  `{python} f"{SOL25_2.loc[('Ridge recursivo', 'condicional'), 'MASE medio'] - SOL25_2.loc[('Ridge recursivo', 'sin cota'), 'MASE medio']:.2f}".replace(".", ",")`:
   las dos métricas se mueven en el segundo decimal y en direcciones opuestas, que es la manera
   numérica de decir que no pasó nada.
 
@@ -8076,12 +8076,12 @@ Los tres casos agregan algo que la tabla del capítulo no tenía.
 **Un solo punto.** Holt levanta un `IndexError` —no puede estimar una tendencia con una
 observación— y el naive contesta `{python} f"{UNO[-1]:.0f}"`, que es la respuesta correcta: con un
 dato, el mejor pronóstico es ese dato. Lo peligroso es el coeficiente de variación, que devuelve
-`{python} f"{UNO.std() / abs(UNO.mean()):.1f}"`: **declara que la serie no tiene variabilidad**,
+`{python} f"{UNO.std() / abs(UNO.mean()):.1f}".replace(".", ",")`: **declara que la serie no tiene variabilidad**,
 cuando lo que pasa es que no hay con qué medirla. Una característica calculada sobre un punto es un
 número inventado con formato de dato.
 
 **Todos negativos.** El logaritmo devuelve `nan`, esperable. El sMAPE, en cambio, **funciona**:
-`{python} f"{smape([-4.0, -5], [-4.5, -5.5]):.1f}"`, porque usa valores absolutos y la serie es
+`{python} f"{smape([-4.0, -5], [-4.5, -5.5]):.1f}".replace(".", ",")`, porque usa valores absolutos y la serie es
 consistentemente negativa. Y el piso en cero destruye el pronóstico: lo lleva a cero en una serie
 que nunca fue positiva. Es la confirmación de lo que el capítulo advierte sobre el piso: **cero es una
 cota física solo para las cantidades que no pueden ser negativas**, y saber si esta lo es requiere
@@ -8089,7 +8089,7 @@ saber qué mide la serie, no mirarla.
 
 **Último valor cero.** El naive pronostica cero, el sMAPE da
 `{python} f"{smape([5.0, 6, 4], np.repeat(TERMINA_EN_CERO[-1], 3)):.0f}"` —el máximo, saturado— y el
-MASE da `{python} f"{mase25([5.0, 6, 4], np.repeat(TERMINA_EN_CERO[-1], 3), TERMINA_EN_CERO, 1):.1f}"`.
+MASE da `{python} f"{mase25([5.0, 6, 4], np.repeat(TERMINA_EN_CERO[-1], 3), TERMINA_EN_CERO, 1):.1f}".replace(".", ",")`.
 Otra vez la asimetría de la @sec-cota-cordura: el sMAPE dice "lo peor posible" y el MASE dice "dos
 veces y media el naive". El segundo número es el informativo.
 
@@ -8136,7 +8136,7 @@ comparación no la decide la métrica de error sola.
 Y hay una salida que este libro no puede medir pero conviene nombrar: un **modelo global** —uno solo
 para todas las series, como el de la @sec-modelo-global— convierte el almacenamiento de $S \cdot b$ en
 $b$. Con extra trees eso sería un archivo de
-`{python} f"{SOL25_5.loc['extra trees', 'un modelo (kB)'] / 1000:.1f}"` MB en lugar de
+`{python} f"{SOL25_5.loc['extra trees', 'un modelo (kB)'] / 1000:.1f}".replace(".", ",")` MB en lugar de
 `{python} f"{SOL25_5.loc['extra trees', 'recursiva, 99.935 series (GB)']:.0f}"` GB.
 
 ### Ejercicio 6
@@ -8193,11 +8193,11 @@ REG25.groupby("antigüedad")[POLITICAS].mean().round(2)
 Reajustar cada dos horizontes cuesta
 `{python} f"{int(SOL25_6.loc['cada dos horizontes', 'ajustes'] - SOL25_6.loc['congelado', 'ajustes'])}"`
 ajustes extra y recupera
-`{python} f"{SOL25_6.loc['congelado', 'sMAPE medio'] - SOL25_6.loc['cada dos horizontes', 'sMAPE medio']:.2f}"`
+`{python} f"{SOL25_6.loc['congelado', 'sMAPE medio'] - SOL25_6.loc['cada dos horizontes', 'sMAPE medio']:.2f}".replace(".", ",")`
 puntos de sMAPE. Pasar de ahí a reajustar en cada origen cuesta
 `{python} f"{int(SOL25_6.loc['cada origen', 'ajustes'] - SOL25_6.loc['cada dos horizontes', 'ajustes'])}"`
 ajustes más y recupera solo
-`{python} f"{SOL25_6.loc['cada dos horizontes', 'sMAPE medio'] - SOL25_6.loc['cada origen', 'sMAPE medio']:.2f}"`
+`{python} f"{SOL25_6.loc['cada dos horizontes', 'sMAPE medio'] - SOL25_6.loc['cada origen', 'sMAPE medio']:.2f}".replace(".", ",")`
 puntos: la mitad más de ajustes para
 `{python} f"{(SOL25_6.loc['congelado', 'sMAPE medio'] - SOL25_6.loc['cada dos horizontes', 'sMAPE medio']) / (SOL25_6.loc['cada dos horizontes', 'sMAPE medio'] - SOL25_6.loc['cada origen', 'sMAPE medio']):.0f}"`
 veces menos ganancia.
