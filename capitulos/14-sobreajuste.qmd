@@ -447,7 +447,8 @@ Existe una tercera opción que combina las dos penalizaciones, la *elastic net*
 [@zou2005], y que en `scikit-learn` [@pedregosa2011] es `ElasticNet`. Es la más razonable
 cuando hay grupos de predictores correlacionados entre sí —el caso típico de una tabla de
 rezagos consecutivos—, porque Lasso tiende a quedarse con uno del grupo de manera
-arbitraria. El @sec-ingenieria vuelve sobre eso.
+arbitraria. El @sec-ingenieria vuelve sobre eso y mide la elastic net —la respuesta clásica a los grupos
+correlacionados— contra Lasso y contra no penalizar nada.
 
 ### Cuándo la regularización no ayuda {#sec-regularizacion-no-ayuda}
 

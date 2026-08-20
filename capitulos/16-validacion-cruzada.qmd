@@ -693,8 +693,9 @@ estadístico de no tener datos.
 
 La conclusión es la tercera salida de la @sec-costo-validacion y no la primera: cuando la serie es
 así de corta, **un método fijo y sensato le gana a cualquier procedimiento de selección**,
-porque no tiene varianza de selección. El @sec-seleccion-escala vuelve sobre esto con más
-series.
+porque no tiene varianza de selección. El @sec-seleccion-escala vuelve sobre esto con las 99.935 series de M4, donde aprender a elegir
+método a partir de las características de cada serie sí recupera parte del hueco contra el mejor
+método fijo.
 
 ## Cómo queda la receta {#sec-receta-cv}
 

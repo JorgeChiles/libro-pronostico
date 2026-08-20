@@ -487,8 +487,9 @@ que calibrar visto desde el otro lado y tiene la misma limitación.
 **Poner una cota de sensatez.** Es la decisión que la aplicación de pronóstico de este proyecto ya
 tiene tomada, y sale de haber medido una serie con MASE de 127.000: antes de mostrar un intervalo,
 verificar que sus extremos sean valores posibles para la cantidad que se está pronosticando. No
-mejora la cobertura y evita el ridículo, que a veces es lo que importa. El @sec-produccion lo
-desarrolla.
+mejora la cobertura y evita el ridículo, que a veces es lo que importa. El @sec-produccion lo mide, y encuentra que la cota conviene distinta según qué se acote: al
+pronóstico puntual le sirve el rango observado, y al intervalo solo el piso físico, porque
+apretarlo más le cuesta nueve puntos de cobertura.
 
 ::: {.callout-note}
 ## El bootstrap sirve para más que intervalos

@@ -370,7 +370,8 @@ significa un factor así cuando además hay pliegues y candidatos: los factores 
 
 Y hay un costo que no aparece en la tabla. La estrategia directa produce $h$ modelos que hay que
 **versionar, guardar y servir**. Para una aplicación de pronóstico eso es la diferencia entre
-guardar un objeto por serie y guardar dieciocho, y el @sec-produccion vuelve sobre ese punto.
+guardar un objeto por serie y guardar dieciocho, y el @sec-produccion pone el número: con boosting y estrategia directa, las 99.935 series de M4
+son dos terabytes de modelos guardados.
 
 ## Lo que este libro usa, y por qué {#sec-que-usa-el-libro}
 

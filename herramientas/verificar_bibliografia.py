@@ -47,6 +47,9 @@ SIN_CROSSREF = {
     "demsar2006", "demsar2008", "pedregosa2011", "cawley2010",
     "godahewa2021", "grinsztajn2022", "ke2017", "sculley2015",
     "bouthillier2021", "oreshkin2020", "hyndman2021",
+    # Crossref solo tiene la reimpresión de 2017 en CACM; la cita correcta es la
+    # original de NIPS 2012, que no tiene DOI.
+    "krizhevsky2012", "vaswani2017",
 }
 
 
