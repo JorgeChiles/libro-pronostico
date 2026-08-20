@@ -31,10 +31,12 @@ runtime de OJS. Actualizarla es un cambio que hay que probar.
 Otros comandos:
 
 ```bash
-make prueba          # pruebas del módulo de datos
+make prueba          # pruebas del módulo de datos y de la prosa
 make datos           # reconstruye la caché de las 100.000 series de M4
 make catalogo        # reconstruye metadatos y catálogo curado
 make datos-widgets   # exporta los CSV que los widgets embeben
+make referencias     # falla si alguna referencia cruzada quedó sin resolver
+make bibliografia    # comprueba referencias.bib contra Crossref (necesita red)
 ```
 
 ## Los datos

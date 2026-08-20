@@ -15,7 +15,7 @@ export PATH := $(VENV)/bin:$(PATH)
 # sys.path: Quarto ejecuta cada capítulo con el directorio del .qmd como cwd.
 export PYTHONPATH := $(CURDIR)
 
-.PHONY: ayuda entorno kernel libro html pdf ver limpiar limpiar-todo prueba prueba-sin-conexion referencias datos catalogo datos-widgets tesis
+.PHONY: ayuda entorno kernel libro html pdf ver limpiar limpiar-todo prueba prueba-sin-conexion referencias datos catalogo datos-widgets tesis bibliografia
 
 ayuda:
 	@echo "make entorno   crea el entorno virtual e instala las dependencias"
@@ -25,6 +25,7 @@ ayuda:
 	@echo "make prueba    corre los tests del paquete libro/"
 	@echo "make prueba-sin-conexion  compila como en CI: sin caché ni descargas"
 	@echo "make referencias  falla si alguna referencia cruzada quedó sin resolver"
+	@echo "make bibliografia  comprueba referencias.bib contra Crossref (necesita red)"
 	@echo "make datos     reconstruye la caché de M4 desde los CSV originales"
 	@echo "make catalogo  reconstruye metadatos y catálogo curado"
 	@echo "make datos-widgets  exporta los CSV que embeben los widgets"
@@ -58,6 +59,9 @@ referencias:
 	else \
 		echo "referencias cruzadas: todas resueltas"; \
 	fi
+
+bibliografia:
+	$(PY) herramientas/verificar_bibliografia.py
 
 pdf:
 	quarto render --to pdf
