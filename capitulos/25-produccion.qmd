@@ -124,7 +124,7 @@ HUECO.round(1)
 El `{python} f"{HUECO.loc['el peor 1 %', '% del hueco total']:.0f}"` % de todo lo que se pierde por
 usar ARIMA en vez del mejor método disponible está en el 1 % de las series, y el
 `{python} f"{HUECO.loc['el peor 5 %', '% del hueco total']:.0f}"` % en el 5 %. En
-`{python} f"{100 * (E[:, 2] > 2 * mejor).mean():.1f}"` % de las series —
+`{python} f"{100 * (E[:, 2] > 2 * mejor).mean():.1f}".replace(".", ",")` % de las series —
 `{python} f"{int((E[:, 2] > 2 * mejor).sum()):,}".replace(',', '.')` en total— ARIMA da más del
 doble del error del mejor de los tres.
 
@@ -211,8 +211,8 @@ COTA.round({"pasos recortados": 0, "sMAPE medio": 2, "MASE medio": 2, "MASE máx
 ```
 
 Cuanto más apretada la cota, mejor. El MASE medio baja de
-`{python} f"{COTA.loc['sin cota', 'MASE medio']:.1f}"` a
-`{python} f"{COTA.loc['c = 0 (rango observado)', 'MASE medio']:.1f}"`, y el peor caso del catálogo
+`{python} f"{COTA.loc['sin cota', 'MASE medio']:.1f}".replace(".", ",")` a
+`{python} f"{COTA.loc['c = 0 (rango observado)', 'MASE medio']:.1f}".replace(".", ",")`, y el peor caso del catálogo
 —una serie donde Holt erra `{python} f"{COTA.loc['sin cota', 'MASE máximo']:.0f}"` veces lo que
 erraría el naive— baja a `{python} f"{COTA.loc['c = 0 (rango observado)', 'MASE máximo']:.0f}"`.
 
@@ -362,8 +362,8 @@ CONDICIONAL[["pasos recortados", "sMAPE medio", "MASE medio", "MASE máximo",
 La regla condicional deja de recortar
 `{python} f"{int(CONDICIONAL.loc['rango observado', 'pasos recortados'] - CONDICIONAL.loc['condicional a la tendencia', 'pasos recortados'])}"`
 pasos que eran tendencia legítima, y el peor daño baja de
-`{python} f"{CONDICIONAL.loc['rango observado', 'peor daño (puntos de sMAPE)']:.1f}"` a
-`{python} f"{CONDICIONAL.loc['condicional a la tendencia', 'peor daño (puntos de sMAPE)']:.1f}"`
+`{python} f"{CONDICIONAL.loc['rango observado', 'peor daño (puntos de sMAPE)']:.1f}".replace(".", ",")` a
+`{python} f"{CONDICIONAL.loc['condicional a la tendencia', 'peor daño (puntos de sMAPE)']:.1f}".replace(".", ",")`
 puntos de sMAPE, sin perder nada de la protección: las ganancias de cien puntos en las series donde
 Holt se desbarranca siguen ahí.
 
@@ -371,7 +371,7 @@ Holt se desbarranca siguen ahí.
 medida: no es una regla de gusto sino una que sobre `{python} f"{len(SERIES)}"` series y
 `{python} f"{PASOS}"` pasos mejora el MASE medio un
 `{python} f"{100 * (1 - CONDICIONAL.loc['condicional a la tendencia', 'MASE medio'] / CONDICIONAL.loc['sin cota', 'MASE medio']):.0f}"` %
-y daña a lo sumo `{python} f"{CONDICIONAL.loc['condicional a la tendencia', 'peor daño (puntos de sMAPE)']:.1f}"`
+y daña a lo sumo `{python} f"{CONDICIONAL.loc['condicional a la tendencia', 'peor daño (puntos de sMAPE)']:.1f}".replace(".", ",")`
 puntos a una sola serie.
 
 ```{pyodide}
@@ -487,7 +487,7 @@ INTERVALOS = pd.DataFrame([
 INTERVALOS.round(3)
 ```
 
-El extremo inferior es negativo en `{python} f"{100 * negativos / pasos:.1f}"` % de los
+El extremo inferior es negativo en `{python} f"{100 * negativos / pasos:.1f}".replace(".", ",")` % de los
 `{python} f"{pasos}"` pasos, en `{python} f"{series_con_negativo}"` de las `{python} f"{len(SERIES)}"` series, siempre en
 series cuyo histórico es estrictamente positivo. Un intervalo que dice "entre −400 y 1.200 unidades"
 no es conservador: es un error visible.
@@ -495,14 +495,14 @@ no es conservador: es un error visible.
 Y las dos maneras de arreglarlo no son equivalentes.
 
 **Poner un piso en cero no cuesta nada.** La cobertura queda en
-`{python} f"{INTERVALOS.loc['piso en cero', 'cobertura %']:.1f}"` %, idéntica a la de partida, y el
+`{python} f"{INTERVALOS.loc['piso en cero', 'cobertura %']:.1f}".replace(".", ",")` %, idéntica a la de partida, y el
 intervalo se angosta un
 `{python} f"{100 * (1 - INTERVALOS.loc['piso en cero', 'ancho relativo']):.0f}"` %. La región que se
 recorta no contenía ningún valor real, porque ningún valor real es negativo.
 
 **Acotar el intervalo al rango observado cuesta caro.** La cobertura baja a
-`{python} f"{INTERVALOS.loc['rango observado', 'cobertura %']:.1f}"` %, o sea
-`{python} f"{INTERVALOS.loc['sin cota', 'cobertura %'] - INTERVALOS.loc['rango observado', 'cobertura %']:.1f}"`
+`{python} f"{INTERVALOS.loc['rango observado', 'cobertura %']:.1f}".replace(".", ",")` %, o sea
+`{python} f"{INTERVALOS.loc['sin cota', 'cobertura %'] - INTERVALOS.loc['rango observado', 'cobertura %']:.1f}".replace(".", ",")`
 puntos menos, porque los valores reales sí salen del rango histórico y el intervalo estaba ahí
 justamente para admitirlos.
 
@@ -694,11 +694,11 @@ coeficientes.
 Puestos juntos, los dos factores dan una conclusión que cambia el diseño de un sistema:
 
 - Ridge con estrategia **directa**, para las 99.935 series:
-  `{python} f"{ALMACEN.loc['Ridge', 'directa × 99.935 (GB)']:.1f}"` GB.
+  `{python} f"{ALMACEN.loc['Ridge', 'directa × 99.935 (GB)']:.1f}".replace(".", ",")` GB.
 - Boosting con estrategia **recursiva**:
   `{python} f"{ALMACEN.loc['boosting por histogramas', 'recursiva × 99.935 (GB)']:.0f}"` GB.
 - Boosting con estrategia directa:
-  `{python} f"{ALMACEN.loc['boosting por histogramas', 'directa × 99.935 (GB)'] / 1000:.1f}"`
+  `{python} f"{ALMACEN.loc['boosting por histogramas', 'directa × 99.935 (GB)'] / 1000:.1f}".replace(".", ",")`
   **terabytes**.
 
 O sea: **elegir el modelo pesa más que elegir la estrategia.** La combinación cara no es la directa,
@@ -812,7 +812,7 @@ con la longitud: `{python} f"{LATENCIA['factor'].min():.0f}"` veces en la serie 
 Eso **contesta el pendiente que dejó la @sec-costo**, y lo contesta distinto de lo que ese capítulo
 anticipaba. La conclusión de allá fue que el índice, para calcularse en línea, había que vectorizarlo
 o precomputarlo. Medido acá: vectorizarlo alcanza. Los
-`{python} f"{LATENCIA.loc['M17144', 'entropía con bucles (ms)'] / 1000:.1f}"` segundos de la serie de
+`{python} f"{LATENCIA.loc['M17144', 'entropía con bucles (ms)'] / 1000:.1f}".replace(".", ",")` segundos de la serie de
 `{python} f"{int(LATENCIA.loc['M17144', 'n']):,}".replace(',', '.')` puntos se convierten en
 `{python} f"{LATENCIA.loc['M17144', 'entropía vectorizada (ms)']:.0f}"` milisegundos sin cambiar el
 resultado, y las 16,6 horas del pipeline completo caen al mismo ritmo.
@@ -821,7 +821,7 @@ Contra un presupuesto de 100 ms por serie —el límite de lo que se percibe com
 tabla se lee así:
 
 - Las siete características baratas entran siempre con margen enorme: el máximo medido es
-  `{python} f"{LATENCIA['siete baratas (ms)'].max():.2f}"` ms.
+  `{python} f"{LATENCIA['siete baratas (ms)'].max():.2f}".replace(".", ",")` ms.
 - STL y la prueba de raíz unitaria entran en las series cortas y se van del presupuesto en las
   largas: `{python} f"{LATENCIA['STL y raíz unitaria (ms)'].max():.0f}"` ms en la serie de
   `{python} f"{int(LATENCIA['n'].max()):,}".replace(',', '.')` puntos.
@@ -846,7 +846,7 @@ LARGA.round(0)
 ```
 
 En la serie más larga del catálogo, sin recorte, la versión vectorizada tarda
-`{python} f"{LARGA.loc[f'completa (n = {len(y_larga)})', 'milisegundos'] / 1000:.1f}"` segundos:
+`{python} f"{LARGA.loc[f'completa (n = {len(y_larga)})', 'milisegundos'] / 1000:.1f}".replace(".", ",")` segundos:
 sigue afuera del presupuesto interactivo. El costo crece con $n^2$ y ninguna vectorización cambia
 eso.
 
@@ -937,7 +937,7 @@ SEM.mean().to_frame("sMAPE medio").round(2).T
 ```
 
 Ninguna semilla es la buena. La distancia entre la mejor y la peor es de
-`{python} f"{SEM['peor semilla'].mean() - SEM['mejor semilla'].mean():.1f}"` puntos de sMAPE en
+`{python} f"{SEM['peor semilla'].mean() - SEM['mejor semilla'].mean():.1f}".replace(".", ",")` puntos de sMAPE en
 promedio, y en la serie mediana la peor semilla erra un
 `{python} f"{100 * np.median((SEM['peor semilla'] - SEM['mejor semilla']) / SEM['mejor semilla']):.0f}"` %
 más que la mejor. Sobre `{python} f"{len(SEM)}"` series:
@@ -946,12 +946,12 @@ más que la mejor. Sobre `{python} f"{len(SEM)}"` series:
   pensarlo más— en `{python} f"{int((SEM['mediana'] < SEM['semilla 0']).sum())}"` de
   `{python} f"{len(SEM)}"` series.
 - La mediana no alcanza a la mejor semilla
-  (`{python} f"{SEM['mediana'].mean():.2f}"` contra
-  `{python} f"{SEM['mejor semilla'].mean():.2f}"`), y no puede: la mejor semilla es un oráculo que
+  (`{python} f"{SEM['mediana'].mean():.2f}".replace(".", ",")` contra
+  `{python} f"{SEM['mejor semilla'].mean():.2f}".replace(".", ",")`), y no puede: la mejor semilla es un oráculo que
   solo se conoce mirando la prueba.
 - Lo que la mediana compra es no caer en la peor
-  (`{python} f"{SEM['peor semilla'].mean():.2f}"`), que es el riesgo real de tirar una sola vez.
-- Cuesta `{python} f"{tiempo_todas / tiempo_una:.1f}"` veces el tiempo de una sola.
+  (`{python} f"{SEM['peor semilla'].mean():.2f}".replace(".", ",")`), que es el riesgo real de tirar una sola vez.
+- Cuesta `{python} f"{tiempo_todas / tiempo_una:.1f}".replace(".", ",")` veces el tiempo de una sola.
 
 **Tres a cinco semillas con la mediana es la decisión que la aplicación de este proyecto tiene
 tomada**, y estos son los números que la sostienen: no mejora el promedio de manera espectacular,

@@ -79,6 +79,29 @@ def test_todas_las_referencias_apuntan_a_algo_que_existe():
     assert not faltantes, "referencias sin destino:\n  " + "\n  ".join(sorted(set(faltantes)))
 
 
+def test_los_decimales_en_linea_llevan_coma():
+    """El libro escribe 0,7 y no 0.7, también cuando el número lo calcula Python.
+
+    Una expresión en línea como `{python} f"{x:.1f}"` publica un punto decimal
+    en medio de una prosa que usa coma. Es invisible al escribir y salta a la
+    vista en la página: pasó con «daña a lo sumo 0.7 puntos» del capítulo 25,
+    que se vio recién en el sitio publicado.
+    """
+    formato = re.compile(r"`\{python\}[^`]*`")
+    decimal = re.compile(r":,?\.[1-9]f\}")
+    fallas = []
+    for ruta in FUENTES:
+        for numero, linea in enumerate(ruta.read_text().split("\n"), 1):
+            for m in formato.finditer(linea):
+                expresion = m.group(0)
+                if not decimal.search(expresion):
+                    continue
+                if 'replace(".", ",")' in expresion or 'replace(".", "{,}")' in expresion:
+                    continue
+                fallas.append(f"{ruta.name}:{numero}: {expresion[:80]}")
+    assert not fallas, "decimales con punto en la prosa:\n  " + "\n  ".join(fallas)
+
+
 def test_el_libro_usa_tuteo_y_no_voseo():
     """La regla editorial: español latinoamericano con tuteo."""
     voseo = re.compile(

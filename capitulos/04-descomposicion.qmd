@@ -84,7 +84,7 @@ print(f"correlación entre nivel y amplitud: {correlacion:+.3f}")
 por_ciclo.head(4).round(1)
 ```
 
-Correlación de `{python} f"{correlacion:.2f}"`: la amplitud acompaña al nivel. Esta
+Correlación de `{python} f"{correlacion:.2f}".replace(".", ",")`: la amplitud acompaña al nivel. Esta
 serie es multiplicativa.
 
 Y ahora la parte práctica. Casi nadie usa la descomposición multiplicativa

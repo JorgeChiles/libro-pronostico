@@ -154,7 +154,7 @@ mediana_anual = int(
 
 El `{python} f"{menos_100:.0f}"` % de las series de M4 tiene **menos de 100
 observaciones** y el `{python} f"{menos_50:.0f}"` % tiene menos de 50. Solo el
-`{python} f"{mas_1000:.1f}"` % pasa las mil. Las series anuales tienen una mediana de
+`{python} f"{mas_1000:.1f}".replace(".", ",")` % pasa las mil. Las series anuales tienen una mediana de
 `{python} f"{mediana_anual}"` observaciones: con doce rezagos quedarían
 `{python} f"{mediana_anual - 12}"` filas.
 

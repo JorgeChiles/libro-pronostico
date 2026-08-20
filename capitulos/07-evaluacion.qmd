@@ -414,7 +414,7 @@ rango_snaive = tabla_corte["naive estacional"].max() / tabla_corte["naive estaci
 ```
 
 Dos cosas para leer ahí. El error del naive estacional varía por un factor de
-`{python} f"{rango_snaive:.1f}"` según dónde se corte, sobre la misma serie y con
+`{python} f"{rango_snaive:.1f}".replace(".", ",")` según dónde se corte, sobre la misma serie y con
 el mismo método. Y en el primer corte **gana el naive**, mientras que en los demás
 gana el estacional por bastante.
 
@@ -594,7 +594,7 @@ print(f"cobertura empírica del intervalo del 95 %: {cobertura:.1f} %  "
       f"({total} pronósticos)")
 ```
 
-`{python} f"{cobertura:.1f}"` % en vez de 95 %. Los intervalos son **más angostos
+`{python} f"{cobertura:.1f}".replace(".", ",")` % en vez de 95 %. Los intervalos son **más angostos
 de lo que dicen**, y esto no es una anomalía del catálogo: la subcobertura es la
 regla en la práctica, y tiene causas identificables.
 
