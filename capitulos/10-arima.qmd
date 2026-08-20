@@ -50,7 +50,7 @@ $$ {#eq-estacionariedad}
 
 Es decir: media constante, varianza constante, y una autocovarianza que depende de
 la distancia $k$ pero no de dónde se la mida. Una serie con tendencia no cumple la
-primera condición; una con amplitud creciente —como la del
+primera condición; una con amplitud creciente —como la de la
 @sec-aditiva-multiplicativa— no cumple la segunda.
 
 La razón por la que hace falta es simple: si las propiedades cambian con el tiempo,
@@ -175,7 +175,7 @@ antemano. Tres opciones razonables:
 2. **Mirar el gráfico**, que es lo que recomienda @hyndman2021. Una tendencia
    visible decide la cuestión sin necesidad de pruebas.
 3. **Dejar que el criterio de información elija**, ajustando con y sin diferencia y
-   comparando por AICc. Es lo que hace la selección automática del
+   comparando por AICc. Es lo que hace la selección automática de la
    @sec-auto-arima, con una salvedad importante: los AICc de modelos con distinto
    $d$ **no son comparables**, porque no están calculados sobre la misma variable.
 
@@ -210,7 +210,7 @@ $$ {#eq-diferencia-estacional}
 Conviene una notación compacta. El **operador de retardo** $B$ se define por
 $B y_t = y_{t-1}$, de modo que $B^k y_t = y_{t-k}$. Con él, las tres
 transformaciones anteriores se escriben $(1-B) y_t$, $(1-B)^2 y_t$ y
-$(1-B^m) y_t$. Esa notación es la que hace legibles las ecuaciones del
+$(1-B^m) y_t$. Esa notación es la que hace legibles las ecuaciones de la
 @sec-modelo-arima.
 
 ```{python}
@@ -256,7 +256,7 @@ series económicas, $d > 2$ casi nunca se justifica.
 
 ## Identificación con ACF y PACF {#sec-identificacion}
 
-El @sec-autocorrelacion introdujo la autocorrelación y la parcial. Acá se vuelven
+La @sec-autocorrelacion introdujo la autocorrelación y la parcial. Acá se vuelven
 una herramienta de diagnóstico: sirven para leer, del gráfico, qué órdenes probar.
 
 Un proceso **autorregresivo** de orden $p$ —AR($p$)— expresa el valor actual como
@@ -339,7 +339,7 @@ pd.DataFrame([
 
 La tercera fila es la razón por la que este método tiene límites: cuando hay
 componentes AR y MA a la vez, ninguna de las dos funciones se corta y la
-identificación visual no alcanza. De ahí la necesidad de la búsqueda automática del
+identificación visual no alcanza. De ahí la necesidad de la búsqueda automática de la
 @sec-auto-arima.
 
 ## El modelo ARIMA {#sec-modelo-arima}
@@ -393,7 +393,7 @@ entre el mismo mes de años consecutivos.
 ::: {.callout-note}
 ## El período estacional que se le pasa importa, y mucho
 
-En el @sec-horizonte vimos que M4 declara $m = 1$ para las series semanales y
+En la @sec-horizonte vimos que M4 declara $m = 1$ para las series semanales y
 diarias. En un SARIMA eso no es un detalle de notación: con $m = 1$ los términos
 estacionales se vuelven redundantes con los no estacionales y el modelo cambia de
 naturaleza.
@@ -558,7 +558,7 @@ raíz unitaria, y después buscar los órdenes restantes con una búsqueda dirig
 minimiza el AICc de la @eq-aicc, empezando por unos pocos modelos candidatos y
 moviéndose hacia los vecinos que mejoran.
 
-Acá corresponde `statsforecast`, por lo dicho en el @sec-ets: la selección
+Acá corresponde `statsforecast`, por lo dicho en la @sec-ets: la selección
 automática es su especialidad.
 
 ```{python}
@@ -641,7 +641,7 @@ iguales**. La diferencia aparece en la mediana, donde AutoARIMA y AutoETS le sac
 varios puntos al naive estacional, y en el conteo de victorias.
 
 Que el promedio y la mediana cuenten historias distintas es exactamente la
-advertencia del @sec-saturacion. Con 33 series, además, ninguna de estas diferencias
+advertencia de la @sec-saturacion. Con 33 series, además, ninguna de estas diferencias
 es estadísticamente concluyente: se necesitan cientos de series para distinguir
 métodos que difieren en un punto de sMAPE.
 
@@ -710,7 +710,7 @@ print(f"media de los residuos    : {residuos.mean():.3f}")
 print(f"Ljung-Box, p-valor       : {prueba_lb['lb_pvalue'].iloc[0]:.4f}")
 ```
 
-Las cuatro condiciones son las del @sec-diagnostico-residuos —media cero, sin
+Las cuatro condiciones son las de la @sec-diagnostico-residuos —media cero, sin
 autocorrelación, varianza constante y distribución aproximadamente normal— y se leen
 igual acá. Lo que cambia con un ARIMA es la interpretación de la segunda: en un
 método simple, la autocorrelación remanente indica que **falta modelar algo**; en un
@@ -734,7 +734,7 @@ Algunas orientaciones que sí se sostienen:
   hacer.
 - **ETS maneja mejor la estacionalidad multiplicativa**, que en ARIMA requiere
   transformar la serie.
-- **ETS no exige estacionariedad**, así que evita todo el problema del
+- **ETS no exige estacionariedad**, así que evita todo el problema de la
   @sec-pruebas.
 - **Combinar los dos suele ganarle a cada uno.** Es uno de los resultados más
   robustos de la literatura de pronóstico [@petropoulos2022], y la razón por la que
@@ -742,7 +742,7 @@ Algunas orientaciones que sí se sostienen:
 
 ## Ejercicios
 
-Las soluciones están en el @sec-soluciones-10.
+Las soluciones están en la @sec-soluciones-10.
 
 **1.** Aplica ADF y KPSS a `Q22252` en su nivel, con una diferencia y con dos. ¿En
 qué punto coinciden las dos pruebas? ¿Cuántas diferencias usarías?
@@ -761,7 +761,7 @@ pronóstico?
 
 **5.** Sobrediferencia a propósito: toma `M35927`, aplícale tres diferencias y
 grafica la autocorrelación del resultado. ¿Aparece la autocorrelación negativa
-artificial que anticipa el aviso del @sec-diferenciacion?
+artificial que anticipa el aviso de la @sec-diferenciacion?
 
 **6.** Corre `AutoARIMA` sobre las series trimestrales del catálogo y anota los
 órdenes que elige. ¿Cuántas veces elige $d = 1$? ¿Cuántas veces incluye términos

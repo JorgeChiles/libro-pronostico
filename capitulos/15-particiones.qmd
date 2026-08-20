@@ -41,7 +41,7 @@ $$
 E(f) = \mathbb{E}_{(x,\, y) \sim P}\left[ L\left(y, f(x)\right) \right]
 $$ {#eq-error-generalizacion}
 
-donde $P$ es el proceso que genera la serie y $L$ es una de las métricas del @sec-metricas. Lo
+donde $P$ es el proceso que genera la serie y $L$ es una de las métricas de la @sec-metricas. Lo
 que se calcula en la práctica es el promedio sobre un conjunto finito de datos apartados,
 
 $$
@@ -70,7 +70,7 @@ $$
 $$ {#eq-optimismo}
 
 crece con $K$: cuantos más candidatos se prueban, más se aprovecha el ruido del conjunto donde
-se mide. Es el fenómeno del @sec-r2 movido un nivel hacia arriba. Allá sobreajustaba el modelo
+se mide. Es el fenómeno de la @sec-r2 movido un nivel hacia arriba. Allá sobreajustaba el modelo
 a los datos; acá sobreajusta **la selección del modelo** al conjunto de medición
 [@cawley2010; @varma2006].
 
@@ -293,7 +293,7 @@ mostrar(fig, alto=380, titulo_y="unidades")
 ```
 
 El corte de validación va **al final del período de entrenamiento**, no en el medio y no al
-azar. Las dos razones son las del @sec-particion y valen igual un nivel más adentro: una
+azar. Las dos razones son las de la @sec-particion y valen igual un nivel más adentro: una
 validación que interpola no mide la tarea que importa, y una validación rodeada de datos de
 ajuste filtra información de sus vecinos.
 
@@ -558,7 +558,7 @@ print(f"\nel mejor en prueba habría sido: {tabla['prueba'].idxmin()}")
 
 ## Lo que hay que reportar {#sec-reportar-particion}
 
-El @sec-que-reportar dio una lista de qué informar al evaluar un método. Con tres conjuntos se
+La @sec-que-reportar dio una lista de qué informar al evaluar un método. Con tres conjuntos se
 agregan cuatro líneas, y ninguna es formalidad:
 
 1. **Dónde están los dos cortes** y con qué criterio se eligieron. La lista de @hyndman2021
@@ -579,7 +579,7 @@ una semilla afortunada, y el optimismo de la @tbl-optimismo es un piso, no un te
 
 ## Ejercicios
 
-Las soluciones están en el @sec-soluciones-15.
+Las soluciones están en la @sec-soluciones-15.
 
 **1.** Reproduce la @tbl-optimismo midiendo el optimismo **mediano** en vez del medio. ¿Crece
 igual con $K$? ¿Por qué las dos medidas pueden contar historias distintas?
@@ -590,7 +590,7 @@ los dos errores es más grave: elegir mal el modelo o reportar mal el error.
 
 **3.** En la @tbl-reajustar hay 6 series donde reajustar empeora. Identifícalas y compara la
 suma de lo que pierden con la suma de lo que ganan las otras 24. ¿Qué método eligieron y qué
-dificultad tienen? ¿Cambiarías la recomendación del @sec-reajustar?
+dificultad tienen? ¿Cambiarías la recomendación de la @sec-reajustar?
 
 **4.** Arma una partición que **viole** la regla temporal —validación sorteada al azar dentro
 del entrenamiento— y mide el optimismo resultante. ¿Es mayor o menor que con la partición
@@ -601,7 +601,7 @@ observaciones de ajuste después de apartar una validación de largo $h$, con $m
 estacional. Repite con $3m$. El resultado es sorprendente: explícalo mirando cómo se armó M4 y
 di en qué frecuencias está realmente el problema de las series cortas.
 
-**6.** El @sec-costo-validacion propone tres salidas para las series demasiado cortas. Toma la
+**6.** La @sec-costo-validacion propone tres salidas para las series demasiado cortas. Toma la
 tercera —fijar el método de antemano— y mide qué error de prueba se consigue en las cuatro
 series de la @tbl-sin-validacion usando siempre `snaive`. Compáralo con el mejor método de cada
 una y con el peor.

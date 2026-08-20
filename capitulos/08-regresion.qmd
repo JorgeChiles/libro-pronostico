@@ -55,7 +55,7 @@ Sobre lo segundo conviene ser explícito desde el principio. La regresión clás
 supone errores independientes, y en una serie de tiempo casi nunca lo son. Eso no
 sesga los coeficientes, pero **sí invalida sus errores estándar y sus pruebas de
 significación**, que quedan demasiado optimistas: un coeficiente que parece
-significativo puede no serlo. El diagnóstico del @sec-diagnostico-residuos es
+significativo puede no serlo. El diagnóstico de la @sec-diagnostico-residuos es
 obligatorio acá.
 
 ## La tendencia como predictor {#sec-tendencia-predictor}
@@ -113,7 +113,7 @@ de la serie**; es un compromiso entre regímenes distintos y por lo tanto una ma
 descripción de todos.
 
 Y sin embargo la tendencia lineal no es siempre mala. Conviene medirlo sobre
-horizontes largos, contra la alternativa amortiguada del @sec-amortiguada:
+horizontes largos, contra la alternativa amortiguada de la @sec-amortiguada:
 
 ```{python}
 #| label: tbl-tendencia-larga
@@ -177,7 +177,7 @@ absorbida por la constante y actúa como referencia.
 ::: {.callout-warning}
 ## En M4, la posición del ciclo no es el mes del calendario
 
-El @sec-fechas-m4 advierte que las fechas declaradas por M4 son irregulares. Por eso
+La @sec-fechas-m4 advierte que las fechas declaradas por M4 son irregulares. Por eso
 las ficticias de este capítulo se construyen sobre la **posición dentro del ciclo**
 —$t \bmod m$— y no sobre el mes del calendario.
 
@@ -343,7 +343,7 @@ y_t = \beta_0 + \sum_{j \in L} \phi_j\, y_{t-j} + \varepsilon_t
 $$ {#eq-rezagos-regresion}
 
 donde $L$ es el conjunto de rezagos elegidos. Comparando la @eq-rezagos-regresion con
-la @eq-ar del @sec-identificacion se ve que **es un modelo autorregresivo escrito
+la @eq-ar de la @sec-identificacion se ve que **es un modelo autorregresivo escrito
 como regresión**, la formulación de @boxjenkins1970 vista desde el otro lado. La diferencia no es matemática sino de enfoque: acá los rezagos son
 columnas de una tabla, y se pueden elegir con criterios de selección de variables en
 vez de con el correlograma.
@@ -386,7 +386,7 @@ pd.DataFrame(filas).set_index("rezagos").round(4)
 
 El salto está en agregar el rezago 12. Pasar de `[1]` a `[1, 12]` baja el sMAPE a
 menos de la mitad, mientras que pasar de `[1]` a `[1, 2]` casi no cambia nada. La
-razón es la del @sec-autocorrelacion: en esta serie el rezago informativo es el
+razón es la de la @sec-autocorrelacion: en esta serie el rezago informativo es el
 estacional, no el inmediato.
 
 Ese es el resultado más importante del capítulo para lo que viene: **cuáles rezagos se
@@ -470,7 +470,7 @@ II.
 
 ## Ejercicios
 
-Las soluciones están en el @sec-soluciones-08.
+Las soluciones están en la @sec-soluciones-08.
 
 **1.** Ajusta la @eq-tendencia a `Q1915` y grafica los residuos. ¿Oscilan alrededor de
 cero o tienen la forma sistemática de la @fig-tendencia-quiebre?

@@ -166,7 +166,7 @@ extrapola linealmente, sin límite**. A un paso es razonable; a cuarenta y ocho,
 
 ### El problema que esto causa, medido {#sec-holt-diverge}
 
-En el @sec-saturacion vimos que Holt aplicado a las series horarias del catálogo
+En la @sec-saturacion vimos que Holt aplicado a las series horarias del catálogo
 produce pronósticos negativos en series que nunca lo son. Vale la pena ver por qué:
 
 ```{python}
@@ -315,7 +315,7 @@ acaba de observar —descontando el efecto de las otras dos— con lo que se cre
 antes. Y hay un parámetro por componente: $\alpha$ para el nivel, $\beta^*$ para la
 tendencia, $\gamma$ para la estacionalidad.
 
-Cuando la amplitud del ciclo crece con el nivel —el caso del
+Cuando la amplitud del ciclo crece con el nivel —el caso de la
 @sec-aditiva-multiplicativa— corresponde la versión **multiplicativa**:
 
 $$
@@ -377,7 +377,7 @@ Vale la pena buscar tres cosas:
 - Con **α cerca de 1**, el nivel salta con cada observación y el pronóstico se
   vuelve inestable: el método casi no promedia.
 - Con **β cerca de 1** en una serie con ciclo, la tendencia confunde el ciclo con
-  pendiente y el pronóstico se dispara. Es el mecanismo del @sec-holt-diverge.
+  pendiente y el pronóstico se dispara. Es el mecanismo de la @sec-holt-diverge.
 - Con **γ cerca de 0**, la estacionalidad queda congelada en la del primer ciclo
   observado.
 
@@ -591,7 +591,7 @@ El libro usa `statsmodels` para mostrar cómo funciona un modelo y `statsforecas
 cuando el tema es elegir automáticamente o correr sobre muchas series.
 
 No es capricho. `statsmodels` permite fijar $\alpha$, $\beta^*$ y $\gamma$ a mano,
-que es lo que hace posible el widget del @sec-widget-09, y además funciona dentro
+que es lo que hace posible el widget de la @sec-widget-09, y además funciona dentro
 del navegador. `statsforecast` no permite fijarlos —su punto es justamente
 elegirlos— pero implementa la selección automática completa y es órdenes de
 magnitud más rápida sobre miles de series, que es lo que hace falta en el
@@ -659,7 +659,7 @@ lo hace en resolución de **nanosegundos** sin importar la resolución de entrad
 El resultado es un `OutOfBoundsDatetime`, porque los nanosegundos no llegan más
 allá de 2262.
 
-Es el mismo techo del @sec-estructura, en otro disfraz: allá aparecía al
+Es el mismo techo de la @sec-estructura, en otro disfraz: allá aparecía al
 *construir* el índice, acá al *extenderlo*. La salida práctica es pasarle al modelo
 un array de numpy en vez de la `Series` cuando lo único que interesa es la métrica:
 
@@ -690,11 +690,11 @@ viene de las series horarias de la @tbl-amortiguado.
 tienen ni tendencia ni estacionalidad explotables— y ahí los métodos más
 sofisticados pierden por estimar componentes que no están. Es la misma conclusión
 del @sec-que-es-pronosticar, ahora con métodos de verdad: el mejor método depende
-de la serie, y por eso conviene la selección automática del @sec-seleccion-ets.
+de la serie, y por eso conviene la selección automática de la @sec-seleccion-ets.
 
 ## Ejercicios
 
-Las soluciones están en el @sec-soluciones-09.
+Las soluciones están en la @sec-soluciones-09.
 
 **1.** Ajusta un suavizado exponencial simple a `D2039` con $\alpha = 0{,}1$,
 $\alpha = 0{,}5$ y $\alpha$ optimizado. Compara los tres sMAPE. ¿Qué valor eligió

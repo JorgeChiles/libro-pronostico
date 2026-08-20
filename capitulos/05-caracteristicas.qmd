@@ -509,7 +509,7 @@ Vale la pena probar dos cosas. Primero, poner `m = 12` en la caminata aleatoria:
 fuerza de estacionalidad va a devolver un número igual, porque el cálculo siempre
 devuelve un número, aunque el período no signifique nada para esa serie. Segundo,
 comparar el quiebre de nivel con la tendencia limpia y ver la diferencia de $F_T$
-que comentamos en el @sec-ft-no-es-tendencia.
+que comentamos en la @sec-ft-no-es-tendencia.
 
 ```{pyodide}
 #| caption: Fuerza de tendencia y de estacionalidad — cambia `cual` y `m`
@@ -541,13 +541,13 @@ print(f"fuerza de estacionalidad F_S = {f_s:.3f}")
 
 ## Ejercicios
 
-Las soluciones están en el @sec-soluciones-05.
+Las soluciones están en la @sec-soluciones-05.
 
 **1.** Calcula $F_T$ y $F_S$ para las series de caminata aleatoria del catálogo con
 `cargar(fenomeno="caminata-aleatoria", n=3)`. ¿Dan los valores bajos que
 esperabas? Compara con lo que dice `metadatos()`.
 
-**2.** El @sec-ft-no-es-tendencia muestra que un quiebre de nivel no se refleja en
+**2.** La @sec-ft-no-es-tendencia muestra que un quiebre de nivel no se refleja en
 $F_T$. Busca en `metadatos()` las diez series con el `change_points_per_length` más
 alto y mira qué $F_T$ tienen. ¿Se confirma el patrón?
 
@@ -555,7 +555,7 @@ alto y mira qué $F_T$ tienen. ¿Se confirma el patrón?
 `m = 30`. Los dos dan un número. ¿Cuál creerías, y por qué? ¿Qué dice esto sobre
 usar características sin decidir antes el período estacional?
 
-**4.** El @sec-costo-entropia mide que la entropía muestral es $O(n^2)$. Estima,
+**4.** La @sec-costo-entropia mide que la entropía muestral es $O(n^2)$. Estima,
 con los tiempos de la @tbl-costo, cuánto tardaría sobre `D4099` completa, que tiene
 9.919 observaciones. Después mídelo, si tienes paciencia. ¿Le acertó la estimación?
 

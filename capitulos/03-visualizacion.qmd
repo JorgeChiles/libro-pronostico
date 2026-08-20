@@ -72,7 +72,7 @@ del modelo:
    conocimiento del dominio.
 6. **Cambios de varianza**: la amplitud de las fluctuaciones crece o se reduce con
    el nivel. Es lo que decide entre descomposición aditiva y multiplicativa, como
-   vimos en el @sec-aditiva-multiplicativa.
+   vimos en la @sec-aditiva-multiplicativa.
 
 ::: {.callout-note}
 ## Estacionalidad y ciclo no son lo mismo
@@ -224,7 +224,7 @@ Un $r_k$ fuera de esa banda es evidencia de estructura. Conviene recordar que la
 @eq-banda supone ruido blanco y que, con veinte rezagos, aproximadamente uno va a
 salirse por azar aunque la serie sea ruido: es la lógica de las comparaciones
 múltiples. Por eso, cuando la pregunta es "¿hay *alguna* estructura?", es preferible
-la prueba conjunta de @ljungbox1978 que aparece en el @sec-residuo.
+la prueba conjunta de @ljungbox1978 que aparece en la @sec-residuo.
 
 El gráfico de $r_k$ contra $k$ se llama **correlograma**:
 
@@ -450,7 +450,7 @@ plt.show()
 
 ## Ejercicios
 
-Las soluciones están en el @sec-soluciones-03.
+Las soluciones están en la @sec-soluciones-03.
 
 **1.** Grafica la serie `Y21290` y describe en dos frases qué ves. Después mira qué
 fenómeno le asigna el catálogo. ¿Coincide con tu descripción?

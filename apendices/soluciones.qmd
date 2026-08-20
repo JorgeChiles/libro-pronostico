@@ -119,7 +119,7 @@ Con `m = 1` el naive estacional **es** el naive simple: repetir el último ciclo
 de largo 1 es repetir la última observación. Los dos primeros valores coinciden
 por construcción, no por casualidad.
 
-Con `m = 7` el resultado suele ser algo peor, y la razón es la del
+Con `m = 7` el resultado suele ser algo peor, y la razón es la de la
 @sec-a-escala: en una serie sin estructura semanal, usar los últimos siete
 valores en vez del último agrega ruido sin agregar señal.
 
@@ -343,7 +343,7 @@ dimensiona por el **pico**: el instante de máxima demanda simultánea. La agreg
 correcta sería `.max()`, y con datos horarios incluso eso subestima el pico real,
 porque un pico de quince minutos queda promediado dentro de su hora.
 
-Es el mismo argumento del @sec-agregar-enganio visto desde el otro lado: la función
+Es el mismo argumento de la @sec-agregar-enganio visto desde el otro lado: la función
 de agregación tiene que salir de la decisión que el pronóstico va a alimentar.
 
 ### Ejercicio 4
@@ -1346,7 +1346,7 @@ negativos al principio y positivos al final: una racha larga de cada signo, que 
 forma más extrema de autocorrelación positiva. Toda la tendencia quedó sin modelar y
 está íntegra en el residuo.
 
-La lección para el @sec-diagnostico-residuos: **la primera condición hay que
+La lección para la @sec-diagnostico-residuos: **la primera condición hay que
 verificarla, pero no siempre es informativa**. En cualquier método que estime un
 nivel minimizando errores cuadrados, la media de los residuos es cero
 automáticamente. La condición que discrimina es la segunda.
@@ -1514,7 +1514,7 @@ en realidad fue un salto puntual.
 
 ### Ejercicio 6
 
-El MASE del @sec-metricas divide el error por
+El MASE de la @sec-metricas divide el error por
 
 $$
 \frac{1}{T-m}\sum_{t=m+1}^{T} \left| y_t - y_{t-m} \right|
@@ -1649,7 +1649,7 @@ print(f"cociente entre ambos                    : "
 Cambia por un factor de casi tres. El mismo pronóstico, la misma serie, y dos
 números que llevarían a evaluaciones muy distintas.
 
-La razón: `M3007` es la serie que se acelera —la del @sec-una-serie—, así que en el
+La razón: `M3007` es la serie que se acelera —la de la @sec-una-serie—, así que en el
 período de prueba los valores reales son mucho más grandes que el último valor
 observado, que es lo que el naive pronostica. Con el real en el denominador, cada
 error se divide por un número grande y el porcentaje sale chico. Con el pronóstico en
@@ -1694,7 +1694,7 @@ El MASE sí: dice que el pronóstico negativo es unas dos veces peor que el de c
 Y tiene razón, porque estar en $-1.000$ cuando la serie vale $1.000$ es el doble de
 distancia que estar en cero.
 
-Es el mismo fenómeno del @sec-saturacion, en su versión más simple. Un modelo que
+Es el mismo fenómeno de la @sec-saturacion, en su versión más simple. Un modelo que
 diverge queda disimulado en el sMAPE y arrastra sin límite el promedio del MASE. Al
 evaluar un conjunto de modelos, esa combinación es peligrosa en las dos direcciones:
 si se mira solo el sMAPE, los desastres pasan desapercibidos; si se mira solo el
@@ -1741,7 +1741,7 @@ donde el ganador cambiaba según el corte.
 
 La diferencia entre las dos series es la fuerza de la estacionalidad. `Q15481` tiene
 $F_S$ cercano a 0,94: su ciclo es tan dominante que ningún corte razonable lo hace
-desaparecer. En `M35927` el patrón estacional cambia con el tiempo —lo vimos en el
+desaparecer. En `M35927` el patrón estacional cambia con el tiempo —lo vimos en la
 @sec-soluciones-04— así que hay tramos donde repetir el último ciclo funciona muy
 bien y otros donde no.
 
@@ -1806,7 +1806,7 @@ Ejercicio abierto. Las cinco preguntas, en orden de cuánto pueden invalidar la
 afirmación:
 
 **1. ¿Sobre qué datos lo mediste?** Si el 8,3 salió de los datos de entrenamiento y
-el 14,2 del período de prueba, la comparación no existe. Es el error del
+el 14,2 del período de prueba, la comparación no existe. Es el error de la
 @sec-fuera-de-muestra y es el más común de todos.
 
 **2. ¿Cuál es la mediana, y cuántos casos extremos hay?** Un promedio de 8,3 puede
@@ -1816,7 +1816,7 @@ opuestos.
 
 **3. ¿En cuántas series corrió cada uno?** Si el modelo falló en las series difíciles
 y esas quedaron fuera del promedio, mientras el naive corrió en todas, el 8,3 se
-calculó sobre una población más fácil. Es la trampa del @sec-denominador.
+calculó sobre una población más fácil. Es la trampa de la @sec-denominador.
 
 **4. ¿Qué punto de corte y qué horizonte usaste?** Como muestra la @tbl-corte, el
 mismo método sobre la misma serie puede variar por un factor de cinco según dónde se
@@ -2267,7 +2267,7 @@ idéntica a la @eq-holt.
 La diferencia de sMAPE entre los dos es de centésimas sobre valores de una décima:
 ruido, no señal. En esta serie los dos métodos son el mismo método.
 
-Y eso completa el argumento del @sec-amortiguada. Amortiguar tiene un costo casi
+Y eso completa el argumento de la @sec-amortiguada. Amortiguar tiene un costo casi
 nulo cuando la tendencia es real —el parámetro se acomoda solo— y evita un desastre
 cuando no lo es, como en la @tbl-amortiguado. Una opción que no pierde casi nada en
 el mejor caso y gana mucho en el peor es una buena opción por omisión.
@@ -2351,7 +2351,7 @@ todo en series cortas donde el AICc tiene mucha varianza.
 La ventaja práctica del criterio de información es grande y conviene decirla: **no
 consume datos de prueba**. Se puede usar para elegir entre dieciocho modelos sin
 gastar ni una observación del período de evaluación, que es exactamente lo que hace
-la selección automática del @sec-seleccion-ets.
+la selección automática de la @sec-seleccion-ets.
 
 ### Ejercicio 6
 
@@ -2450,7 +2450,7 @@ de la @tbl-desacuerdo, y es interesante que aparezca en la primera serie que uno
 elija.
 
 Con una diferencia las dos coinciden en que la serie es estacionaria, y con dos
-también. Usaría **una**, por la regla del @sec-diferenciacion: la menor cantidad que
+también. Usaría **una**, por la regla de la @sec-diferenciacion: la menor cantidad que
 logre estacionariedad. La segunda diferencia no agrega nada y solo amplifica ruido.
 
 Vale la pena notar el detalle del p-valor de KPSS igual a 0,1000 exacto en dos
@@ -2546,7 +2546,7 @@ $\phi = 0{,}95$ y $\phi = 1$ con esa cantidad de datos.
 Dos consecuencias prácticas:
 
 **No rechazar no es evidencia de raíz unitaria.** Es la asimetría que ya apareció en
-el @sec-soluciones-04 con Ljung-Box: rechazar informa, no rechazar casi no informa.
+la @sec-soluciones-04 con Ljung-Box: rechazar informa, no rechazar casi no informa.
 
 **Diferenciar una serie muy persistente pero estacionaria no es un desastre.** Los
 pronósticos de un ARIMA con $d = 1$ sobre un proceso con $\phi = 0{,}95$ son casi
@@ -2580,7 +2580,7 @@ pd.DataFrame(filas).set_index("modelo")
 
 **No.** El ARIMA(2,1,2) tiene el AIC más bajo y el sMAPE más alto. Las diferencias
 son mínimas en los dos casos, así que no conviene sacar una conclusión fuerte de
-esta comparación en particular; el patrón sí es general y ya apareció en el
+esta comparación en particular; el patrón sí es general y ya apareció en la
 @sec-soluciones-09 con el AICc: el criterio de información mide ajuste dentro de la
 muestra, penalizado por complejidad, y el sMAPE mide error fuera de la muestra a
 dieciocho pasos.
@@ -2589,7 +2589,7 @@ Los dos residuos pasan la prueba de Ljung-Box con holgura, así que por ese lado
 ninguno de los dos modelos tiene estructura sin capturar.
 
 Lo que más llama la atención de esta tabla es otra cosa: **los dos modelos tienen un
-sMAPE cercano a 52**, malísimo. `M3007` es la serie del @sec-una-serie, la que se
+sMAPE cercano a 52**, malísimo. `M3007` es la serie de la @sec-una-serie, la que se
 multiplica por tres en menos de un año después de una década de calma. Ningún ARIMA
 estimado sobre la década de calma puede anticipar eso, y los dos fallan por igual.
 Es un recordatorio útil de que elegir bien entre especificaciones no ayuda cuando el
@@ -2641,7 +2641,7 @@ fig.update_xaxes(title="rezago")
 mostrar(fig)
 ```
 
-El artefacto aparece exactamente como lo anticipa el aviso del @sec-diferenciacion, y
+El artefacto aparece exactamente como lo anticipa el aviso de la @sec-diferenciacion, y
 en dos indicadores a la vez.
 
 **La autocorrelación del rezago 1 se vuelve cada vez más negativa**: pasa de $+0{,}98$
@@ -2699,14 +2699,14 @@ Las respuestas directas están en el conteo. Pero hay dos cosas en la tabla que 
 más que las respuestas.
 
 **Una serie recibe todos los órdenes en cero con $d = 1$.** Eso es un
-ARIMA(0,1,0), que como dice la tabla del @sec-modelo-arima **es el naive**. El
+ARIMA(0,1,0), que como dice la tabla de la @sec-modelo-arima **es el naive**. El
 algoritmo evaluó una docena de modelos con parámetros y concluyó que ninguno mejora
 sobre repetir el último valor. Es el resultado del @sec-que-es-pronosticar llegando
 por otra vía: cuando no hay estructura, la selección automática lo detecta y devuelve
 el método más simple.
 
 **Solo algo más de la mitad incluye términos estacionales**, aunque todas son series
-trimestrales y varias tienen estacionalidad visible. La razón es la misma del
+trimestrales y varias tienen estacionalidad visible. La razón es la misma de la
 @sec-soluciones-09 con ETS: cada término estacional cuesta parámetros y el criterio
 de información los penaliza. Con 50 u 80 observaciones trimestrales —entre 12 y 20
 ciclos completos— muchas veces no alcanza para justificarlos.
@@ -2776,7 +2776,7 @@ costo real de subir $p$ no es perder datos, es **perder casos para aprender** mi
 agregan columnas: las dos cosas empujan en la dirección de sobreajustar.
 
 En una serie de 56 observaciones, $p = 8$ deja 48 filas y 8 columnas —seis filas por
-columna—, apenas por debajo del criterio de diez que sugiere el
+columna—, apenas por debajo del criterio de diez que sugiere la
 @sec-cuantas-filas.
 
 ### Ejercicio 2
@@ -2883,7 +2883,7 @@ pd.DataFrame([
 
 Acá gana la **directa**, con casi la mitad del error.
 
-Y ese resultado es interesante porque es el contrario del que se obtuvo en el
+Y ese resultado es interesante porque es el contrario del que se obtuvo en la
 @sec-soluciones-08 con la misma serie. La diferencia está en los predictores: allá se
 usaban solo los rezagos 1 y 12, acá se usan los doce rezagos contiguos. Con doce columnas
 el modelo directo tiene con qué predecir seis pasos adelante sin pasar por la cadena; con
@@ -2932,9 +2932,9 @@ entrena con vecinos inmediatos de cada fila de prueba, y con sus respuestas.
 **La segunda es que evalúa una tarea distinta, y más fácil.** La partición aleatoria mide
 el error a **un paso** con predictores observados. El período de prueba mide el error a
 dieciocho pasos con predictores que el modelo inventó. Son dos problemas de dificultad muy
-distinta, como quedó claro en el @sec-horizonte.
+distinta, como quedó claro en la @sec-horizonte.
 
-En `M3007` la brecha es especialmente brutal porque es la serie del @sec-una-serie, la que
+En `M3007` la brecha es especialmente brutal porque es la serie de la @sec-una-serie, la que
 se acelera de golpe. La partición aleatoria reparte esa aceleración entre entrenamiento y
 prueba, así que el modelo la conoce; el período de prueba real la deja íntegramente del
 otro lado del corte.
@@ -3271,7 +3271,7 @@ el de mínimos cuadrados hasta el sexto decimal, y con $\lambda = 100$ el sMAPE 
 0,931 a 0,928: nada. Hay que llegar a $\lambda = 10^6$ para que la penalización empiece a
 morder.
 
-La razón está en el aviso del @sec-regularizacion. La serie tiene valores del orden de 1.000
+La razón está en el aviso de la @sec-regularizacion. La serie tiene valores del orden de 1.000
 y sus coeficientes de regresión son del orden de 0,1 a 1. La suma de cuadrados de los
 residuos es del orden de $10^5$; la suma de cuadrados de los coeficientes, del orden de la
 unidad. Cuando la @eq-ridge suma los dos términos, un $\lambda$ de 100 aporta una
@@ -3519,7 +3519,7 @@ El rango mediano es **41,15 puntos de sMAPE** y el medio 59,20. Comparado con el
 reportar mal el error.**
 
 Eso responde la pregunta del enunciado con un orden de magnitud, y la conclusión es la del
-recuadro del @sec-elegir-es-medir: el capítulo no argumenta contra la selección, argumenta
+recuadro de la @sec-elegir-es-medir: el capítulo no argumenta contra la selección, argumenta
 contra confundir el número de selección con el número de reporte.
 
 Pero hay una segunda lectura que no aparece en los promedios. El error de elegir mal se
@@ -3679,7 +3679,7 @@ ventanas de la @eq-ventana se solapan, predecir esas filas es casi copiar. El mo
 mejor de lo que es.
 
 El signo es entonces el que corresponde: **la fuga no empeora el modelo, empeora la
-medición**, y por eso agranda la brecha. Es la versión cuantificada de lo que el
+medición**, y por eso agranda la brecha. Es la versión cuantificada de lo que la
 @sec-trampa advierte, y la razón por la que ese capítulo insiste en `Pipeline`: el error no
 avisa, solo mejora los números.
 
@@ -3793,7 +3793,7 @@ for identificador in ("Q5655", "Q23425", "Y21804", "Y22817"):
 pd.DataFrame(promedios).mean().round(2).to_frame("sMAPE medio")
 ```
 
-El resultado justifica la tercera salida del @sec-costo-validacion mejor de lo que uno
+El resultado justifica la tercera salida de la @sec-costo-validacion mejor de lo que uno
 esperaría. **`snaive` fijo da 24,10 de sMAPE medio; el oráculo —el mejor método de cada serie,
 elegido con información que no se tiene— da 21,57; y el peor método da 46,33.**
 
@@ -3895,7 +3895,7 @@ estiman peor el futuro que el reciente.
 
 **Y el error absoluto mediano mejora**, con mínimo en cinco pliegues: 2,11, 1,71, **1,35**,
 1,51. Es la única de las tres columnas que se comporta como la teoría promete, y es exactamente
-la conclusión que el @sec-que-compra dio como la robusta: la validación cruzada mejora el caso
+la conclusión que la @sec-que-compra dio como la robusta: la validación cruzada mejora el caso
 típico. Que el mínimo esté en cinco y no en diez respalda además la recomendación de la
 @tbl-receta de quedarse en tres a cinco pliegues.
 
@@ -4180,7 +4180,7 @@ pliegues a 3 ahorra un 40 %; bajar de 10 candidatos a 3 ahorra un 70 %; y usar p
 paso 1 ahorra un 95 %.
 
 Lo que hace interesante la cuenta es cruzarla con lo que el capítulo midió. Las tres economías
-son casi gratis en precisión: el @sec-paso mostró que el paso 1 no mejora nada, la @tbl-sol-16-1
+son casi gratis en precisión: la @sec-paso mostró que el paso 1 no mejora nada, la @tbl-sol-16-1
 que cinco pliegues no son peores que diez, y el @sec-particiones que **de siete a diez candidatos
 el error de prueba no se movió**. Es decir que se puede pasar de 96,8 años-núcleo a menos de un
 año sin perder precisión medible.
@@ -4411,7 +4411,7 @@ representadas —3.017 Micro, 2.237 Macro, 1.825 Demographic, 1.144 Industry, 1.
 que el grupo no viene de un solo tipo de proceso. Lo único llamativo es la ausencia total de
 `Other`, la categoría de las horarias.
 
-**Y no, las tres reglas del @sec-fechas-ficcion no cambian.** El descubrimiento es tranquilizador
+**Y no, las tres reglas de la @sec-fechas-ficcion no cambian.** El descubrimiento es tranquilizador
 sobre la *coherencia interna* de cada lote y no sobre el anclaje. Que 6.355 series cubran de
 verdad los mismos 306 meses no dice que esos meses hayan sido enero de 1990 a junio de 2015: el
 lote pudo trasladarse entero al anonimizar, que es exactamente lo que pasó con los 2.493 bloques
@@ -4601,7 +4601,7 @@ De ahí sale un diagnóstico gratis, y es el verdadero valor del ejercicio. **Si
 error no mejora, el modelo está sesgado**, y eso es información que no requiere ninguna prueba
 estadística. Un modelo con sesgo sistemático se puede corregir sumándole una constante; uno con
 error simétrico grande, no. `M3007` no necesita otro modelo: necesita que alguien note el quiebre
-de nivel del @sec-soluciones-14.
+de nivel de la @sec-soluciones-14.
 
 ## Capítulo 17 · Predicción {#sec-soluciones-17}
 
@@ -4739,7 +4739,7 @@ un 6 % de la brecha. En cantidad de series ganadas empata con la recursiva, 11 a
 Con el bosque aleatorio la mejora es sustancial: 17,17 contra 19,31 de la directa, o sea que
 **recupera un tercio de lo que la directa pierde** frente a la recursiva.
 
-El mecanismo es coherente con el @sec-acumulacion. DirRec le da al modelo del paso $k$ las
+El mecanismo es coherente con la @sec-acumulacion. DirRec le da al modelo del paso $k$ las
 predicciones anteriores como entradas, así que le devuelve la información que la directa
 descarta: en la directa, el modelo del paso 8 no sabe nada de lo que se predijo para los pasos 1
 a 7. Eso ayuda más cuanto más capacidad tiene el modelo para usar esas entradas extra, y de ahí
@@ -4926,7 +4926,7 @@ fig.update_xaxes(title="paso del horizonte", dtick=2)
 mostrar(fig, alto=420, titulo_y="distancia relativa de la entrada (%)")
 ```
 
-La medición confirma el argumento del @sec-teoria-multipaso, y con una nitidez que sorprende.
+La medición confirma el argumento de la @sec-teoria-multipaso, y con una nitidez que sorprende.
 
 En el paso 1 la distancia es **exactamente cero**: la ventana son doce datos reales. A partir de
 ahí crece de manera monótona, y desde el paso 13 —marcado en el gráfico— la ventana no contiene
@@ -4943,7 +4943,7 @@ razonando sobre una historia inventada que difiere de la realidad en más del do
 
 Y acá está el remate, que es lo que hace valer el ejercicio: **en esa misma serie la estrategia
 recursiva le gana a la directa por amplio margen**, 71,24 contra 116,13. La acumulación de error
-es real, medible y enorme, **y sigue sin ser la restricción que decide.** El @sec-acumulacion lo
+es real, medible y enorme, **y sigue sin ser la restricción que decide.** La @sec-acumulacion lo
 mostró en promedio; acá se ve en el caso más desfavorable posible.
 
 La lectura correcta del argumento clásico es entonces: la realimentación degrada el pronóstico
@@ -5349,7 +5349,7 @@ sola columna más. Trece columnas contra doce no puede explicar un 29 % de deter
 la @fig-curva-rezagos, así que la característica está haciendo daño activo.
 
 La segunda pregunta explica por qué, y la respuesta es **no, no se puede calcular sobre
-predicciones sin caer en el problema del @sec-trampa-ventana.** Es peor que la desviación de la
+predicciones sin caer en el problema de la @sec-trampa-ventana.** Es peor que la desviación de la
 ventana, por dos razones:
 
 **No está acotada y crece sola.** Si el pronóstico se mantiene por debajo del máximo histórico, la
@@ -5360,7 +5360,7 @@ en el entrenamiento, donde nunca tomó ese valor en las últimas filas.
 un número grande a cero. El modelo tiene un coeficiente lineal para eso, así que un salto en la
 entrada produce un salto en la salida.
 
-La lección general es la del recuadro del @sec-trampa-ventana, formulada más fuerte: **una
+La lección general es la del recuadro de la @sec-trampa-ventana, formulada más fuerte: **una
 característica es segura en pronóstico recursivo si su valor sobre una trayectoria predicha vive en
 el mismo rango que sobre datos reales.** Los rezagos cumplen. La desviación de la ventana no
 cumple. Un contador de períodos desde un evento no cumple, y encima no puede volver a su rango
@@ -5424,7 +5424,7 @@ que los rezagos 2 y 5, que sobreviven en 13 cada uno. En una tabla donde la mayo
 son mensuales con $m = 12$, eso es exactamente lo que no debería pasar si Lasso estuviera
 encontrando estructura.
 
-La explicación es el aviso del @sec-grupos-rezagos, ahora con un conteo detrás. Los rezagos 11, 12
+La explicación es el aviso de la @sec-grupos-rezagos, ahora con un conteo detrás. Los rezagos 11, 12
 y 13 están fuertemente correlacionados entre sí, así que la penalización $\ell_1$ se queda con uno
 de los tres y anula los otros dos **sin ningún criterio estructural**: el que gana es el que casualmente
 tenga un poco más de correlación con el residuo en esa muestra. Sobre 25 series, esa lotería
@@ -5433,7 +5433,7 @@ reparte los votos entre 11, 12 y 13 en vez de concentrarlos en el 12.
 Y el histograma completo lo confirma: fuera del rezago 1, las frecuencias van de 6 a 14 sin ninguna
 estructura reconocible. **Lasso sobre rezagos consecutivos no es un selector de estructura: es un
 reductor de columnas con un empate resuelto al azar.** Si lo que se busca es identificar cuáles
-rezagos importan de verdad, el correlograma del @sec-cuales-rezagos lo hace mejor y más barato; y si
+rezagos importan de verdad, el correlograma de la @sec-cuales-rezagos lo hace mejor y más barato; y si
 lo que se busca es tener menos columnas, la @fig-curva-rezagos dice que alcanza con pedir doce.
 
 ## Capítulo 19 · Modelos básicos {#sec-soluciones-19}
@@ -5614,7 +5614,7 @@ Dos filas se salen del patrón y las dos son informativas.
 Ridge. Ahí el techo no es el problema: la serie es difícil por otro motivo y el pronóstico está lejos
 por todas partes.
 
-`M3007` tiene un margen de **217,5 %** —es el quiebre de nivel del @sec-soluciones-14— y a todos les
+`M3007` tiene un margen de **217,5 %** —es el quiebre de nivel de la @sec-soluciones-14— y a todos les
 falta un 68 %. Un modelo acotado no tiene ninguna chance, y Ridge tampoco, porque el quiebre no
 estaba anunciado en la pendiente.
 
@@ -5652,7 +5652,7 @@ pd.DataFrame(filas).set_index("k").round(2)
 La curva es limpia en las dos columnas: 16,02 con un vecino, 13,56 con dos, y de ahí sube de manera
 monótona hasta 18,05 con veinte. El $k = 3$ del capítulo da 14,43, cerca del óptimo pero no en él.
 
-La forma es la del @sec-cuantos-rezagos y el mecanismo también, con los roles invertidos. Acá $k$ es
+La forma es la de la @sec-cuantos-rezagos y el mecanismo también, con los roles invertidos. Acá $k$ es
 un **regularizador**: $k = 1$ copia la respuesta del vecino más parecido, que es máxima capacidad y
 máxima varianza; $k$ grande promedia respuestas de filas cada vez menos parecidas, que es sesgo. El
 mínimo está donde el promedio suaviza el ruido sin traer vecinos irrelevantes.
@@ -5759,7 +5759,7 @@ El sMAPE medio baja de 36,71 con el núcleo radial a 23,78 con el lineal y a **1
 $C = 1000$. Y la última columna es la que cierra el argumento: el núcleo radial supera el techo en
 **0 de 8** series y el lineal con $C = 1000$ lo supera en **6 de 8**.
 
-Eso confirma el diagnóstico del @sec-diferenciar y lo hace más preciso. El problema no era de la
+Eso confirma el diagnóstico de la @sec-diferenciar y lo hace más preciso. El problema no era de la
 familia SVR ni del tamaño de la muestra: era del **núcleo**. Una función de base radial decae hacia
 cero al alejarse de los datos de entrenamiento, así que la predicción tiende a la constante del
 término independiente, que en la escala de una serie de nivel 1.000 es un número sin sentido. El
@@ -5768,7 +5768,7 @@ capacidad de extrapolar.
 
 El papel de $C$ también es informativo: subirlo de 10 a 1.000 mejora 7,7 puntos. $C$ es el inverso
 de la regularización, así que un $C$ chico está aplastando los coeficientes hacia cero y con ellos
-la pendiente que hace falta para extrapolar. Es el mismo fenómeno del @sec-techo visto desde la
+la pendiente que hace falta para extrapolar. Es el mismo fenómeno de la @sec-techo visto desde la
 regularización en vez de desde la forma del modelo.
 
 La moraleja general no es sobre SVR: **antes de concluir que un modelo no sirve para pronóstico,
@@ -5825,7 +5825,7 @@ resumen.groupby("familia")[["primeros 6", "últimos 6", "crecimiento"]].mean().r
 En los primeros seis pasos los dos grupos son **indistinguibles**: 19,70 los acotados y 19,74
 Ridge. En los últimos seis, los acotados se van a 26,30 y Ridge se queda en 22,27, así que el error
 crece 6,60 en un grupo y 2,53 en el otro: **dos veces y media más rápido**. El motivo es directo: en una serie con tendencia, cada paso del horizonte
-aleja más al valor real del máximo que el modelo vio, y el @sec-soluciones-19 —ejercicio 2— midió
+aleja más al valor real del máximo que el modelo vio, y la @sec-soluciones-19 —ejercicio 2— midió
 que lo que le falta al modelo acotado es exactamente esa distancia. Cuanto más largo el horizonte,
 más grande la distancia.
 
@@ -6155,7 +6155,7 @@ El resultado apunta en la dirección que la hipótesis predice —**el enfoque g
 las series comparten estructura**— y hay que decir con la misma claridad que es un resultado de dos
 series y 340 filas. No sostiene nada por sí solo.
 
-Lo que sí sostiene es un diagnóstico sobre el diseño del experimento del @sec-modelo-global. El
+Lo que sí sostiene es un diagnóstico sobre el diseño del experimento de la @sec-modelo-global. El
 modelo global no perdió ahí por ser global: perdió porque se lo entrenó con once series elegidas
 **a propósito** para no parecerse. Es una condición del catálogo de este libro, y explica por qué el
 @sec-caso-m4 tiene que ir a buscar 4.773 series a otra parte.
@@ -6250,7 +6250,7 @@ $\rho = 0{,}741$, con lo cual su piso es **0,861**: aun promediando mil modelos 
 automático sobre la misma tabla de rezagos, la desviación del error bajaría un 14 % y no más. Los
 nueve tienen piso 0,701 y los cinco estadísticos, los más diversos, 0,630.
 
-Esto pone un número a lo que el recuadro del @sec-diversidad decía en palabras, y es el resultado
+Esto pone un número a lo que el recuadro de la @sec-diversidad decía en palabras, y es el resultado
 más útil del capítulo para decidir dónde poner el esfuerzo:
 
 > **Agregar miembros parecidos tiene un techo bajo y se alcanza rápido. La única manera de bajar el
@@ -6543,7 +6543,7 @@ series que alcanzan el 95 % real en prueba pasan de 15 a 18 sobre 30: mejora, no
 **El nivel calibrado mediano es 0,950**, o sea que en la mitad de las series el 95 % ya alcanzaba en
 validación y no hizo falta corregir nada. La mejora viene de la otra mitad, donde el nivel se subió
 hasta 0,999. Eso significa que **la calibración es muy desigual entre series**, y un valor global
-—"usá siempre 0,99"— no habría funcionado.
+—"usa siempre 0,99"— no habría funcionado.
 
 **Y el intervalo se ensancha.** No hay magia: cubrir más exige ser más ancho, y un intervalo más
 ancho es menos informativo. La calibración cambia una etiqueta falsa por una etiqueta honesta a
@@ -6683,7 +6683,7 @@ sorprender: 20,61 contra 17,78 en la media y 8,77 contra 12,09 en la mediana, me
 
 El patrón es el mismo que el @sec-ensambles midió en la @tbl-combinaciones y por el mismo motivo:
 **el promedio de trayectorias amortigua los desastres y estropea los casos buenos.** Cuando
-Holt-Winters se dispara en una serie —el @sec-saturacion documentó que llega a valores negativos—,
+Holt-Winters se dispara en una serie —la @sec-saturacion documentó que llega a valores negativos—,
 promediar diez versiones ajustadas a series sintéticas lo tira hacia el centro y salva la situación.
 Cuando Holt-Winters ya andaba bien, las diez series sintéticas son diez perturbaciones del original y
 el promedio se aleja del ajuste que servía.
@@ -6863,7 +6863,7 @@ Los dos números juntos dicen algo preciso y hay que leerlos así. El ensamble *
 corrida cualquiera —80 de 93 es una mayoría clara— y está muy lejos de la mejor corrida: 26,3 contra
 16,8 en promedio.
 
-Y eso es exactamente lo que corresponde esperar, aunque el recuadro del @sec-varianza-semilla sugiera
+Y eso es exactamente lo que corresponde esperar, aunque el recuadro de la @sec-varianza-semilla sugiera
 más. La mejor de cinco corridas es un **oráculo**: para elegirla hay que conocer el error de prueba.
 Es el mismo optimismo de la @eq-optimismo del @sec-particiones, con las semillas en el papel de
 candidatos. Comparar el ensamble contra la mejor corrida es comparar contra algo inalcanzable.
@@ -7022,15 +7022,15 @@ pequeña y no es cero.
 
 **`MLPRegressor` regulariza por omisión.** Trae `alpha=0.0001`, que es una penalización $\ell_2$
 chica. Es decir que el equivalente exacto no es mínimos cuadrados sino un Ridge con $\lambda$ muy
-chico — y el @sec-regularizacion ya midió que en estas tablas el efecto de $\lambda$ depende del
+chico — y la @sec-regularizacion ya midió que en estas tablas el efecto de $\lambda$ depende del
 escalado.
 
 **El pronóstico es recursivo.** Una diferencia mínima en el primer paso se realimenta durante $h$
-pasos, y el @sec-varianza-medida midió cómo eso amplifica. En `M39292`, con $h = 18$, una diferencia
+pasos, y la @sec-varianza-medida midió cómo eso amplifica. En `M39292`, con $h = 18$, una diferencia
 de coeficientes en el cuarto decimal se convierte en 1,6 puntos de sMAPE.
 
 La conclusión es la del enunciado con una precisión que el enunciado no pedía: **la equivalencia es
-del modelo, no del cómputo.** Es el mismo tipo de distinción que el @sec-posicion-estacional hizo
+del modelo, no del cómputo.** Es el mismo tipo de distinción que la @sec-posicion-estacional hizo
 entre Fourier e indicadoras: dos formulaciones del mismo objeto matemático pueden dar números
 distintos por cómo se las calcula.
 
@@ -7073,7 +7073,7 @@ Eso obliga a leer la @tbl-friedman de otra manera. **No es un ranking de 27 posi
 pocos grupos.** Con esta evidencia se puede decir que ARIMA, SARIMA y ETS están arriba, que las cinco
 redes están abajo, y que el orden dentro de cada grupo no está sostenido.
 
-Es la misma lección del @sec-varianza-semilla vista desde la estadística en vez de desde las
+Es la misma lección de la @sec-varianza-semilla vista desde la estadística en vez de desde las
 semillas, y las dos apuntan a la misma práctica: **reportar grupos y no puestos.** Un artículo que
 titula "el modelo X es el mejor" cuando X está a 0,03 de rango del segundo está reportando ruido con
 formato de resultado, y @demsar2006 propuso precisamente el diagrama de diferencias críticas para
@@ -7125,7 +7125,7 @@ ve más limpio.
 
 Vale notar también que el naive estacional se evalúa sobre 76.935 series y no 99.935, porque en las
 frecuencias con $m = 1$ no está definido como distinto del naive. Comparar las tres filas sin declarar
-eso sería comparar poblaciones distintas, que es la trampa del @sec-denominador.
+eso sería comparar poblaciones distintas, que es la trampa de la @sec-denominador.
 
 ### Ejercicio 2 {.unnumbered}
 
@@ -7156,7 +7156,7 @@ pd.DataFrame([
 **El cociente de las medias es 3,27 y el de las medianas 3,71**, y la diferencia va en la dirección
 contraria a la que uno esperaría.
 
-El reflejo habitual —y el que este libro viene aplicando desde el @sec-que-compra— es que la media
+El reflejo habitual —y el que este libro viene aplicando desde la @sec-que-compra— es que la media
 está inflada por la cola, así que el cociente de medias debería ser *mayor* que el de medianas. Acá es
 menor.
 
@@ -7170,7 +7170,7 @@ Un quiebre de nivel como el de `M3007` del @sec-los-datos puede estar en una ser
 simple, y ahí el naive falla feo. **El índice mide la estructura, y un evento puntual no es
 estructura.**
 
-La conexión con el @sec-agregacion es directa. Ninguno de estos dos cocientes es un promedio de
+La conexión con la @sec-agregacion es directa. Ninguno de estos dos cocientes es un promedio de
 razones serie por serie: los dos son razones de agregados, que es la forma correcta según la
 @eq-owa-m4. Calcular el promedio de $e_i^{Q4} / e_j^{Q1}$ no tendría sentido porque las series de los
 dos cuartiles no están emparejadas.
@@ -7207,7 +7207,7 @@ print("correlación de Pearson: "
 
 Las dos puntas están de acuerdo sin discusión. Horaria es primera en las dos columnas —correlación
 +0,736 y 39,1 % de series complejas— y diaria es última en las dos, con +0,019 y 1,7 %. Ese acuerdo es
-el que sostiene el argumento del @sec-donde-no-sirve: dos procedimientos distintos, el PCA y el
+el que sostiene el argumento de la @sec-donde-no-sirve: dos procedimientos distintos, el PCA y el
 clustering, identifican la misma frecuencia como la que no tiene estructura.
 
 En el medio se cruzan. Semanal es segunda por correlación y **quinta** por proporción de series
@@ -7266,7 +7266,7 @@ sin decir nada sobre las series. Si eso fuera todo, el $R^2$ de la frecuencia so
 comparable al del índice. Es cuatro veces menor.
 
 Y la segunda tabla muestra que el índice **sigue funcionando dentro de cada frecuencia**, con la
-variabilidad que el @sec-donde-no-sirve ya había mostrado: $R^2$ de 0,54 en horaria, 0,28 en semanal,
+variabilidad que la @sec-donde-no-sirve ya había mostrado: $R^2$ de 0,54 en horaria, 0,28 en semanal,
 0,20 en mensual, 0,17 en trimestral, 0,07 en anual y **0,0004 en diaria**.
 
 Vale poner el 0,54 de horaria al lado del 0,164 global. En la frecuencia donde las series tienen
@@ -7382,7 +7382,7 @@ Los tres que no son redondos —4.227 diarias, 414 horarias, 294 semanales— so
 Ahí el número lo puso la disponibilidad de datos, no una decisión, y por eso queda con la forma que
 queda.
 
-La distinción es la que importa para el diagnóstico del @sec-truncamiento: **lo sospechoso no es que
+La distinción es la que importa para el diagnóstico de la @sec-truncamiento: **lo sospechoso no es que
 un número sea redondo, es que sea redondo en la base equivocada.** 16.384 es redondo en base 2 y
 ridículo en base 10, y nadie elige 16.384 series a propósito. Un número redondo en base 2 es la firma
 de un límite técnico: un buffer, un formato de archivo, un tope de filas.
@@ -7484,7 +7484,7 @@ Solo funciona en semanal (+32,0 %), trimestral (+14,6 %) y anual (+8,3 %), que s
 frecuencias cuyas dinámicas se parecen a las de las demás.
 
 El caso horario explica el mecanismo. Sus 414 series tienen $m = 24$, más de 700 observaciones y un
-ciclo diario limpio: son las únicas de M4 con esa estructura, como el @sec-donde-si midió. El
+ciclo diario limpio: son las únicas de M4 con esa estructura, como la @sec-donde-si midió. El
 meta-modelo entrenado sobre las otras cinco frecuencias nunca vio nada parecido, así que **extrapola
 una regla aprendida en series de cien observaciones a series de novecientas**, y elige mal de manera
 sistemática.
@@ -7501,7 +7501,7 @@ salida de «no sé».** Si la serie que llega cae lejos del rango de caracterís
 —cosa que se puede medir con una distancia o con la probabilidad que el clasificador asigna—, la
 respuesta correcta es usar el método fijo por omisión, no la predicción del meta-modelo.
 
-Es la misma lección del techo de extrapolación del @sec-techo, un nivel más arriba: **un modelo
+Es la misma lección del techo de extrapolación de la @sec-techo, un nivel más arriba: **un modelo
 entrenado en un rango no sabe que está afuera de él a menos que se lo pregunte.**
 :::
 
@@ -7556,7 +7556,7 @@ pronósticos y promediar errores son operaciones distintas**, y solo la primera 
 cada método en cada serie: para las 99.935 series de M4, con los horizontes de cada frecuencia, son
 unos 3,4 millones de números por método. Es perfectamente factible —serían unos pocos cientos de
 megabytes— y es una decisión de diseño que hay que tomar **antes** de correr el experimento, porque
-volver a correrlo cuesta las veinte horas del @sec-costo.
+volver a correrlo cuesta las veinte horas de la @sec-costo.
 
 La lección general para cualquier pipeline de evaluación: **guardar los pronósticos, no solo las
 métricas.** Las métricas se recalculan de los pronósticos; los pronósticos no se recuperan de las
@@ -7600,7 +7600,7 @@ el **error total** de una cartera —un presupuesto agregado, una capacidad—, 
 las series difíciles, porque ahí están los puntos de sMAPE. Si lo que importa es el error **de cada
 serie por separado**, da lo mismo: el porcentaje que se gana es el mismo en todas.
 
-Y vale conectarlo con el @sec-donde-funciona-seleccion. Ahí el hueco variaba mucho **por frecuencia**
+Y vale conectarlo con la @sec-donde-funciona-seleccion. Ahí el hueco variaba mucho **por frecuencia**
 —0,0015 en horaria contra 0,0182 en semanal— y acá casi no varía por cuartil de complejidad. O sea
 que **la frecuencia predice mejor que la complejidad si conviene elegir**, que es la misma conclusión
 que la @fig-importancias sacó para elegir *qué* método.
@@ -7766,13 +7766,13 @@ sustituibles entre sí, así que la elección por costo no está dejando afuera 
 Y ese resultado es mejor de lo que parece para la aplicación de pronóstico. Significa que **se puede
 elegir el conjunto de características por criterios de ingeniería —costo, latencia, cuántos datos
 hacen falta para calcularlas— sin sacrificar casi nada de rendimiento.** No hace falta pagar los
-diecinueve segundos de `sample_entropy` del @sec-costo para tomar una buena decisión de modelo.
+diecinueve segundos de `sample_entropy` de la @sec-costo para tomar una buena decisión de modelo.
 
 Vale una advertencia sobre el procedimiento, igual. Las importancias con las que se armó el conjunto
 "por importancia" se calcularon con un modelo entrenado sobre el **mismo** conjunto de entrenamiento,
 así que hay una selección de características apoyada en datos que después se usan para evaluar. El
 efecto acá es chico —el hueco entre los dos conjuntos es de un punto y medio— pero es exactamente el
-tipo de fuga que el @sec-trampa advierte: **seleccionar variables es una decisión, y las decisiones se
+tipo de fuga que la @sec-trampa advierte: **seleccionar variables es una decisión, y las decisiones se
 toman con el conjunto de validación.**
 
 ## Capítulo 25 · De la evidencia a la producción {#sec-soluciones-25}
@@ -7949,7 +7949,7 @@ acotado no cambia nada.** Los números lo dicen mejor:
   las dos métricas se mueven en el segundo decimal y en direcciones opuestas, que es la manera
   numérica de decir que no pasó nada.
 
-Ridge recursivo no necesita la cota porque **ya la tiene incorporada**: el @sec-techo mostró que
+Ridge recursivo no necesita la cota porque **ya la tiene incorporada**: la @sec-techo mostró que
 todos los modelos acotados de aprendizaje automático no pueden pronosticar fuera del rango que
 vieron en el entrenamiento. Lo que en el @sec-modelos-basicos era una limitación acá es una defensa
 gratis.
@@ -8086,7 +8086,7 @@ saber qué mide la serie, no mirarla.
 **Último valor cero.** El naive pronostica cero, el sMAPE da
 `{python} f"{smape([5.0, 6, 4], np.repeat(TERMINA_EN_CERO[-1], 3)):.0f}"` —el máximo, saturado— y el
 MASE da `{python} f"{mase25([5.0, 6, 4], np.repeat(TERMINA_EN_CERO[-1], 3), TERMINA_EN_CERO, 1):.1f}"`.
-Otra vez la asimetría del @sec-cota-cordura: el sMAPE dice "lo peor posible" y el MASE dice "dos
+Otra vez la asimetría de la @sec-cota-cordura: el sMAPE dice "lo peor posible" y el MASE dice "dos
 veces y media el naive". El segundo número es el informativo.
 
 ### Ejercicio 5
@@ -8130,7 +8130,7 @@ segundo, y la diferencia en sMAPE era de pocos puntos.** Para un sistema que sir
 comparación no la decide la métrica de error sola.
 
 Y hay una salida que este libro no puede medir pero conviene nombrar: un **modelo global** —uno solo
-para todas las series, como el del @sec-modelo-global— convierte el almacenamiento de $S \cdot b$ en
+para todas las series, como el de la @sec-modelo-global— convierte el almacenamiento de $S \cdot b$ en
 $b$. Con extra trees eso sería un archivo de
 `{python} f"{SOL25_5.loc['extra trees', 'un modelo (kB)'] / 1000:.1f}"` MB en lugar de
 `{python} f"{SOL25_5.loc['extra trees', 'recursiva, 99.935 series (GB)']:.0f}"` GB.

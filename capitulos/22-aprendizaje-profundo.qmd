@@ -86,7 +86,7 @@ historia.
 
 **Convolucionales en una dimensión.** Aplican filtros que se deslizan sobre la serie, con lo cual
 aprenden patrones locales invariantes a la posición. Son la versión de aprendizaje profundo de los
-estadísticos de ventana móvil del @sec-trampa-ventana.
+estadísticos de ventana móvil de la @sec-trampa-ventana.
 
 **Transformers y N-BEATS.** El Transformer reemplaza la recurrencia por atención, y N-BEATS
 [@oreshkin2020] propone bloques que descomponen la serie en tendencia y estacionalidad de forma
@@ -164,7 +164,7 @@ serie: entrenó **un modelo global sobre las 100.000 series a la vez**, con una 
 suavizado exponencial por serie para manejar el nivel y la estacionalidad. La red aprendió lo que
 las series tienen en común, con cien mil series de datos.
 
-Es exactamente el enfoque global que el @sec-modelo-global midió y no pudo demostrar: con once
+Es exactamente el enfoque global que la @sec-modelo-global midió y no pudo demostrar: con once
 series heterogéneas del catálogo pierde, y con cien mil gana la competencia. **La arquitectura no
 es lo que separa a los dos resultados: es la cantidad de series.**
 :::
@@ -260,8 +260,8 @@ Dos cosas, y la primera es un error de implementación que vale más que el resu
 acotadas no puede producir salidas del orden de 5.000 partiendo de pesos inicializados cerca de cero.
 `TransformedTargetRegressor` con otro `StandardScaler` lo arregla en una línea.
 
-Es la tercera vez que el libro tropieza con lo mismo: el @sec-regularizacion midió que sin
-estandarizar $\lambda$ no significa nada, y el @sec-diferenciar que `SVR()` con núcleo radial es
+Es la tercera vez que el libro tropieza con lo mismo: la @sec-regularizacion midió que sin
+estandarizar $\lambda$ no significa nada, y la @sec-diferenciar que `SVR()` con núcleo radial es
 inaplicable a series de nivel. **Los valores por omisión de `scikit-learn` están pensados para
 clasificación en datos acotados**, y una serie de tiempo no es eso.
 
@@ -281,7 +281,7 @@ for etiqueta, seleccion in (("n / h < 10", MLP[MLP["n / h"] < 10]),
 pd.DataFrame(filas).set_index("series").T.round(2)
 ```
 
-La separación por largo confirma la regla del @sec-donde-si en pequeño. En las series largas el
+La separación por largo confirma la regla de la @sec-donde-si en pequeño. En las series largas el
 perceptrón mejora mucho —de 43,43 a 16,30 con la arquitectura más grande— y sigue estando al doble
 del error de *extra trees*, que da 7,97. **El perceptrón necesita más datos que los árboles para
 llegar al mismo lugar, y con 200 observaciones no los tiene.**
@@ -450,7 +450,7 @@ lo que hace falta para que un pronóstico salga de un notebook.
 
 ## Ejercicios
 
-Las soluciones están en el @sec-soluciones-22.
+Las soluciones están en la @sec-soluciones-22.
 
 **1.** El perceptrón sin escalar el objetivo da 57,60 de sMAPE medio. Mira qué pronostica en una
 serie concreta y explica el mecanismo: ¿el valor queda cerca de cero, cerca de la media, o en otro

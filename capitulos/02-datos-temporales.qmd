@@ -161,7 +161,7 @@ print(f"frecuencia   : {reparado.index.freq}")
 ```
 
 `asfreq` reconstruye el índice completo y el hueco aparece como lo que es: un
-`NaN` visible. De ahí en más es un problema de datos faltantes, que se trata en el
+`NaN` visible. De ahí en más es un problema de datos faltantes, que se trata en la
 @sec-faltantes, y no un problema silencioso.
 
 ::: {.callout-tip}
@@ -521,7 +521,7 @@ plt.show()
 
 ## Ejercicios
 
-Las soluciones están en el @sec-soluciones-02.
+Las soluciones están en la @sec-soluciones-02.
 
 **1.** Carga `H242` y comprueba que su índice tiene frecuencia y que no tiene
 faltantes. Después reconstruye el índice con
@@ -537,7 +537,7 @@ pronóstico. Después repárala con `asfreq` e `interpolate`, y vuelve a ajustar
 Grafica las dos. ¿En qué se parecen y en qué no? ¿Cuál usarías si fuera consumo
 eléctrico y tuvieras que dimensionar una red?
 
-**4.** El @sec-agregar-enganio muestra que el error del naive cae mucho al agregar
+**4.** La @sec-agregar-enganio muestra que el error del naive cae mucho al agregar
 a diario. Repite el cálculo con `H242` y con `H282`. ¿Se repite el patrón?
 Escribe en dos frases por qué esa caída no significa que el pronóstico diario sea
 mejor.

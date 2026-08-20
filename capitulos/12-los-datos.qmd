@@ -420,7 +420,7 @@ esa situación creyendo que las técnicas de la Parte II se aplican sin modifica
 | lo que aparece en datos reales | qué se rompe | qué hacer |
 |---|---|---|
 | huecos en el índice | los rezagos de la @eq-ventana dejan de ser rezagos: la fila mira $p$ *filas* atrás, no $p$ *períodos* | reindexar al calendario completo antes de construir características, y decidir explícitamente qué es un hueco |
-| ceros | el sMAPE se indefine y el MAPE explota | métricas con denominador de escala, como el MASE del @sec-metricas |
+| ceros | el sMAPE se indefine y el MAPE explota | métricas con denominador de escala, como el MASE de la @sec-metricas |
 | negativos | el logaritmo y la transformación de @boxcox1964 del @sec-descomposicion no aplican | modelar sin transformar, o transformar con un corrimiento declarado |
 | series intermitentes, con mayoría de ceros | la estacionalidad y la tendencia dejan de ser el fenómeno dominante | métodos específicos, que este libro no cubre |
 | revisiones de datos publicados | el valor que hoy se ve para el mes pasado no es el que se veía el mes pasado | guardar la versión *tal como estaba* en cada fecha |
@@ -432,7 +432,7 @@ sección siguiente.
 
 ## Fuga de información {#sec-fuga}
 
-El @sec-trampa listó tres formas concretas de usar información no disponible. Acá está el
+La @sec-trampa listó tres formas concretas de usar información no disponible. Acá está el
 criterio general del que las tres son casos particulares.
 
 Vale decir de entrada que no es un problema de principiantes. @kapoor2023 revisaron 294
@@ -457,7 +457,7 @@ tenía entonces.
 Con eso, las formas de fuga se ordenan de la más obvia a la más difícil de ver.
 
 **1. Usar el futuro directamente.** Un rezago negativo, una ventana centrada, un `shift(-1)`. Es
-la del @sec-rezagos y se detecta leyendo el código.
+la de la @sec-rezagos y se detecta leyendo el código.
 
 **2. Usar estadísticas del conjunto completo.** Ajustar un `StandardScaler`, imputar con la
 media, seleccionar variables o fijar hiperparámetros mirando todos los datos. El valor de cada
@@ -533,18 +533,18 @@ mensual y uno de 19 semestral describen el mismo pronóstico, así que comparar 
 distintos niveles no significa nada. Hay que fijarlo antes y decirlo.
 
 **Si a quien pide el pronóstico le importa el total del trimestre, hay que medir el total del
-trimestre.** El @sec-que-reportar insiste en reportar la métrica que corresponde a la decisión;
+trimestre.** La @sec-que-reportar insiste en reportar la métrica que corresponde a la decisión;
 esto es lo mismo un paso antes, en la definición de la unidad.
 
 Y el caso que rompe la regla vale mirarlo: en `M3007` el error **empeora** al agregar, de 50,75 a
-63,57. Es la serie con el quiebre de nivel del @sec-soluciones-14, y sus errores mensuales no se
+63,57. Es la serie con el quiebre de nivel de la @sec-soluciones-14, y sus errores mensuales no se
 cancelan porque tienen todos el mismo signo: el modelo se queda corto todos los meses. **La
 cancelación al agregar es un beneficio de los errores sin sesgo; con un modelo sesgado, agregar
 acumula el sesgo.**
 
 ## Ejercicios
 
-Las soluciones están en el @sec-soluciones-12.
+Las soluciones están en la @sec-soluciones-12.
 
 **1.** Grafica las tres series del catálogo con el cociente `únicos / n` más bajo de la
 @tbl-diagnostico. Decide para cada una si es un defecto o una propiedad, y justifica con el
@@ -559,7 +559,7 @@ armó el conjunto?
 
 **4.** La @tbl-bloques sugiere que cada fecha repetida es un lote de procedencia. Comprueba si
 las 9.248 series del 1 de enero de 1990 comparten además categoría, y decide si el lote es una
-fuente única o varias. ¿Cambia eso alguna de las tres reglas del @sec-fechas-ficcion?
+fuente única o varias. ¿Cambia eso alguna de las tres reglas de la @sec-fechas-ficcion?
 
 **5.** Toma una serie mensual del catálogo, borra al azar el 10 % de las observaciones y compara
 los rezagos que salen de reindexar al calendario completo contra los que salen de ignorar los
@@ -567,7 +567,7 @@ huecos. ¿Cuántas filas quedan mal y cuánto cambia el sMAPE?
 
 **6.** Calcula el sesgo de un pronóstico de Holt-Winters sobre `M3007` —el error medio con signo,
 no el absoluto— y sobre `M35927`. Después mide el error de los dos a nivel mensual y anual.
-¿Se cumple lo que dice el @sec-agregacion-temporal sobre los modelos sesgados?
+¿Se cumple lo que dice la @sec-agregacion-temporal sobre los modelos sesgados?
 
 ## Referencias {.unnumbered}
 

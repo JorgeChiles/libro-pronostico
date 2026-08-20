@@ -24,7 +24,7 @@ def smape(real, pron):
     return 200 * np.mean(np.abs(real - pron) / (np.abs(real) + np.abs(pron)))
 ```
 
-El @sec-r2 mostró que el $R^2$ sube al agregar predictores de ruido puro mientras el error
+La @sec-r2 mostró que el $R^2$ sube al agregar predictores de ruido puro mientras el error
 de pronóstico empeora. Este capítulo explica por qué pasa eso, cómo se llama y qué hacer al
 respecto.
 
@@ -74,7 +74,7 @@ conjunto $\mathcal{F}$ de la @eq-perdida. Subir la capacidad baja el sesgo y sub
 varianza.
 
 La manera más clara de verlo es con polinomios de grado creciente ajustados al índice
-temporal, que es la @eq-tendencia del @sec-tendencia-predictor con más términos:
+temporal, que es la @eq-tendencia de la @sec-tendencia-predictor con más términos:
 
 $$
 y_t = \beta_0 + \beta_1 t + \beta_2 t^2 + \cdots + \beta_G t^G + \varepsilon_t
@@ -369,7 +369,7 @@ regularización sin escalar sobre una serie de valores del orden de 10.000, un $
 100 no cambia absolutamente nada, porque es despreciable frente a la escala de la suma de
 cuadrados.
 
-Es el complemento del @sec-escalado: allá vimos que estandarizar no importa cuando todas
+Es el complemento de la @sec-escalado: allá vimos que estandarizar no importa cuando todas
 las columnas son rezagos de la misma variable; acá importa siempre, porque lo que se
 compara no son las columnas entre sí sino cada coeficiente contra la penalización.
 :::
@@ -514,7 +514,7 @@ pd.DataFrame([
 ]).set_index("síntoma")
 ```
 
-La última fila merece atención: apareció de verdad en el @sec-soluciones-07, donde una serie
+La última fila merece atención: apareció de verdad en la @sec-soluciones-07, donde una serie
 de 56 observaciones daba un error de prueba menor que el de entrenamiento. No es imposible,
 pero casi siempre significa que el período de prueba es corto o poco representativo.
 
@@ -525,14 +525,14 @@ tomar una decisión. La solución es un tercer conjunto, y de eso trata el @sec-
 
 ## Ejercicios
 
-Las soluciones están en el @sec-soluciones-14.
+Las soluciones están en la @sec-soluciones-14.
 
 **1.** Reproduce la @tbl-grados sobre `M3007`, la serie del @sec-que-es-pronosticar, y
 después sobre `Q1915`. ¿En qué grado está el mínimo del error de prueba en cada una? En
 M3007 el error de prueba del mejor polinomio es enorme comparado con el de M39292: grafica
 la serie completa y explica por qué, y por qué ninguna elección de grado lo podía evitar.
 
-**2.** Usando el procedimiento del @sec-varianza-medida, estima el término de varianza para
+**2.** Usando el procedimiento de la @sec-varianza-medida, estima el término de varianza para
 grados 1 a 12 sobre una serie del catálogo y grafícalo. ¿Crece de manera suave o se dispara
 a partir de cierto grado?
 
@@ -544,7 +544,7 @@ tabla de 24 rezagos y grafica el sMAPE contra $\lambda$. ¿Se ve la U de la
 rezagos sobreviven en Lasso. ¿Están entre ellos el rezago 1 y el rezago estacional?
 
 **5.** Corre la @tbl-regularizacion sin el `StandardScaler`. ¿Qué le pasa al efecto de
-$\lambda$? Explica el resultado con el aviso del @sec-regularizacion.
+$\lambda$? Explica el resultado con el aviso de la @sec-regularizacion.
 
 **6.** Toma una serie larga del catálogo y ajusta un polinomio de grado 12 con el 50 %, el
 70 % y el 90 % de los datos. ¿Cómo cambia el error de prueba al aumentar los datos de

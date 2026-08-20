@@ -388,7 +388,7 @@ veredicto.**
 
 ## Ejercicios
 
-Las soluciones están en el @sec-soluciones-17.
+Las soluciones están en la @sec-soluciones-17.
 
 **1.** Implementa la estrategia **DirRec** de @bentaieb2012: como la directa, pero el modelo del
 paso $k$ recibe además las predicciones de los pasos anteriores. Compárala con las tres del

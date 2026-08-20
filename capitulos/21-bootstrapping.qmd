@@ -19,7 +19,7 @@ from libro.graficos import COLORES, mostrar
 warnings.simplefilter("ignore")
 ```
 
-El @sec-intervalos construyó intervalos de predicción con una fórmula: el pronóstico más o menos
+La @sec-intervalos construyó intervalos de predicción con una fórmula: el pronóstico más o menos
 $z$ veces la desviación de los residuos, ensanchándose con la raíz del horizonte. Este capítulo
 reemplaza la fórmula por una simulación, y después mide algo que el libro todavía no había medido:
 **si un intervalo del 95 % contiene el valor real el 95 % de las veces.**
@@ -309,7 +309,7 @@ app = App(app_ui, servidor)
 Antes de comparar el bootstrap con la fórmula hay que corregir una cosa, y es un error fácil de
 cometer.
 
-El ancho $\propto \sqrt{h}$ del @sec-intervalos es el del **paseo aleatorio**: cada paso hacia
+El ancho $\propto \sqrt{h}$ de la @sec-intervalos es el del **paseo aleatorio**: cada paso hacia
 adelante acumula una varianza $\sigma^2$ más, así que a $h$ pasos la varianza es $h\sigma^2$. Para el
 naive eso es correcto. Para el **naive estacional** no lo es, porque el pronóstico del paso $k$ no
 se apoya en el paso $k-1$ sino en el valor de hace $m$ períodos. La varianza crece por **ciclos
@@ -491,7 +491,7 @@ pequeño.
 
 ## Ejercicios
 
-Las soluciones están en el @sec-soluciones-21.
+Las soluciones están en la @sec-soluciones-21.
 
 **1.** El bootstrap del capítulo remuestrea residuos de forma independiente. Verifica si los
 residuos de `snaive` están autocorrelacionados con el Ljung-Box del @sec-arima. ¿En cuántas series

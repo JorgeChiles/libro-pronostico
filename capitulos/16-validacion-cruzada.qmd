@@ -117,7 +117,7 @@ con la recomendación habitual.
 
 La validación cruzada de $k$ pliegues del aprendizaje automático clásico sortea las
 observaciones en $k$ grupos y usa cada grupo por turno como conjunto de evaluación. En series
-de tiempo eso está mal por las dos razones del @sec-particion: fuga entre vecinos y evaluación
+de tiempo eso está mal por las dos razones de la @sec-particion: fuga entre vecinos y evaluación
 que interpola en vez de extrapolar.
 
 Con una salvedad importante que conviene no saltear. @bergmeir2018 demuestran que para modelos
@@ -127,7 +127,7 @@ lo que el vecino sabía ya está en los predictores. El ejercicio 4 lo verifica 
 encuentra que en esas condiciones la validación cruzada aleatoria es prácticamente insesgada.
 
 O sea: la prohibición no es sobre el sorteo, es sobre el sorteo cuando el modelo puede memorizar
-al vecino. El @sec-trampa lo midió del lado en que la prohibición vale.
+al vecino. La @sec-trampa lo midió del lado en que la prohibición vale.
 
 La versión temporal reemplaza el sorteo por un **origen de pronóstico que se mueve**. Se elige
 una sucesión de orígenes $o_1 < o_2 < \cdots < o_k$ y para cada uno se ajusta el modelo con lo
@@ -143,7 +143,7 @@ donde $\hat{f}^{(o_j)}$ es el modelo reajustado usando solo los datos hasta $o_j
 importa: **cada pliegue reajusta**. Si el modelo se ajusta una vez con toda la serie y después
 se evalúa en varios tramos, lo que se mide no es pronóstico sino memoria.
 
-Con $k = 1$ y $o_1 = n - h$ la @eq-cv-temporal es exactamente la partición del
+Con $k = 1$ y $o_1 = n - h$ la @eq-cv-temporal es exactamente la partición de la
 @sec-tres-conjuntos. Todo lo que sigue es la pregunta de qué pasa al subir $k$.
 
 ```{python}
@@ -619,7 +619,7 @@ algo.
 
 ## Lo que la validación cruzada no arregla {#sec-cv-no-arregla}
 
-El @sec-costo-validacion propuso la validación cruzada como primera salida para las cuatro
+La @sec-costo-validacion propuso la validación cruzada como primera salida para las cuatro
 series del catálogo demasiado cortas para apartar un bloque. Conviene medir si funciona.
 
 ```{python}
@@ -685,7 +685,7 @@ información para apartar un bloque; es que falta información, punto.** La vali
 resuelve el problema contable de no tener dónde apartar el bloque y no resuelve el problema
 estadístico de no tener datos.
 
-La conclusión es la tercera salida del @sec-costo-validacion y no la primera: cuando la serie es
+La conclusión es la tercera salida de la @sec-costo-validacion y no la primera: cuando la serie es
 así de corta, **un método fijo y sensato le gana a cualquier procedimiento de selección**,
 porque no tiene varianza de selección. El @sec-seleccion-escala vuelve sobre esto con más
 series.
@@ -715,7 +715,7 @@ estimaciones ruidosas, y sigue haciendo falta un conjunto de prueba que no se ha
 
 ## Ejercicios
 
-Las soluciones están en el @sec-soluciones-16.
+Las soluciones están en la @sec-soluciones-16.
 
 **1.** Reproduce la @tbl-estimadores con 3 y con 10 pliegues en vez de 5. ¿El sesgo sigue
 bajando al agregar pliegues? ¿Y el error absoluto?

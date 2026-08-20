@@ -142,7 +142,7 @@ $$
 c_j = \frac{1}{|R_j|} \sum_{i \,\in\, R_j} y_i
 $$ {#eq-arbol}
 
-Cada $c_j$ es una media de valores observados, así que **la @eq-arbol también está acotada**. El
+Cada $c_j$ es una media de valores observados, así que **la @eq-arbol también está acotada**. La
 @sec-extrapolacion lo midió en un bosque; más abajo se ve que es una propiedad de la forma de la
 ecuación, no de un modelo.
 
@@ -197,7 +197,7 @@ resultado que más contradice la sabiduría recibida sobre datos tabulares [@gri
 diferencia con esos resultados está en el tamaño: los conjuntos tabulares donde el boosting brilla
 tienen decenas de miles de filas.
 
-**SVR con núcleo radial es un desastre**: 36,71, peor que `naive`. Lo dejo en la tabla porque el
+**SVR con núcleo radial es un desastre**: 36,71, peor que `naive`. Lo dejo en la tabla porque la
 @sec-diferenciar explica por qué y cómo se arregla, y porque es útil ver que un modelo respetable
 puede ser inaplicable a un problema por un motivo estructural.
 
@@ -226,7 +226,7 @@ están por encima de ella**, o sea que cuestan cómputo y no le ganan a repetir 
 
 ## El techo de los modelos acotados {#sec-techo}
 
-El @sec-extrapolacion mostró que un bosque aleatorio no puede pronosticar por encima del máximo
+La @sec-extrapolacion mostró que un bosque aleatorio no puede pronosticar por encima del máximo
 que vio. Las ecuaciones @eq-knn y @eq-arbol dicen que eso no es del bosque: es de cualquier modelo
 cuya predicción sea un promedio de respuestas observadas.
 
@@ -271,7 +271,7 @@ promedia sobre las dos situaciones.
 
 ## Diferenciar, y por qué no alcanza {#sec-diferenciar}
 
-El @sec-quitar-tendencia propuso el remedio: ajustar el modelo sobre la serie diferenciada y
+La @sec-quitar-tendencia propuso el remedio: ajustar el modelo sobre la serie diferenciada y
 reconstruir acumulando. La serie de diferencias no tiene tendencia, así que el techo deja de estar
 en el camino. En la serie de aquel capítulo funcionó de manera espectacular.
 
@@ -321,7 +321,7 @@ pd.DataFrame([
 ]).set_index("modelo").round(2)
 ```
 
-Acá hay que corregir la lectura que dejó el @sec-quitar-tendencia, y es una corrección que importa.
+Acá hay que corregir la lectura que dejó la @sec-quitar-tendencia, y es una corrección que importa.
 
 **Diferenciar empeora la media en siete de los nueve modelos.** El árbol sin límite pasa de 16,24
 a 23,23, el boosting de 17,13 a 24,16, el bosque de 13,21 a 19,00. Solo mejoran Ridge —de 14,88 a
@@ -334,7 +334,7 @@ perjudica perjudica mucho.**
 El motivo es la reconstrucción. El pronóstico en diferencias se convierte en pronóstico de nivel
 acumulando, y una suma acumulada **acumula también el sesgo**: si el modelo sobrestima la diferencia
 típica en una cantidad chica, el nivel reconstruido se va alejando linealmente con el horizonte. Es
-el mismo mecanismo que el @sec-agregacion-temporal midió al agregar un pronóstico sesgado, aplicado
+el mismo mecanismo que la @sec-agregacion-temporal midió al agregar un pronóstico sesgado, aplicado
 al revés.
 
 ::: {.callout-warning}
@@ -342,7 +342,7 @@ al revés.
 
 Diferenciar **no** es una mejora general para modelos basados en árboles. Es un remedio para un
 diagnóstico específico: la serie tiene tendencia sostenida y el techo de la @tbl-techo está
-activo. El @sec-quitar-tendencia lo midió en `Q1915`, que es exactamente ese caso, y ahí funciona.
+activo. La @sec-quitar-tendencia lo midió en `Q1915`, que es exactamente ese caso, y ahí funciona.
 Generalizarlo a las treinta series lo da vuelta.
 
 La regla operativa que queda: **diferenciar si el diagnóstico del recuadro anterior dice que el
@@ -427,7 +427,7 @@ otro lado, que es el que funciona: en vez de achicar el modelo, agrandar los dat
 ## Pruébalo {#sec-probalo-19}
 
 La celda que sigue corre cuatro de estos modelos en tu navegador. Arranca con la única de las
-cuatro series donde el techo del @sec-techo se activa, y avisa cuando no se activa. Cambia `cual`
+cuatro series donde el techo de la @sec-techo se activa, y avisa cuando no se activa. Cambia `cual`
 y mira dos cosas: cuál gana en cada serie, y qué le pasa a la columna del máximo pronosticado.
 
 ```{pyodide}
@@ -528,7 +528,7 @@ optimizarla es regularizar. El @sec-ensambles lleva esa idea hasta el final.
 
 ## Ejercicios
 
-Las soluciones están en el @sec-soluciones-19.
+Las soluciones están en la @sec-soluciones-19.
 
 **1.** *Extra trees* gana en la media y en la mediana pero solo en una serie es el mejor. ¿Cómo se
 explica? Compáralo con el bosque aleatorio serie por serie y mira la distribución de las
@@ -537,14 +537,14 @@ diferencias.
 **2.** Repite la @tbl-techo pero midiendo cuánto **subestima** cada modelo en las ocho series donde
 el techo se activa. ¿La subestimación es del tamaño de la distancia al máximo?
 
-**3.** Barre el número de vecinos $k$ de 1 a 20 en la @eq-knn. ¿Hay una U como la del
+**3.** Barre el número de vecinos $k$ de 1 a 20 en la @eq-knn. ¿Hay una U como la de la
 @sec-cuantos-rezagos? ¿Dónde está el mínimo, y coincide con el $k$ que este capítulo usó?
 
 **4.** El boosting perdió con 120 iteraciones. Prueba `max_iter` de 5 a 500 en escala logarítmica
 sobre las series largas solamente. ¿Cuántas iteraciones aguantan?
 
 **5.** Con SVR, compara el núcleo radial contra el lineal sobre el nivel de la serie. ¿El lineal
-resuelve el problema del @sec-diferenciar sin necesidad de diferenciar?
+resuelve el problema de la @sec-diferenciar sin necesidad de diferenciar?
 
 **6.** Toma las tres series del catálogo con tendencia más marcada y calcula, para cada modelo, el
 error en los primeros seis pasos y en los últimos seis. ¿La brecha entre lineales y acotados crece

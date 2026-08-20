@@ -95,7 +95,7 @@ Dos elementos de la @eq-perdida deciden casi todo lo que viene. El conjunto
 $\mathcal{F}$ —qué formas se le permiten a $f$— es la **capacidad** del modelo, y es el
 tema del @sec-sobreajuste. Y la pérdida $L$ es lo que el modelo minimiza: conviene que se
 parezca a la métrica con la que después se lo va a juzgar, porque casi todos los
-algoritmos usan error cuadrático por omisión, que como vimos en el @sec-metricas apunta a
+algoritmos usan error cuadrático por omisión, que como vimos en la @sec-metricas apunta a
 la media y no a la mediana.
 
 ## Cuántas filas quedan {#sec-cuantas-filas}
@@ -131,7 +131,7 @@ el camino.
 
 La @eq-ventana usa $p$ rezagos consecutivos, y eso gasta columnas. Para capturar
 estacionalidad mensual con rezagos contiguos hacen falta doce; con rezagos elegidos
-—$\{1, 2, 12\}$— alcanzan tres, y el @sec-rezagos-predictores mostró que esa selección
+—$\{1, 2, 12\}$— alcanzan tres, y la @sec-rezagos-predictores mostró que esa selección
 funciona igual o mejor.
 
 Elegir cuáles rezagos entran es ingeniería de características, el tema del
@@ -261,7 +261,7 @@ la transformación previa, no en el algoritmo.**
 Es el resultado más importante de este capítulo, y contradice el reflejo habitual de
 buscar un modelo mejor cuando el pronóstico falla. Acá el problema no era la capacidad
 del modelo: era una incompatibilidad entre lo que el modelo puede representar y la forma
-de la serie. La diferenciación del @sec-diferenciacion, que apareció como requisito de
+de la serie. La diferenciación de la @sec-diferenciacion, que apareció como requisito de
 ARIMA, resulta ser también un requisito de los modelos basados en árboles, por una razón
 completamente distinta.
 
@@ -330,13 +330,13 @@ Tres formas concretas de meterla, las tres fáciles de cometer.
 de distancia y sortea filas. Como las ventanas se solapan —la fila $i$ y la $i+1$
 comparten $p-1$ valores—, cualquier partición aleatoria pone en entrenamiento información
 de las filas de prueba. @bergmeir2012 analizan con detalle cuándo esa contaminación
-importa y cuándo no. Es el error del @sec-particion, disfrazado de buena práctica.
+importa y cuándo no. Es el error de la @sec-particion, disfrazado de buena práctica.
 
 **Escalar antes de partir.** Si el `StandardScaler` se ajusta sobre la tabla completa, su
 media y su desviación incluyen el período de prueba, y el modelo recibe datos
 normalizados con estadísticas del futuro.
 
-**Construir características con ventanas centradas.** Es la trampa del @sec-rezagos, y en
+**Construir características con ventanas centradas.** Es la trampa de la @sec-rezagos, y en
 una tabla de decenas de columnas pasa desapercibida.
 
 ::: {.callout-important}
@@ -404,7 +404,7 @@ El @sec-caso-m4 aplica el enfoque global a M4 y mide cuánto rinde.
 
 ## Ejercicios
 
-Las soluciones están en el @sec-soluciones-13.
+Las soluciones están en la @sec-soluciones-13.
 
 **1.** Construye la tabla supervisada de `Q22252` con $p = 4$ y con $p = 8$. ¿Cuántas
 filas quedan en cada caso? ¿Qué fracción de la serie se pierde?
@@ -413,7 +413,7 @@ filas quedan en cada caso? ¿Qué fracción de la serie se pierde?
 comparten la fila 0 y la fila 1. Explica en una frase por qué eso invalida una partición
 aleatoria.
 
-**3.** Repite el experimento del @sec-extrapolacion con `M39292`, otra serie con
+**3.** Repite el experimento de la @sec-extrapolacion con `M39292`, otra serie con
 tendencia. ¿Se repite el techo del bosque aleatorio? ¿Cuánto lo mejora diferenciar?
 
 **4.** Usando `tabla_supervisada` con $h = 6$, entrena un modelo que prediga seis pasos
