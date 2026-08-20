@@ -339,32 +339,74 @@ Ninguna está aplicada todavía.
 
 ---
 
-## Un defecto conocido del catálogo curado
+## El defecto del catálogo curado, corregido
 
-El @sec-los-datos —capítulo 12— documenta que `M16834` tiene sus primeras 435 de
-504 observaciones de entrenamiento en el valor 10.000 exacto: es un relleno, no
-datos. La serie está en el catálogo como ejemplar del fenómeno *tendencia y
-estacionalidad* para la frecuencia mensual, y eso es una mala elección.
+El @sec-los-datos —capítulo 12— documenta que `M16834` tiene 435 de sus 504
+observaciones de entrenamiento en el valor 10.000 exacto: es un relleno, no
+datos. La serie estaba en el catálogo como ejemplar de *tendencia y
+estacionalidad* para la frecuencia mensual, y eso era una mala elección.
 
-**Por qué pasó.** La selección de `libro/_construir_catalogo.py` usa el índice de
-complejidad estructural, que resume 29 descriptores por componentes principales.
-Ninguno de los 29 pregunta si hay una racha larga de valores idénticos. El índice
-midió bien lo que mide: la serie tiene tendencia y estacionalidad en su último
-14 %.
+**Por qué pasó.** La selección de `libro/_construir_catalogo.py` usa el índice
+de complejidad estructural, que resume 29 descriptores por componentes
+principales. Ninguno de los 29 pregunta si hay una racha larga de valores
+idénticos. El índice midió bien lo que mide: la serie tiene tendencia y
+estacionalidad en su último 14 %.
 
-**Cuál es la corrección.** Agregar un descriptor de racha máxima —la función
-`racha_maxima` del capítulo 12 sirve tal cual— como filtro de exclusión en
-`FENOMENOS`, y sumar `M16834` a `SERIES_DEL_LIBRO` para que siga viajando en el
-repositorio, porque los capítulos 2, 4 y 12 la usan.
+**Qué se hizo.** Se agregó `racha_maxima` como descriptor número 30 —viaja en
+`metadatos.parquet` para las 99.935 series— y se usa como filtro de exclusión:
+ninguna serie con una racha mayor al 20 % de su largo puede representar un
+fenómeno. El umbral sale de la distribución medida sobre las 100.000 series: la
+mediana tiene una racha del 1,5 % de su largo, el percentil 99 llega al 11 %, el
+máximo al 92 %, y el corte en 20 % excluye 257 series, el 0,26 %. Ninguna
+frecuencia pierde más del 0,54 % de las suyas. `M16834` da 86 %.
 
-**Por qué no está hecho todavía.** Regenerar el catálogo cambia qué series lo
-componen, y con eso los números de las tablas agregadas de los capítulos 5, 13,
-15 y 16, que ya están escritos con valores citados en la prosa. La corrección es
-correcta y la churn es real; es una decisión de cuándo, no de si.
+`M16834` sigue viajando porque los capítulos 2, 4 y 12 la nombran, con la
+etiqueta `usada-en-el-texto`. Su cupo lo tomó `Q23601`, trimestral, 699
+observaciones, racha máxima de dos.
 
-Mientras no se haga, el defecto está explicado en el capítulo 12 a la vista del
-lector, con la medición de cuánto cuesta: Holt-Winters pasa de 2,799 a 7,634 de
-sMAPE por entrenar con el relleno, y `naive` no se entera.
+**El segundo defecto, que apareció al arreglar el primero.** La primera
+regeneración cambió cinco series en vez de una. La causa no era el filtro: la
+curación ordenaba las candidatas con `sort_values` sin especificar el algoritmo,
+y el `quicksort` de pandas no es estable. En fenómenos con cientos de empatados
+—hay cientos de series anuales con exactamente 13 observaciones— el desempate lo
+decidía el orden accidental de las filas, así que el catálogo no era reproducible
+ante ningún cambio de entrada. Con el desempate explícito por identificador y
+`kind="stable"`, regenerar dos veces da el mismo catálogo y el cambio quedó
+acotado a lo que tenía que ser.
+
+**El mecanismo de fijar series también cambió.** `SERIES_DEL_LIBRO` pasó de
+`id → motivo` a `id → (etiqueta, motivo)`: una serie fijada conserva la etiqueta
+del fenómeno que ilustra y consume uno de sus cupos, en vez de sumarse aparte
+como `usada-en-el-texto`. Sin eso, fijar las cinco series que los capítulos 13,
+15 y 16 nombran por identificador les habría cambiado la etiqueta y habría
+desplazado al resto del catálogo. Dos pruebas nuevas lo fijan: que la etiqueta
+declarada sea la del catálogo, y que ningún ejemplar supere el umbral de racha.
+
+**Dos agujeros en las defensas, encontrados al hacer el cambio.** Los dos daban
+compilación en verde con el libro mal, que es la peor combinación posible.
+
+1. `freeze: auto` mira la fecha del `.qmd`, no la de los parquet. Después de
+   regenerar el catálogo, los capítulos que no se editaron siguieron publicando
+   los números del catálogo anterior. Ahora `make catalogo` borra `_freeze`.
+2. `quarto render ... | tee` devuelve el estado de salida de `tee`, así que
+   `make libro` terminaba en 0 aunque el render abortara a la mitad. Se agregó
+   `set -o pipefail` y `SHELL := /bin/bash`. El error que lo destapó fue mío
+   —una variable de capítulo pisada al reescribir prosa— y se publicó en verde.
+
+Para encontrar qué prosa quedó desactualizada se comparó el `_freeze` versionado
+en git contra el nuevo: los números que dejaron de aparecer en alguna salida y
+todavía estaban escritos en el texto. Dieron 128 en siete documentos, y esa lista
+es exacta, no una búsqueda a ojo.
+
+**Lo que costó.** El catálogo pasó de 34 a 35 series, así que todos los agregados
+que se calculan sobre él se movieron. Los capítulos que los citaban en prosa
+pasaron a calcularlos en línea, que era la manera de que no vuelva a pasar. Tres
+conclusiones cambiaron de signo y se reescribieron: la elastic net del capítulo 18
+ya no le gana a no regularizar, el error de Ridge en el ejercicio 6 del capítulo 19
+deja de crecer con el horizonte, y el ejercicio 3 del capítulo 22 pasa de
+contradecir a la tesis a reproducirla.
+
+---
 
 ## Las tres defensas de la aplicación, ahora medidas
 

@@ -142,6 +142,43 @@ def test_las_series_que_el_texto_nombra_viajan_en_el_repositorio():
     )
 
 
+def test_las_series_fijadas_conservan_la_etiqueta_declarada():
+    """Fijar una serie no debe cambiarle el fenómeno que ilustra.
+
+    `SERIES_DEL_LIBRO` declara con qué etiqueta viaja cada serie fijada, y esa
+    etiqueta es la que la prosa de los capítulos da por cierta: el 15 dice que
+    `Y21804` es una serie corta, el 12 dice que `M16834` está por el texto y no
+    por ilustrar nada.
+    """
+    from libro._construir_catalogo import SERIES_DEL_LIBRO
+
+    cat = catalogo().set_index("serie")["fenomeno"]
+    mal = {
+        serie: (etiqueta, cat[serie])
+        for serie, (etiqueta, _) in SERIES_DEL_LIBRO.items()
+        if cat[serie] != etiqueta
+    }
+    assert not mal, f"etiqueta declarada ≠ etiqueta del catálogo: {mal}"
+
+
+def test_ninguna_serie_rellenada_ilustra_un_fenomeno():
+    """El filtro que dejó a `M16834` afuera sigue puesto.
+
+    Una serie con un quinto de su historia en un solo valor repetido enseña el
+    relleno, no el fenómeno. Ver el capítulo 12.
+    """
+    from libro._construir_catalogo import RACHA_MAXIMA_TOLERADA
+
+    meta = metadatos().set_index("serie")
+    cat = catalogo()
+    ejemplares = cat[cat["fenomeno"] != "usada-en-el-texto"]["serie"]
+    rachas = meta.loc[ejemplares, "racha_relativa"]
+    culpables = rachas[rachas > RACHA_MAXIMA_TOLERADA]
+    assert culpables.empty, (
+        f"estas ilustran un fenómeno con una racha demasiado larga:\n{culpables}"
+    )
+
+
 def test_sin_descarga_no_se_cuelga_sino_que_avisa(monkeypatch):
     """Con LIBRO_SIN_DESCARGA puesta, nada intenta bajar cientos de megabytes."""
     from libro.datos.rutas import descargas_permitidas

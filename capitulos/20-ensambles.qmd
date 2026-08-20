@@ -208,7 +208,8 @@ pd.DataFrame({
 ```
 
 Antes de combinar conviene mirar quiénes son, porque ahí está la explicación de todo el capítulo.
-**Holt da 49,86 y `extra trees` 12,62: el peor miembro es cuatro veces peor que el mejor.**
+**Holt da `{python} f"{ENS["Holt"].mean():.2f}".replace(".", ",")` y `extra trees` `{python} f"{ENS["extra trees"].mean():.2f}".replace(".", ",")`: el peor miembro es cuatro
+veces peor que el mejor.**
 
 El desastre de Holt no es nuevo. La @sec-saturacion ya lo había documentado: Holt extrapola una
 tendencia lineal a 48 pasos y en las series horarias llega a valores negativos, en series que solo
@@ -244,25 +245,28 @@ referencias = pd.DataFrame({
                       ENS["el mejor miembro (oráculo)"].median()],
 }, index=["— extra trees solo —", "— el mejor miembro, con el futuro a la vista —"])
 
-pd.concat([resumen, referencias]).round(2)
+COMBINA = pd.concat([resumen, referencias])
+COMBINA.round(2)
 ```
 
 La tabla contradice el eslogan de manera ordenada.
 
-**El promedio simple de los nueve es la segunda peor fila: 18,53.** Es peor que seis de los nueve
+**El promedio simple de los nueve es la segunda peor fila: `{python} f"{COMBINA.loc["promedio de los 9", "sMAPE medio"]:.2f}".replace(".", ",")`.** Es peor que seis de los nueve
 miembros por separado. Promediar todo lo que hay a mano no es combinar: es dejar que el peor
 miembro arruine a los demás.
 
-**El promedio de los cinco estadísticos es la peor de todas: 26,04.** Es la que contiene a Holt con
+**El promedio de los cinco estadísticos es la peor de todas: `{python} f"{COMBINA.loc["promedio de los estadísticos", "sMAPE medio"]:.2f}".replace(".", ",")`.** Es la que contiene a Holt con
 un peso de un quinto en vez de un noveno.
 
-**La mediana de los nueve, en cambio, funciona: 13,18.** No cambió ningún método ni ningún peso;
+**La mediana de los nueve, en cambio, funciona: `{python} f"{COMBINA.loc["mediana de los 9", "sMAPE medio"]:.2f}".replace(".", ",")`.** No cambió ningún método ni ningún peso;
 cambió el estadístico de agregación por uno que **ignora los extremos**. Ese solo cambio recupera
-5,35 puntos de sMAPE.
+`{python} f"{COMBINA.loc['promedio de los 9', 'sMAPE medio'] - COMBINA.loc['mediana de los 9', 'sMAPE medio']:.2f}".replace(".", ",")`
+puntos de sMAPE.
 
-**Y ninguna combinación le gana a elegir uno solo.** Elegir el mejor por validación da 12,61 y el
-mejor promedio —los dos mejores de validación— da 12,50: una diferencia de una décima sobre 30
-series, que es ruido. `extra trees` solo da 12,62.
+**Y ninguna combinación le gana a elegir uno solo.** Elegir el mejor por validación da `{python} f"{COMBINA.loc["elegir uno por validación", "sMAPE medio"]:.2f}".replace(".", ",")` y el mejor promedio
+—los dos mejores de validación— da `{python} f"{COMBINA.loc["promedio de los 2 mejores en validación", "sMAPE medio"]:.2f}".replace(".", ",")`: una
+diferencia de una décima sobre `{python} f"{len(ENS)}"` series, que es ruido. `extra trees` solo da
+`{python} f"{COMBINA.loc["— extra trees solo —", "sMAPE medio"]:.2f}".replace(".", ",")`.
 
 ::: {.callout-important}
 ## Lo que este resultado sí dice y lo que no
@@ -282,9 +286,9 @@ de prueba.
 
 ## Por qué el promedio de aprendizaje automático no gana más {#sec-diversidad}
 
-Queda una pregunta que la @tbl-combinaciones no contesta. El promedio de los cuatro modelos de
-aprendizaje automático da 13,00, y todos sus miembros son buenos. ¿Por qué no le gana a `extra
-trees` solo, que da 12,62?
+Queda una pregunta que la @tbl-combinaciones no contesta. El promedio de los cuatro modelos de aprendizaje automático da
+`{python} f"{COMBINA.loc["promedio de los de aprendizaje", "sMAPE medio"]:.2f}".replace(".", ",")`, y todos sus miembros son buenos. ¿Por qué no le gana a
+`extra trees` solo, que da `{python} f"{COMBINA.loc["— extra trees solo —", "sMAPE medio"]:.2f}".replace(".", ",")`?
 
 La respuesta está en la otra mitad de la @eq-varianza-combinacion.
 
@@ -316,16 +320,24 @@ for etiqueta, subconjunto in (("los 9", NOMBRES),
                   "factor de varianza": factor,
                   "reducción de la desviación": np.sqrt(factor)})
 
-pd.DataFrame(filas).set_index("subconjunto").round(3)
+DIVERSIDAD = pd.DataFrame(filas).set_index("subconjunto")
+DIVERSIDAD.round(3)
 ```
 
 Ahí está. **Los cuatro modelos de aprendizaje automático tienen una correlación media de errores de
-0,741**, y el bosque con `extra trees` llega a **0,928**: son prácticamente el mismo modelo. Por la
-@eq-varianza-combinacion, promediar cuatro miembros con $\rho = 0{,}74$ reduce la desviación del
-error a 0,898 de la original: **un 10 %**, y eso es lo mejor que se puede esperar.
+`{python} f"{DIVERSIDAD.loc["los 4 de aprendizaje", "correlación media ρ"]:.3f}".replace(".", ",")`**, y el bosque con
+`extra trees` llega a **`{python} f"{DIVERSIDAD.loc["bosque y extra trees", "correlación media ρ"]:.3f}".replace(".", ",")`**:
+son prácticamente el mismo modelo. Por la @eq-varianza-combinacion, promediar cuatro miembros con
+ese $\rho$ reduce la desviación del error a
+`{python} f"{DIVERSIDAD.loc["los 4 de aprendizaje", "reducción de la desviación"]:.3f}".replace(".", ",")` de la original:
+**un `{python} f"{100 * (1 - DIVERSIDAD.loc['los 4 de aprendizaje', 'reducción de la desviación']):.0f}"` %**,
+y eso es lo mejor que se puede esperar.
 
-Los cinco estadísticos, en cambio, tienen $\rho = 0{,}397$ y su factor predice una reducción al
-0,720: **un 28 %.** Son mucho más diversos, porque `naive` y `Holt-Winters` fallan en situaciones
+Los cinco estadísticos, en cambio, tienen
+$\rho = `{python} f"{DIVERSIDAD.loc['los 5 estadísticos', 'correlación media ρ']:.3f}".replace(".", "{,}")`$
+y su factor predice una reducción al
+`{python} f"{DIVERSIDAD.loc["los 5 estadísticos", "reducción de la desviación"]:.3f}".replace(".", ",")`:
+**un `{python} f"{100 * (1 - DIVERSIDAD.loc['los 5 estadísticos', 'reducción de la desviación']):.0f}"` %.** Son mucho más diversos, porque `naive` y `Holt-Winters` fallan en situaciones
 distintas —correlación 0,16 entre sus errores— mientras que dos ensambles de árboles fallan juntos.
 
 Y ahí se cierra el capítulo con una tensión que el catálogo no permite resolver:
@@ -342,7 +354,7 @@ automático la tienen; los estadísticos, con Holt adentro, no.
 En este catálogo **ningún subconjunto tiene las dos**, y por eso ninguna combinación despega. El
 camino que sí funciona es evidente una vez planteado así: **armar un conjunto de métodos que fallen
 en situaciones distintas y que ninguno sea catastrófico.** Es lo que hicieron los ganadores de M4,
-y el @sec-caso-m4 lo mide con 4.773 series en vez de treinta.
+y el @sec-caso-m4 lo mide con 4.773 series en vez de treinta y cinco.
 :::
 
 ## El modelo global {#sec-modelo-global}
@@ -428,7 +440,7 @@ Y esto es un límite del libro, no del método, así que conviene decirlo sin ad
 ::: {.callout-warning}
 ## Este catálogo no puede demostrar el enfoque global
 
-El catálogo curado tiene 34 series elegidas para **cubrir fenómenos distintos**, que es lo contrario
+El catálogo curado tiene 35 series elegidas para **cubrir fenómenos distintos**, que es lo contrario
 de lo que un modelo global necesita. Con 4.636 filas de once series heterogéneas, el enfoque global
 está condenado a perder, y las dos mediciones —acá y en la @sec-muchas-series— dicen lo mismo.
 
@@ -446,11 +458,11 @@ demostración a escala equivocada.**
 
 | decisión | qué hacer | evidencia de este capítulo |
 |---|---|---|
-| ¿promediar o elegir? | con miembros desparejos, elegir; con miembros parejos, promediar | 12,61 eligiendo contra 18,53 promediando todo |
-| ¿qué miembros? | descartar primero con validación los que están muy por debajo | el promedio de los 2 mejores da 12,50 y el de los 9 da 18,53 |
-| ¿qué estadístico? | mediana si hay riesgo de un miembro catastrófico | 13,18 contra 18,53 con los mismos nueve métodos |
+| ¿promediar o elegir? | con miembros desparejos, elegir; con miembros parejos, promediar | elegir por validación le gana al promedio de los nueve por más de cinco puntos |
+| ¿qué miembros? | descartar primero con validación los que están muy por debajo | el promedio de los 2 mejores es la mejor fila de la tabla y el de los 9 es la anteúltima |
+| ¿qué estadístico? | mediana si hay riesgo de un miembro catastrófico | con los mismos nueve métodos, la mediana recupera cinco puntos sobre la media |
 | ¿cuántos? | pocos y diversos antes que muchos y parecidos | bosque y extra trees tienen $\rho = 0{,}93$: promediarlos no aporta |
-| ¿pesos? | el promedio simple del subconjunto bueno alcanza | ponderar por validación da 13,14 y no mejora al promedio de los mejores |
+| ¿pesos? | el promedio simple del subconjunto bueno alcanza | ponderar por validación no le gana al promedio de los dos mejores |
 | ¿modelo global? | solo con miles de series que compartan estructura | 19,02 contra 15,90 con once series heterogéneas |
 
 : Decisiones al combinar pronósticos, según lo medido acá. {#tbl-receta-ensambles}
@@ -459,7 +471,8 @@ La fila de los pesos merece una nota, porque es donde más esfuerzo se suele gas
 revisa la teoría de los pesos óptimos y el hallazgo repetido de la literatura empírica es que **el
 promedio simple es difícil de superar**: estimar $K$ pesos con datos escasos agrega varianza de
 estimación que se come la mejora teórica. Acá se ve en pequeño: ponderar por el error de validación
-da 13,14 contra los 12,50 del promedio simple de los dos mejores.
+da `{python} f"{COMBINA.loc["ponderado por el error de validación", "sMAPE medio"]:.2f}".replace(".", ",")` contra los
+`{python} f"{COMBINA.loc["promedio de los 2 mejores en validación", "sMAPE medio"]:.2f}".replace(".", ",")` del promedio simple de los dos mejores.
 
 ## Ejercicios
 

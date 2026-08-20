@@ -16,7 +16,7 @@ warnings.simplefilter("ignore")
 ```
 
 La Parte II terminó con una deuda. La @sec-modelo-global no pudo demostrar el enfoque global
-porque el catálogo tiene 34 series elegidas para ser distintas entre sí; el @sec-ensambles no pudo
+porque el catálogo tiene 35 series elegidas para ser distintas entre sí; el @sec-ensambles no pudo
 mostrar una combinación que le gane al mejor miembro porque sus nueve métodos no eran ni diversos ni
 parejos; y el @sec-aprendizaje-profundo tuvo que citar resultados en vez de entrenar redes.
 
@@ -464,7 +464,7 @@ distribución de tamaños, no las primeras filas.**
 
 | deuda de la Parte II | qué muestra este capítulo |
 |---|---|
-| el enfoque global no se pudo demostrar con 34 series | el ganador de M4 lo aplicó a 100.000 y obtuvo OWA 0,821 contra el 0,936 del mejor método por serie |
+| el enfoque global no se pudo demostrar con 35 series | el ganador de M4 lo aplicó a 100.000 y obtuvo OWA 0,821 contra el 0,936 del mejor método por serie |
 | las combinaciones no le ganaron al mejor miembro | los dos primeros puestos de M4 fueron combinaciones |
 | el aprendizaje profundo se citó sin entrenar | 4.773 series y 26 modelos ponen a las cinco redes en los cinco últimos puestos |
 | las conclusiones se apoyaban en 30 series | el índice de complejidad separa 99.935 series en grupos con error 3,27 veces distinto |

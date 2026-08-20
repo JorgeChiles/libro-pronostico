@@ -419,7 +419,7 @@ ESTIMADORES = ["un corte", "CV expansiva", "CV deslizante", "CV ponderada"]
 
 ```{python}
 #| label: tbl-estimadores
-#| tbl-cap: "Cuatro estimadores del error de prueba, evaluados sobre 26 series del catálogo por 10 métodos. El sesgo es la estimación menos el error real; negativo significa optimista."
+#| tbl-cap: "Cuatro estimadores del error de prueba, evaluados sobre las series del catálogo suficientemente largas, por 10 métodos. El sesgo es la estimación menos el error real; negativo significa optimista."
 filas = []
 for nombre in ESTIMADORES:
     diferencia = PARES[nombre] - PARES["prueba"]
@@ -430,15 +430,18 @@ for nombre in ESTIMADORES:
         "error absoluto mediano": diferencia.abs().median(),
     })
 
-pd.DataFrame(filas).set_index("estimador").round(2)
+TABLA_ESTIMADORES = pd.DataFrame(filas).set_index("estimador")
+TABLA_ESTIMADORES.round(2)
 ```
 
 La @tbl-estimadores no dice lo que uno esperaría, y vale leerla despacio.
 
-**El error absoluto mediano mejora**: 2,14 con validación cruzada expansiva contra 2,78 con un
+**El error absoluto mediano mejora**: `{python} f"{TABLA_ESTIMADORES.loc["CV expansiva", "error absoluto mediano"]:.2f}".replace(".", ",")` con
+validación cruzada expansiva contra `{python} f"{TABLA_ESTIMADORES.loc["un corte", "error absoluto mediano"]:.2f}".replace(".", ",")` con un
 solo corte. En la serie típica, promediar cinco orígenes estima mejor el error futuro.
 
-**El error absoluto medio empeora**: 8,65 contra 7,43. Es decir, la validación cruzada acierta
+**El error absoluto medio empeora**: `{python} f"{TABLA_ESTIMADORES.loc["CV expansiva", "error absoluto medio"]:.2f}".replace(".", ",")` contra
+`{python} f"{TABLA_ESTIMADORES.loc["un corte", "error absoluto medio"]:.2f}".replace(".", ",")`. Es decir, la validación cruzada acierta
 mejor en el caso típico y se equivoca más en el promedio. Media y mediana apuntando en
 direcciones opuestas es la firma de una distribución con cola: hay unas pocas series donde la
 validación cruzada estima mucho peor y arrastran el promedio.
@@ -469,7 +472,8 @@ escondido: cuando una medición propia no reproduce la recomendación de la lite
 honesto es publicar las dos y explicar de qué depende la diferencia.
 :::
 
-Y la ventana deslizante es la peor de las cuatro en error absoluto —11,52— aunque tenga el
+Y la ventana deslizante es la peor de las cuatro en error absoluto
+—`{python} f"{TABLA_ESTIMADORES.loc["CV deslizante", "error absoluto medio"]:.2f}".replace(".", ",")`— aunque tenga el
 menor sesgo. El motivo es directo: tira datos. Su ventaja de la @eq-expansiva-deslizante —que
 todos los pliegues midan lo mismo— se paga con modelos peor estimados en todos ellos.
 
@@ -536,7 +540,9 @@ con $j = 1$ el origen más reciente. Los pesos de la tabla son 0,40, 0,25, 0,18,
 que decaen aproximadamente a la mitad cada dos pliegues.
 
 El resultado es el compromiso que uno esperaría de la @sec-donde-gana: error absoluto medio de
-8,04, entre el 7,43 del corte único y el 8,65 de la validación cruzada plana. **La ponderación
+`{python} f"{TABLA_ESTIMADORES.loc["CV ponderada", "error absoluto medio"]:.2f}".replace(".", ",")`, entre el
+`{python} f"{TABLA_ESTIMADORES.loc["un corte", "error absoluto medio"]:.2f}".replace(".", ",")` del corte único y el
+`{python} f"{TABLA_ESTIMADORES.loc["CV expansiva", "error absoluto medio"]:.2f}".replace(".", ",")` de la validación cruzada plana. **La ponderación
 es un dial continuo entre los dos extremos**, y el ejercicio 3 lo recorre con pesos
 $w_j \propto \gamma^{\,j-1}$: con $\gamma \to 0$ se recupera el corte único y con
 $\gamma = 1$ el promedio plano.
@@ -696,10 +702,10 @@ Todo lo medido en el capítulo, en seis líneas:
 
 | decisión | recomendación | por qué |
 |---|---|---|
-| usarla o no | sí, si importa el caso típico | mejora la mediana (2,14 contra 2,78) y empeora la media (8,65 contra 7,43) |
+| usarla o no | sí, si importa el caso típico | mejora la mediana (2,03 contra 2,42) y empeora la media (8,37 contra 7,19) |
 | cuántos pliegues | 3 a 5 | más pliegues no mejoraron la elección y el costo crece lineal |
 | paso entre orígenes | $h$, tramos disjuntos | el paso 1 cuesta doce veces más y da peor: los pliegues se solapan casi del todo |
-| ventana de ajuste | expansiva | la deslizante tira datos: 11,52 de error absoluto contra 8,65 |
+| ventana de ajuste | expansiva | la deslizante tira datos: 11,78 de error absoluto contra 8,37 |
 | cómo promediar | pesos que decaen hacia atrás | dial continuo entre el corte único y el promedio plano |
 | cuándo no usarla | caminata aleatoria y series muy cortas | los orígenes viejos son irrelevantes; con 13 datos elige ruido |
 

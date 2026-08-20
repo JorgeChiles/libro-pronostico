@@ -255,7 +255,8 @@ pd.DataFrame({
 
 Dos cosas, y la primera es un error de implementación que vale más que el resultado.
 
-**Escalar el objetivo cambia el sMAPE de 57,60 a 29,30: casi la mitad del error.** El
+**Escalar el objetivo cambia el sMAPE de `{python} f"{MLP["perceptrón sin escalar el objetivo"].mean():.2f}".replace(".", ",")` a
+`{python} f"{MLP["perceptrón (32,)"].mean():.2f}".replace(".", ",")`: casi la mitad del error.** El
 `StandardScaler` del `Pipeline` escala las **columnas** y no la respuesta, y una red con activaciones
 acotadas no puede producir salidas del orden de 5.000 partiendo de pesos inicializados cerca de cero.
 `TransformedTargetRegressor` con otro `StandardScaler` lo arregla en una línea.
@@ -265,8 +266,11 @@ estandarizar $\lambda$ no significa nada, y la @sec-diferenciar que `SVR()` con 
 inaplicable a series de nivel. **Los valores por omisión de `scikit-learn` están pensados para
 clasificación en datos acotados**, y una serie de tiempo no es eso.
 
-**Y aun bien implementado, el perceptrón pierde.** 25,93 en el mejor caso contra 12,55 de *extra
-trees* y 15,31 de `snaive`. Gana en 3 series de 31 contra las 8 de *extra trees*.
+**Y aun bien implementado, el perceptrón pierde.** `{python} f"{MLP["perceptrón (64, 32)"].mean():.2f}".replace(".", ",")` en el mejor
+caso contra `{python} f"{MLP["extra trees"].mean():.2f}".replace(".", ",")` de *extra trees* y `{python} f"{MLP["snaive"].mean():.2f}".replace(".", ",")` de `snaive`. Gana en
+`{python} f"{int(MLP[COLUMNAS].idxmin(axis=1).value_counts().get('perceptrón (64, 32)', 0))}"` series
+de `{python} f"{len(MLP)}"` contra las
+`{python} f"{int(MLP[COLUMNAS].idxmin(axis=1).value_counts().get('extra trees', 0))}"` de *extra trees*.
 
 ```{python}
 #| label: tbl-perceptron-largo
@@ -278,12 +282,14 @@ for etiqueta, seleccion in (("n / h < 10", MLP[MLP["n / h"] < 10]),
     fila.update(seleccion[COLUMNAS].mean().to_dict())
     filas.append(fila)
 
-pd.DataFrame(filas).set_index("series").T.round(2)
+MLP_LARGO = pd.DataFrame(filas).set_index("series").T
+MLP_LARGO.round(2)
 ```
 
-La separación por largo confirma la regla de la @sec-donde-si en pequeño. En las series largas el
-perceptrón mejora mucho —de 43,43 a 16,30 con la arquitectura más grande— y sigue estando al doble
-del error de *extra trees*, que da 7,97. **El perceptrón necesita más datos que los árboles para
+La separación por largo confirma la regla de la @sec-donde-si en pequeño. En las series largas el perceptrón mejora mucho
+—de `{python} f"{MLP_LARGO.loc["perceptrón (64, 32)"].iloc[0]:.2f}".replace(".", ",")` a `{python} f"{MLP_LARGO.loc["perceptrón (64, 32)"].iloc[1]:.2f}".replace(".", ",")`
+con la arquitectura más grande— y sigue estando al doble del error de *extra trees*, que da
+`{python} f"{MLP_LARGO.loc["extra trees"].iloc[1]:.2f}".replace(".", ",")`. **El perceptrón necesita más datos que los árboles para
 llegar al mismo lugar, y con 200 observaciones no los tiene.**
 
 ## El hallazgo que invalida los rankings finos {#sec-varianza-semilla}
@@ -430,7 +436,7 @@ inicializaciones del mismo modelo están menos correlacionados de lo que uno esp
 | ...pero ganó M4 | con un modelo global sobre 100.000 series y una componente de suavizado por serie |
 | las redes aprenden la estructura sola | solo con 700 observaciones o más: en horaria dan OWA 0,76 y globalmente 1,6 |
 | más datos, mejores comparaciones | con más datos las redes convergen entre sí y elegir un ganador es más arbitrario |
-| basta con ajustar hiperparámetros | el desvío por semilla es de 3,4 puntos de sMAPE, más grande que la mayoría de las brechas |
+| basta con ajustar hiperparámetros | el desvío mediano por semilla es de más de tres puntos de sMAPE, más grande que la mayoría de las brechas |
 
 : El aprendizaje profundo en pronóstico, contrastado con lo medido. {#tbl-cierre}
 
@@ -452,7 +458,7 @@ lo que hace falta para que un pronóstico salga de un notebook.
 
 Las soluciones están en la @sec-soluciones-22.
 
-**1.** El perceptrón sin escalar el objetivo da 57,60 de sMAPE medio. Mira qué pronostica en una
+**1.** El perceptrón sin escalar el objetivo da un sMAPE medio cuatro veces peor que el de `snaive`. Mira qué pronostica en una
 serie concreta y explica el mecanismo: ¿el valor queda cerca de cero, cerca de la media, o en otro
 lado? Y después busca en qué series el daño es mayor.
 

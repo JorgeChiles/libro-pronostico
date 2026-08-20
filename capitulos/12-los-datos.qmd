@@ -303,22 +303,40 @@ cartera con series así va a concluir que Holt-Winters no sirve, cuando lo que n
 datos.
 
 ::: {.callout-warning}
-## Un defecto del catálogo de este libro
+## Un defecto del catálogo de este libro, y cómo se arregló
 
-`M16834` está en el catálogo curado como ejemplar del fenómeno *tendencia y estacionalidad* para
-la frecuencia mensual. Es una mala elección, y el motivo es instructivo.
+Durante buena parte de la escritura de este libro, `M16834` estuvo en el catálogo curado como
+**ejemplar del fenómeno *tendencia y estacionalidad*** para la frecuencia mensual. Era una mala
+elección, y el motivo es más interesante que el error.
 
 La curación usa el índice de complejidad estructural del @sec-caracteristicas, que resume 29
-descriptores por componentes principales. Ninguno de esos 29 descriptores pregunta "¿hay una
-racha larga de valores idénticos?". El índice vio una serie con tendencia y estacionalidad
-—porque las tiene, en su último 14 %— y la etiquetó bien según lo que mide.
+descriptores por componentes principales. Ninguno de esos 29 pregunta "¿hay una racha larga de
+valores idénticos?". El índice vio una serie con tendencia y estacionalidad —porque las tiene, en
+su último 14 %— y la etiquetó bien según lo que mide. **El descriptor que faltaba es el que
+detecta el defecto, y por eso el defecto era invisible al procedimiento.**
 
-Queda documentado acá en vez de corregido en silencio, por dos razones. La primera es que
-`M16834` se usa en los ejercicios del @sec-datos-temporales y del @sec-descomposicion, y quien
-mire la tabla de rezagos de la solución del primero va a ver doce valores idénticos: ahora sabe
-por qué. La segunda es que **la corrección no es cambiar la serie sino agregar el descriptor que
-falta**, y eso cambia el catálogo entero y con él los números de varios capítulos. Es una
-decisión que se toma a la vista, no en una nota al pie.
+La corrección fue agregar ese descriptor, medirlo sobre las 100.000 series y usarlo como filtro de
+exclusión: una serie no puede representar un fenómeno si su racha más larga pasa del 20 % de su
+largo. El umbral sale de la distribución, no del gusto: la serie mediana de M4 tiene una racha del
+1,5 % de su largo, el percentil 99 llega al 11 %, y el corte en 20 % excluye 257 series —el
+0,26 %—. `M16834`, con 435 de 504, da 86 %.
+
+`M16834` sigue viajando en el repositorio, porque el @sec-datos-temporales, el
+@sec-descomposicion y este capítulo la nombran, pero ahora con la etiqueta `usada-en-el-texto`:
+está en el libro porque el texto la usa, no porque ilustre nada. Su cupo de *tendencia y
+estacionalidad* lo tomó `Q23601`, una serie trimestral de 699 observaciones cuya racha máxima es
+de dos.
+
+Y arreglarlo destapó un segundo defecto, este del procedimiento y no de los datos. Al cambiar el
+conjunto de candidatas, el catálogo cambió **cinco** series en vez de una: la curación ordenaba
+por puntaje con el algoritmo por omisión de pandas, que no es estable, y en fenómenos con cientos
+de series empatadas —hay cientos de series anuales con exactamente 13 observaciones— el desempate
+lo decidía el orden accidental de las filas. Con el desempate escrito de manera explícita, por
+identificador, el cambio quedó en lo que tenía que ser: entra `Q23601`, `M16834` cambia de
+etiqueta, y nada más se mueve.
+
+**La lección es la del capítulo, aplicada al propio libro: el procedimiento que elige los datos
+también hay que auditarlo, y también conviene que sea reproducible.**
 :::
 
 ## Cómo encontrar estas cosas {#sec-diagnostico}
@@ -328,7 +346,7 @@ ajustar cualquier cosa.
 
 ```{python}
 #| label: tbl-diagnostico
-#| tbl-cap: "Diagnóstico elemental sobre las 34 series del catálogo; solo las que levantan alguna bandera. La racha es la cantidad máxima de valores idénticos consecutivos."
+#| tbl-cap: "Diagnóstico elemental sobre las series del catálogo; solo las que levantan alguna bandera. La racha es la cantidad máxima de valores idénticos consecutivos."
 def racha_maxima(serie):
     """Cuántos valores idénticos consecutivos, como máximo."""
     if len(serie) == 0:
@@ -365,8 +383,12 @@ diagnostico[
 ].sort_values("racha máxima", ascending=False).round(3)
 ```
 
-De 34 series, once levantan alguna bandera —seis por la racha y siete por el cociente, con dos
-que caen en las dos— y **no todas son un problema**. Ahí está la gracia del diagnóstico: separa
+De `{python} f"{len(diagnostico)}"` series,
+`{python} f"{int(((diagnostico['racha máxima'] >= 5) | (diagnostico['únicos / n'] < 0.2)).sum())}"`
+levantan alguna bandera —`{python} f"{int((diagnostico['racha máxima'] >= 5).sum())}"` por la racha,
+`{python} f"{int((diagnostico['únicos / n'] < 0.2).sum())}"` por el cociente y
+`{python} f"{int(((diagnostico['racha máxima'] >= 5) & (diagnostico['únicos / n'] < 0.2)).sum())}"`
+por las dos— y **no todas son un problema**. Ahí está la gracia del diagnóstico: separa
 lo que hay que mirar de lo que hay que arreglar.
 
 `M16834` es un defecto. `H242`, con 1.008 observaciones y 65 valores distintos, no lo es: es una
@@ -385,7 +407,8 @@ diagnostico[diagnostico["todos enteros"]][
 ].round(3)
 ```
 
-Doce de las 34 series tienen valores enteros exactos, y eso tampoco es un defecto: es una pista
+`{python} f"{int(diagnostico['todos enteros'].sum())}"` de las
+`{python} f"{len(diagnostico)}"` series tienen valores enteros exactos, y eso tampoco es un defecto: es una pista
 sobre qué son. Un conteo —unidades vendidas, personas, transacciones— no es una cantidad
 continua, y los métodos de este libro le van a asignar probabilidad a 3,7 unidades vendidas.
 Cuando los valores son chicos eso importa mucho y tiene literatura propia [@kolassa2016]; cuando
@@ -396,7 +419,7 @@ notado.
 
 ```{python}
 #| label: tbl-lo-que-no-tiene
-#| tbl-cap: "Recuento de los tres problemas de datos más comunes, sobre las 34 series del catálogo."
+#| tbl-cap: "Recuento de los tres problemas de datos más comunes, sobre las series del catálogo."
 pd.DataFrame([{
     "series con valores faltantes": int((diagnostico["faltantes"] > 0).sum()),
     "series con ceros": int((diagnostico["ceros"] > 0).sum()),

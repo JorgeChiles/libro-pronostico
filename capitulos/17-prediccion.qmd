@@ -214,13 +214,20 @@ for modelo in MODELOS:
             f"gana en (de {len(sub)})": int(ganadora.get(estrategia, 0)),
         })
 
-pd.DataFrame(filas).set_index(["modelo", "estrategia"]).round(2)
+ESTRATEGIAS = pd.DataFrame(filas).set_index(["modelo", "estrategia"])
+ESTRATEGIAS.round(2)
 ```
 
-Con el modelo lineal es prácticamente un empate: la recursiva gana en 14 series de 31 y la directa
-en 13, y las medianas se dan vuelta respecto de las medias —8,60 contra 8,39 a favor de la
-directa—. Con el bosque aleatorio no hay empate: **la recursiva gana en 25 de 31 series** y baja
-el sMAPE medio de 19,31 a 13,31.
+Con el modelo lineal es prácticamente un empate: la recursiva y la directa ganan en
+`{python} f"{int(ESTRATEGIAS.loc[('Ridge', 'recursiva'), ESTRATEGIAS.columns[-1]])}"` series cada una,
+y las medianas se dan vuelta respecto de las medias
+—`{python} f"{ESTRATEGIAS.loc[("Ridge", "recursiva"), "sMAPE mediano"]:.2f}".replace(".", ",")` contra
+`{python} f"{ESTRATEGIAS.loc[("Ridge", "directa"), "sMAPE mediano"]:.2f}".replace(".", ",")` a favor de la directa—. Con el bosque aleatorio
+no hay empate: **la recursiva gana en
+`{python} f"{int(ESTRATEGIAS.loc[('bosque aleatorio', 'recursiva'), ESTRATEGIAS.columns[-1]])}"` de
+`{python} f"{int(ESTRATEGIAS[ESTRATEGIAS.columns[-1]].loc['bosque aleatorio'].sum())}"` series** y baja
+el sMAPE medio de `{python} f"{ESTRATEGIAS.loc[("bosque aleatorio", "directa"), "sMAPE medio"]:.2f}".replace(".", ",")` a
+`{python} f"{ESTRATEGIAS.loc[("bosque aleatorio", "recursiva"), "sMAPE medio"]:.2f}".replace(".", ",")`.
 
 La diferencia entre los dos modelos es la primera conclusión del capítulo, y es la de siempre en
 la Parte II: **cuanta más capacidad tiene el modelo, más cara sale la estrategia directa.** Un
@@ -283,20 +290,27 @@ for modelo in MODELOS:
         fila.update(seleccion[NOMBRES].mean().to_dict())
         filas.append(fila)
 
-pd.DataFrame(filas).set_index(["modelo", "series"]).round(2)
+POR_LARGO = pd.DataFrame(filas).set_index(["modelo", "series"])
+POR_LARGO.round(2)
 ```
 
-Con Ridge el orden **se invierte** entre los dos grupos. En las 11 series con menos de diez
-horizontes de historia la recursiva da 25,85 y la directa 32,68, una diferencia grande a favor de
-la recursiva. En las 20 series con diez horizontes o más, la directa da **8,18** contra 9,72 de la
-recursiva.
+Con Ridge el orden **se invierte** entre los dos grupos. En las
+`{python} f"{int(POR_LARGO.loc[('Ridge', 'n / h < 10'), 'cuántas'])}"` series con menos de diez
+horizontes de historia la recursiva da `{python} f"{POR_LARGO.loc[("Ridge", "n / h < 10"), "recursiva"]:.2f}".replace(".", ",")` y la
+directa `{python} f"{POR_LARGO.loc[("Ridge", "n / h < 10"), "directa"]:.2f}".replace(".", ",")`, una diferencia grande a favor de la
+recursiva. En las `{python} f"{int(POR_LARGO.loc[('Ridge', 'n / h ≥ 10'), 'cuántas'])}"` series con
+diez horizontes o más, la directa da **`{python} f"{POR_LARGO.loc[("Ridge", "n / h ≥ 10"), "directa"]:.2f}".replace(".", ",")`** contra
+`{python} f"{POR_LARGO.loc[("Ridge", "n / h ≥ 10"), "recursiva"]:.2f}".replace(".", ",")` de la recursiva.
 
 Eso explica la divergencia entre la media y la mediana de la @tbl-estrategias: la media está
 dominada por las series cortas, donde la recursiva gana por mucho, y la mediana refleja el caso
 típico, que en este catálogo es una serie larga donde la directa gana por poco.
 
-Con el bosque aleatorio la inversión **no ocurre**: la recursiva gana en los dos grupos, 22,28
-contra 35,21 y 8,37 contra 10,56. La capacidad del modelo pesa más que la cantidad de datos.
+Con el bosque aleatorio la inversión **no ocurre**: la recursiva gana en los dos grupos,
+`{python} f"{POR_LARGO.loc[("bosque aleatorio", "n / h < 10"), "recursiva"]:.2f}".replace(".", ",")` contra
+`{python} f"{POR_LARGO.loc[("bosque aleatorio", "n / h < 10"), "directa"]:.2f}".replace(".", ",")` y
+`{python} f"{POR_LARGO.loc[("bosque aleatorio", "n / h ≥ 10"), "recursiva"]:.2f}".replace(".", ",")` contra
+`{python} f"{POR_LARGO.loc[("bosque aleatorio", "n / h ≥ 10"), "directa"]:.2f}".replace(".", ",")`. La capacidad del modelo pesa más que la cantidad de datos.
 
 ```{python}
 #| label: tbl-filas

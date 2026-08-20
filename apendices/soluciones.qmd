@@ -3151,9 +3151,9 @@ tabla["factor"] = tabla["desviación"] / tabla["desviación"].shift(1)
 tabla.set_index("grado").round(2)
 ```
 
-Hasta el grado 5 la desviación se mueve entre 4 y 17 unidades sin una tendencia clara. A
-partir del 6 crece de manera sostenida y con factores de 1,5 a 2 por grado, hasta llegar a
-casi 100 en el grado 12: **más de veinte veces la del grado 1**.
+Hasta el grado 6 la desviación se mueve entre 4 y 17 unidades sin una tendencia clara. A
+partir del 7 crece de manera sostenida, con factores de 1,1 a 2 por grado, hasta llegar a
+99 en el grado 12: **más de veinte veces la del grado 1**.
 
 Ese es el término de varianza de la @eq-sesgo-varianza medido directamente. No crece de
 manera suave y proporcional: hay una zona de calma y después una aceleración. La zona de
@@ -3474,8 +3474,8 @@ pd.DataFrame(filas).set_index("candidatos").round(2)
 ```
 
 Las tres columnas suben con $K$, pero solo una lo hace de manera **monótona**: la mediana de
-las diferencias, que va de $-0{,}03$ a $+0{,}59$ sin retrocesos. El optimismo de las medianas
-salta a 2,05 con tres candidatos y **baja** a 1,54 con cinco, y el de las medias es el más
+las diferencias, que va de $-0{,}03$ a $+0{,}48$ sin retrocesos. El optimismo de las medianas
+salta a 1,81 con dos candidatos y **baja** a 1,25 con tres, y el de las medias es el más
 grande de los tres en todas las filas.
 
 La razón de las diferencias es una distinción que conviene tener presente cada vez que se
@@ -3484,7 +3484,7 @@ La primera pregunta "¿en el caso típico, cuánto se paga?" y la segunda "¿cu�
 típico de validación del caso típico de prueba?", que no son la misma pregunta porque el caso
 típico de una distribución no se corresponde con el caso típico de la otra.
 
-Y la media es mucho mayor que las dos medianas —3,45 contra 2,54 y 0,59 con diez candidatos—
+Y la media es mayor que las dos medianas —3,32 contra 2,76 y 0,48 con diez candidatos—
 porque unas pocas series pagan un optimismo enorme y arrastran el promedio. Las tres medidas
 son correctas; **la elección entre ellas es una decisión sobre qué pregunta se está
 contestando**, y hay que declararla. Para reportar el riesgo de un proyecto, la media es la
@@ -3514,8 +3514,8 @@ pd.DataFrame([{
 }], index=["rango entre el mejor y el peor método"]).round(2)
 ```
 
-El rango mediano es **41,15 puntos de sMAPE** y el medio 59,20. Comparado con el optimismo de
-3,45 de la @tbl-optimismo, **elegir mal el modelo cuesta más de diez veces lo que cuesta
+El rango mediano es **45,22 puntos de sMAPE** y el medio 62,26. Comparado con el optimismo de
+3,32 de la @tbl-optimismo, **elegir mal el modelo cuesta más de diez veces lo que cuesta
 reportar mal el error.**
 
 Eso responde la pregunta del enunciado con un orden de magnitud, y la conclusión es la del
@@ -3667,13 +3667,13 @@ pd.DataFrame([
 ]).set_index("partición").round(2)
 ```
 
-El optimismo es **mayor** con la partición al azar: 6,89 contra 5,76. Y el mecanismo se lee en
+El optimismo es **mayor** con la partición al azar: 6,71 contra 5,57. Y el mecanismo se lee en
 las otras dos columnas, que es lo que pedía el enunciado.
 
-**El error de prueba casi no cambia** —14,22 contra 15,00, una diferencia que con 30 series no
-significa nada—. Es decir: sortear la validación no eligió modelos mucho peores.
+**El error de prueba casi no cambia** —13,81 contra 14,54, una diferencia que con treinta y pico
+de series no significa nada—. Es decir: sortear la validación no eligió modelos mucho peores.
 
-**El error de validación baja de 9,24 a 7,33**, un 21 %. Ahí está todo el efecto. La partición
+**El error de validación baja de 8,97 a 7,10**, un 21 %. Ahí está todo el efecto. La partición
 al azar deja en el conjunto de ajuste las filas vecinas de las que va a evaluar, y como las
 ventanas de la @eq-ventana se solapan, predecir esas filas es casi copiar. El modelo parece
 mejor de lo que es.
@@ -3991,10 +3991,10 @@ pd.DataFrame(filas).set_index("γ").sort_index().round(2)
 
 **Sí: el óptimo está en un extremo, y en cuál depende de qué se mida.**
 
-El error absoluto **medio** baja de manera monótona al bajar $\gamma$: 8,65 con $\gamma = 1$ y
-7,45 con $\gamma = 0{,}3$, hasta 7,43 en el límite $\gamma = 0$, que es el corte único. El error
-absoluto **mediano** hace lo contrario: 2,14 con $\gamma = 1$ y 2,16 con $\gamma = 0{,}3$, hasta
-2,78 con el corte único.
+El error absoluto **medio** baja de manera monótona al bajar $\gamma$: 8,37 con $\gamma = 1$ y
+7,20 con $\gamma = 0{,}3$, hasta 7,19 en el límite $\gamma = 0$, que es el corte único. El error
+absoluto **mediano** hace lo contrario: 2,03 con $\gamma = 1$ y 2,15 con $\gamma = 0{,}3$, hasta
+2,42 con el corte único.
 
 La conclusión práctica es que **la ponderación no resuelve la tensión de la @tbl-estimadores:
 la parametriza en un solo número**. Elegir $\gamma$ es elegir dónde pararse entre "quiero que el
@@ -4733,11 +4733,11 @@ pd.DataFrame(resumen).set_index(["modelo", "estrategia"]).round(2)
 
 **Sí, queda en el medio, y el lugar exacto depende del modelo.**
 
-Con Ridge, DirRec da 16,79 contra 16,87 de la directa y 15,44 de la recursiva: recupera apenas
+Con Ridge, DirRec da 16,32 contra 16,40 de la directa y 15,02 de la recursiva: recupera apenas
 un 6 % de la brecha. En cantidad de series ganadas empata con la recursiva, 11 a 11.
 
-Con el bosque aleatorio la mejora es sustancial: 17,17 contra 19,31 de la directa, o sea que
-**recupera un tercio de lo que la directa pierde** frente a la recursiva.
+Con el bosque aleatorio la mejora es sustancial: 16,66 contra 18,73 de la directa, o sea que
+**recupera más de un tercio de lo que la directa pierde** frente a la recursiva.
 
 El mecanismo es coherente con la @sec-acumulacion. DirRec le da al modelo del paso $k$ las
 predicciones anteriores como entradas, así que le devuelve la información que la directa
@@ -5026,8 +5026,8 @@ Tres cosas, en este orden, y ninguna requiere ajustar un modelo:
    hay que guardar y servir.
 
 Si las tres apuntan a la directa, vale probar las dos y elegir con el @sec-validacion-cruzada. Si
-alguna apunta a la recursiva, el margen que la directa podría ganar —los 1,5 puntos de la
-@tbl-por-largo— no justifica el riesgo ni el costo.
+alguna apunta a la recursiva, el margen que la directa podría ganar en las series largas —poco
+más de un punto en la @tbl-por-largo— no justifica el riesgo ni el costo.
 :::
 
 ## Capítulo 18 · Ingeniería de características {#sec-soluciones-18}
@@ -5259,18 +5259,18 @@ for etiqueta, kw in (("los 3 de mayor |r|", dict(cuantos=3)),
 pd.DataFrame(filas).set_index("criterio").round(2)
 ```
 
-**Gana quedarse con seis en la media —12,85— y con doce en la mediana —6,67—, y el peor de los
+**Gana quedarse con seis en las dos columnas —12,46 de media y 5,26 de mediana—, y el peor de los
 cuatro es el criterio que suena más principista.**
 
-"Todos los significativos" da 14,94 de media y 7,74 de mediana, con una mediana de 24 columnas: en
+"Todos los significativos" da 14,47 de media y 7,63 de mediana, con una mediana de 24 columnas: en
 la mitad de las series el correlograma marca *todos* los rezagos hasta el 24 como significativos.
 Eso pasa porque el límite $1{,}96/\sqrt{n}$ está pensado para una serie de ruido blanco, y una
 serie con tendencia tiene correlaciones altas en todos los rezagos cortos por el solo hecho de
 moverse despacio. El @sec-caja-de-herramientas ya avisaba de esto.
 
 Juntando los tres ejercicios, la conclusión es la misma desde tres ángulos: **el criterio para
-elegir rezagos importa mucho menos que cuántos se elijan.** Tres, seis y doce dan 12,98, 12,85 y
-13,18 —indistinguibles— y veinticuatro da 14,94. Lo que hace el correlograma no es encontrar los
+elegir rezagos importa mucho menos que cuántos se elijan.** Tres, seis y doce dan 12,58, 12,46 y
+12,78 —indistinguibles— y veinticuatro da 14,47. Lo que hace el correlograma no es encontrar los
 rezagos correctos: es dar una excusa razonable para tener pocas columnas.
 
 ### Ejercicio 4 {.unnumbered}
@@ -5344,7 +5344,7 @@ for etiqueta, kw in (("12 rezagos", dict()),
 pd.DataFrame(filas).set_index("características").round(2)
 ```
 
-**No ayuda: empeora la media de 13,54 a 17,43 y la mediana de 8,49 a 10,58**, y lo hace con una
+**No ayuda: empeora la media de 13,12 a 16,93 y la mediana de 8,43 a 10,32**, y lo hace con una
 sola columna más. Trece columnas contra doce no puede explicar un 29 % de deterioro por la vía de
 la @fig-curva-rezagos, así que la característica está haciendo daño activo.
 
@@ -5548,9 +5548,9 @@ mostrar(fig, alto=560)
 
 La contradicción aparente se resuelve mirando la **distribución** en vez del recuento.
 
-*Extra trees* gana en 17 de las 31 series, apenas más de la mitad. Pero **cuando gana, gana 3,11
-en promedio, y cuando pierde, pierde 2,09**: la suma de sus ganancias es 52,86 y la de sus pérdidas
-29,29. Una apuesta con esa asimetría gana en el promedio aunque acierte poco más de la mitad de las
+*Extra trees* gana en 17 de las 32 series, apenas más de la mitad. Pero **cuando gana, gana 3,11
+en promedio, y cuando pierde, pierde 1,97**: la suma de sus ganancias es 52,86 y la de sus pérdidas
+29,55. Una apuesta con esa asimetría gana en el promedio aunque acierte poco más de la mitad de las
 veces.
 
 Y ahí está la explicación de por qué es el mejor en una sola serie: **casi nunca es el
@@ -5647,10 +5647,10 @@ for k in (1, 2, 3, 5, 7, 10, 15, 20):
 pd.DataFrame(filas).set_index("k").round(2)
 ```
 
-**Sí, hay una U, y el mínimo está en $k = 2$ —13,56— no en el $k = 3$ que usó el capítulo.**
+**Sí, hay una U, y el mínimo está en $k = 2$ —13,16— no en el $k = 3$ que usó el capítulo.**
 
-La curva es limpia en las dos columnas: 16,02 con un vecino, 13,56 con dos, y de ahí sube de manera
-monótona hasta 18,05 con veinte. El $k = 3$ del capítulo da 14,43, cerca del óptimo pero no en él.
+La curva es limpia en las dos columnas: 15,54 con un vecino, 13,16 con dos, y de ahí sube de manera
+monótona hasta 17,50 con veinte. El $k = 3$ del capítulo da 14,00, cerca del óptimo pero no en él.
 
 La forma es la de la @sec-cuantos-rezagos y el mecanismo también, con los roles invertidos. Acá $k$ es
 un **regularizador**: $k = 1$ copia la respuesta del vecino más parecido, que es máxima capacidad y
@@ -5703,11 +5703,11 @@ pd.DataFrame({"max_iter": ITERACIONES, "sMAPE medio": medias,
               "sMAPE mediano": medianas}).set_index("max_iter").round(2)
 ```
 
-**Aguantan entre 50 y 300 iteraciones, con una meseta ancha y las dos ramas empinadas.**
+**El mínimo está en 120 iteraciones, con las dos ramas empinadas y ninguna meseta ancha.**
 
-Con 5 iteraciones el error es 30,96: el modelo todavía no aprendió nada y es peor que `naive`. Con
-25 ya baja a 13,21, con 50 a **10,47** y con 120 a 9,99, que es el mínimo. Con 300 sigue en 10,27 y
-con 500 salta a 16,59.
+Con 5 iteraciones el error es 36,64: el modelo todavía no aprendió nada y es peor que `naive`. Con
+25 ya baja a 19,49, con 50 a **15,72** y con 120 a 9,86, que es el mínimo. Con 300 sube a 16,54 y
+con 500 salta a 22,54.
 
 Las dos ramas son fenómenos distintos y conviene no confundirlos. La rama izquierda es **subajuste**:
 cada iteración del boosting corrige una parte del residuo, y con cinco árboles de profundidad
@@ -5717,7 +5717,7 @@ corregirlo es memorizarlo.
 
 Lo que el ejercicio agrega al capítulo es que **el 120 del capítulo no era una mala elección**: está
 en el fondo de la meseta. El problema del boosting en la @tbl-modelos no era estar mal configurado,
-y esto lo confirma: en las series largas, bien configurado, da 9,99 y le gana a `snaive`. Su
+y esto lo confirma: en las series largas, bien configurado, da 9,86 y le gana a `snaive`. Su
 problema son las series cortas, y la @tbl-boosting-capacidad ya mostró que ahí no hay configuración
 que lo salve.
 
@@ -5755,7 +5755,7 @@ pd.DataFrame(filas).set_index("núcleo").round(2)
 
 **Sí, y de manera contundente: el núcleo lineal resuelve el problema sin diferenciar nada.**
 
-El sMAPE medio baja de 36,71 con el núcleo radial a 23,78 con el lineal y a **16,06** con el lineal y
+El sMAPE medio baja de 35,69 con el núcleo radial a 23,07 con el lineal y a **15,58** con el lineal y
 $C = 1000$. Y la última columna es la que cierra el argumento: el núcleo radial supera el techo en
 **0 de 8** series y el lineal con $C = 1000$ lo supera en **6 de 8**.
 
@@ -5822,9 +5822,9 @@ resumen.groupby("familia")[["primeros 6", "últimos 6", "crecimiento"]].mean().r
 
 **Sí, la brecha crece con el horizonte, y es el resultado que uno esperaría de la @eq-arbol.**
 
-En los primeros seis pasos los dos grupos son **indistinguibles**: 19,70 los acotados y 19,74
-Ridge. En los últimos seis, los acotados se van a 26,30 y Ridge se queda en 22,27, así que el error
-crece 6,60 en un grupo y 2,53 en el otro: **dos veces y media más rápido**. El motivo es directo: en una serie con tendencia, cada paso del horizonte
+En los primeros seis pasos los dos grupos son **indistinguibles**: 18,84 los acotados y 19,77
+Ridge. En los últimos seis, los acotados se van a 21,88 y Ridge se queda en 19,71, así que el error
+crece 3,03 en un grupo y **no crece en el otro** —baja 0,06, que es ruido—. El motivo es directo: en una serie con tendencia, cada paso del horizonte
 aleja más al valor real del máximo que el modelo vio, y la @sec-soluciones-19 —ejercicio 2— midió
 que lo que le falta al modelo acotado es exactamente esa distancia. Cuanto más largo el horizonte,
 más grande la distancia.
@@ -5973,17 +5973,17 @@ pd.DataFrame(filas).set_index("combinación").sort_values("sMAPE medio").round(2
 
 Sacar a Holt **mejora todo y no cambia el orden.**
 
-El promedio simple sube en el ranking de manera notable: de 18,53 con nueve miembros a **15,03 con
-ocho**. Un solo miembro representaba 3,5 puntos de sMAPE, con un peso de un noveno. En el promedio
-de los estadísticos el efecto es más brutal todavía: de 26,04 a 18,94, porque ahí Holt pesaba un
+El promedio simple sube en el ranking de manera notable: de 18,03 con nueve miembros a **14,61 con
+ocho**. Un solo miembro representaba 3,4 puntos de sMAPE, con un peso de un noveno. En el promedio
+de los estadísticos el efecto es más brutal todavía: de 25,37 a 18,45, porque ahí Holt pesaba un
 quinto.
 
 Pero la respuesta a la segunda pregunta es **no**: el promedio simple sigue sin ganarle a elegir
-uno. Elegir uno por validación mejora de 12,61 a **12,24** al sacar a Holt del menú, y el promedio
-de los ocho queda en 15,03. La brecha se achicó de 5,9 puntos a 2,8 y no se cerró.
+uno. Elegir uno por validación mejora de 12,27 a **11,91** al sacar a Holt del menú, y el promedio
+de los ocho queda en 14,61. La brecha se achicó de 5,8 puntos a 2,7 y no se cerró.
 
-Y aparece un detalle que refuerza la lectura del capítulo: **la mediana de los ocho, 12,63, es casi
-igual a la mediana de los nueve, 13,18.** La mediana ya estaba protegiendo del miembro
+Y aparece un detalle que refuerza la lectura del capítulo: **la mediana de los ocho, 12,24, es casi
+igual a la mediana de los nueve, 12,78.** La mediana ya estaba protegiendo del miembro
 catastrófico, así que sacarlo le aporta muy poco. Es la diferencia entre arreglar el ensamble y
 usar un agregador robusto: **el segundo funciona incluso cuando nadie revisó la lista de
 miembros.**
@@ -6024,10 +6024,10 @@ pd.DataFrame(filas).set_index("subconjunto").round(3)
 En los cuatro modelos de aprendizaje automático la predicción es 0,898 y la medición 0,879: un
 error de dos centésimas. Y tiene sentido, porque ahí el supuesto de la ecuación —que todos los
 miembros tengan la misma varianza de error— es aproximadamente cierto: los cuatro sMAPE de la
-@tbl-miembros van de 12,62 a 14,88.
+@tbl-miembros van de 12,24 a 14,46.
 
-En los cinco estadísticos la predicción es 0,740 y la medición 0,882. La ecuación promete una
-reducción del 26 % y la realidad da 12 %. La razón es la misma de todo el capítulo: con Holt
+En los cinco estadísticos la predicción es 0,719 y la medición 0,881. La ecuación promete una
+reducción del 28 % y la realidad da 12 %. La razón es la misma de todo el capítulo: con Holt
 adentro las varianzas son muy distintas, y una varianza grande en un miembro no se cancela por
 promediar, se transmite.
 
@@ -6162,7 +6162,7 @@ modelo global no perdió ahí por ser global: perdió porque se lo entrenó con 
 
 Y una advertencia sobre por qué el ejercicio no puede probar más: para agrupar por fenómeno hacen
 falta muchas series **de cada** fenómeno. El catálogo tiene una o dos, porque su objetivo es cubrir
-el espectro con 34 series. Es el mismo conjunto de datos, usado para un propósito para el que no fue
+el espectro con 35 series. Es el mismo conjunto de datos, usado para un propósito para el que no fue
 armado.
 
 ### Ejercicio 5 {.unnumbered}
@@ -6200,11 +6200,11 @@ pd.DataFrame(filas).set_index("pesos").round(2)
 
 **No ayuda, y el resultado es más informativo que un simple «no».**
 
-Las tres variantes de peso dan prácticamente lo mismo: 15,47 con pesos fijos, 15,71 bajando el naive
-y 15,45 subiéndolo. Un rango de 26 centésimas entre esquemas de ponderación opuestos.
+Las tres variantes de peso dan prácticamente lo mismo: 14,99 con pesos fijos, 15,23 bajando el naive
+y 14,97 subiéndolo. Un rango de 26 centésimas entre esquemas de ponderación opuestos.
 
-Y las dos últimas filas explican por qué. `extra trees` solo da **12,62** y cualquier combinación
-que incluya a `naive` con peso apreciable queda entre 15,4 y 15,7. **El daño no lo hace el esquema
+Y las dos últimas filas explican por qué. `extra trees` solo da **12,24** y cualquier combinación
+que incluya a `naive` con peso apreciable queda entre 14,9 y 15,3. **El daño no lo hace el esquema
 de pesos: lo hace el miembro.** Mover el peso de un miembro malo de 0,2 a 0,8 y de 0,8 a 0,2 no
 cambia el resultado porque el promedio de los dos extremos es el mismo, y ninguno de los dos
 extremos es cero.
@@ -6354,8 +6354,8 @@ pd.DataFrame([
 ]).set_index("grupo").round(1)
 ```
 
-**Se rechaza la independencia en 26 de las 31 series**, y el bootstrap por bloques **no** cubre
-mejor donde debería: da 81,1 % contra 81,7 % del simple en las series con residuos dependientes, y
+**Se rechaza la independencia en 27 de las 32 series**, y el bootstrap por bloques **no** cubre
+mejor donde debería: da 81,8 % contra 82,4 % del simple en las series con residuos dependientes, y
 78,6 % contra 76,7 % en las cinco donde no se rechaza. El resultado está al revés de la motivación
 del método: la diferencia es de menos de un punto en las dos direcciones y el signo favorece a los
 bloques justamente donde no hacían falta.
@@ -6471,17 +6471,17 @@ pd.DataFrame({
 **Sí, ahora la fórmula es la correcta para todas las series** —con `naive` no hay período estacional
 que complique la @eq-varianza-snaive, y $\sqrt{h}$ es exactamente el ancho del paseo aleatorio—.
 
-**Y no, la cobertura no mejora: empeora.** El analítico da 84,0 % al 95 % nominal y el bootstrap
-85,2 %, contra los 88,2 % que daba la fórmula de la raíz aplicada a `snaive`. Y al 80 % nominal la
-cobertura es 74,0 % y 69,6 %.
+**Y no, la cobertura no mejora: empeora.** El analítico da 84,5 % al 95 % nominal y el bootstrap
+85,7 %, contra los 88,6 % que daba la fórmula de la raíz aplicada a `snaive`. Y al 80 % nominal la
+cobertura es 74,8 % y 70,6 %.
 
 Es un resultado que ordena todo el capítulo. Con `snaive`, la fórmula de la raíz cubría mejor
 **porque estaba mal**: aplicaba a un método con ciclos una varianza que crece nueve veces más
 rápido de lo que corresponde, y el exceso de ancho tapaba la brecha de cobertura. Con `naive` esa
-sobrecompensación desaparece, la fórmula es correcta, el ancho baja de 40,5 a 23,6 y la cobertura
+sobrecompensación desaparece, la fórmula es correcta, el ancho baja de 48,4 a 27,5 y la cobertura
 queda donde de verdad está.
 
-Que las dos vías —fórmula correcta y bootstrap— coincidan en 84,0 % y 85,2 % es la confirmación de
+Que las dos vías —fórmula correcta y bootstrap— coincidan en 84,5 % y 85,7 % es la confirmación de
 que **la brecha no es un error de cálculo**. Los dos métodos, hechos bien, dicen lo mismo: un
 intervalo de residuos al 95 % cubre alrededor del 85 %.
 
@@ -6532,12 +6532,12 @@ pd.DataFrame([{
 }], index=["calibración"]).round(1).T
 ```
 
-**Sí se transfiere, y bastante: la cobertura en prueba pasa del 81,2 % al 89,3 %.**
+**Sí se transfiere, y bastante: la cobertura en prueba pasa del 81,8 % al 89,7 %.**
 
 Es el resultado más útil del capítulo, porque es el único que reduce la brecha de verdad. Y viene
 con tres reservas que hay que decir junto con el número.
 
-**La calibración no llega al 95 %.** Sube 8,1 puntos y se queda 5,7 por debajo del nominal. Las
+**La calibración no llega al 95 %.** Sube 7,9 puntos y se queda 5,3 por debajo del nominal. Las
 series que alcanzan el 95 % real en prueba pasan de 15 a 18 sobre 30: mejora, no resuelve.
 
 **El nivel calibrado mediano es 0,950**, o sea que en la mitad de las series el 95 % ya alcanzaba en
@@ -6596,13 +6596,13 @@ pd.DataFrame([
 ]).set_index("grupo").round(1)
 ```
 
-En promedio casi no cambia —80,9 % remuestreando y 79,8 % con residuos normales— pero **al separar
+En promedio casi no cambia —81,5 % remuestreando y 80,4 % con residuos normales— pero **al separar
 por asimetría aparece un cruce que va en contra de la intuición.**
 
 Con residuos **poco asimétricos**, el remuestreo cubre el 85,9 % y el normal el 78,5 %: el
 remuestreo gana por siete puntos, que es lo esperable.
 
-Con residuos **muy asimétricos**, se da vuelta: el remuestreo cubre el 75,5 % y el normal el 81,1 %.
+Con residuos **muy asimétricos**, se da vuelta: el remuestreo cubre el 77,0 % y el normal el 82,3 %.
 El método que respeta la forma de la distribución cubre **peor** justamente donde esa forma es más
 distinta de una normal.
 
@@ -6678,8 +6678,8 @@ pd.DataFrame([{
 ```
 
 **Le gana en la media y le pierde en la mediana**, que a esta altura del libro ya no debería
-sorprender: 20,61 contra 17,78 en la media y 8,77 contra 12,09 en la mediana, mejorando en solo 8 de
-23 series.
+sorprender: 20,36 contra 17,63 en la media y 9,33 contra 12,70 en la mediana, mejorando en solo 9 de
+24 series.
 
 El patrón es el mismo que el @sec-ensambles midió en la @tbl-combinaciones y por el mismo motivo:
 **el promedio de trayectorias amortigua los desastres y estropea los casos buenos.** Cuando
@@ -6856,12 +6856,11 @@ pd.DataFrame([{
 }], index=["ensamble de semillas"]).round(1).T
 ```
 
-**El ensamble le gana a la media de las corridas en 80 de 93 casos, y recupera solo el 1,5 % del
+**El ensamble le gana a la media de las corridas en 83 de 96 casos, y recupera solo el 1,6 % del
 hueco que la separa de la mejor corrida.**
 
 Los dos números juntos dicen algo preciso y hay que leerlos así. El ensamble **es** mejor que una
-corrida cualquiera —80 de 93 es una mayoría clara— y está muy lejos de la mejor corrida: 26,3 contra
-16,8 en promedio.
+corrida cualquiera —83 de 96 es una mayoría clara— y está muy lejos de la mejor corrida.
 
 Y eso es exactamente lo que corresponde esperar, aunque el recuadro de la @sec-varianza-semilla sugiera
 más. La mejor de cinco corridas es un **oráculo**: para elegirla hay que conocer el error de prueba.
@@ -6902,24 +6901,28 @@ for etiqueta, corto in (("n / h < 10", True), ("n / h ≥ 10", False)):
 pd.DataFrame(filas).set_index("series").round(2)
 ```
 
-**Se verifica a medias, y la mitad que falla es informativa.**
+**Se verifica entero, y la parte que se verifica sola es la más interesante.**
 
-La primera parte sí se cumple: **el desvío entre semillas baja con más datos**, de 4,16 a 2,94. Cada
+La primera parte sí se cumple: **el desvío entre semillas baja con más datos**, de 4,16 a 2,85. Cada
 arquitectura se estabiliza individualmente, tal como la tesis observó al pasar de anual a mensual.
 
-La segunda parte no. La brecha entre arquitecturas baja apenas, de 2,58 a 2,36, y como el ruido baja
-más, la razón ruido/brecha **mejora** de 1,09 a 0,76 en vez de empeorar. La tesis encontraba lo
-contrario: de 2,6 a 4,0.
+La segunda parte no, y ahora falla en la otra dirección: la brecha entre arquitecturas baja **más**
+que el ruido —de 2,58 a 1,39—, así que la razón ruido/brecha **empeora** de 1,09 a 1,31. Con más
+datos las arquitecturas convergen entre sí más rápido de lo que se estabiliza cada una, y elegir un
+ganador se vuelve más arbitrario, no menos.
 
-Vale entender la diferencia en vez de esconderla. La tesis compara **cinco arquitecturas
-genuinamente distintas** —Transformer, LSTM, ConvNet, perceptrón, híbrido— que con muchos datos
-convergen a soluciones parecidas porque todas terminan aprendiendo la misma estructura. Este
-ejercicio compara **tres tamaños del mismo perceptrón**, y ahí más datos permiten que la arquitectura
-grande aproveche su capacidad y se separe de la chica, así que la brecha no colapsa.
+Que la razón empeore es exactamente lo que la tesis encontró al pasar de las frecuencias con series
+cortas a las que tienen series largas, y verlo acá vale más de lo que parece, porque **el
+experimento no es el mismo**. La tesis compara cinco arquitecturas genuinamente distintas
+—Transformer, LSTM, ConvNet, perceptrón, híbrido— sobre 4.773 series; este ejercicio compara tres
+tamaños del mismo perceptrón sobre treinta y pico. Que dos experimentos tan distintos den la misma
+dirección sugiere que el mecanismo no es de las redes recurrentes ni del tamaño del conjunto: es de
+**cualquier familia de modelos con capacidad suficiente**, que con más datos converge a soluciones
+parecidas mientras el ruido de inicialización baja más despacio.
 
-Dicho de otra manera: el fenómeno de la tesis es sobre **familias** que convergen, y acá hay una sola
-familia con tres tamaños. **El experimento del capítulo no es el mismo experimento**, y no
-contradecirlo requiere decir en qué se diferencia.
+La reserva que corresponde hacer es de tamaño de muestra: son once series cortas contra veintiuna
+largas, y las medianas de una diferencia se mueven con poco. Lo que el ejercicio sostiene es la
+dirección, no la magnitud.
 
 ### Ejercicio 4 {.unnumbered}
 
@@ -6958,7 +6961,7 @@ Y el motivo es que `MLPRegressor` **ya había convergido**. `max_iter` es un tec
 iteraciones a ejecutar: el optimizador Adam se detiene solo cuando la pérdida deja de mejorar durante
 `n_iter_no_change` épocas consecutivas. Con 1.500 disponibles, en estas series usa muchas menos.
 
-El resultado es útil por lo que descarta. La varianza entre semillas de 2,94 puntos **no es falta de
+El resultado es útil por lo que descarta. La varianza entre semillas **no es falta de
 entrenamiento**: cada corrida llegó a su óptimo local y los óptimos locales son distintos. Eso es
 información sobre el paisaje de la función de pérdida, no sobre el presupuesto de cómputo, y explica
 por qué el ensamble de semillas es la única salida:
@@ -7549,7 +7552,7 @@ Las dos filas del medio son la trampa. El promedio ponderado de los errores da 0
 pronósticos distintos, que es una cantidad sin interpretación.
 
 El @sec-ensambles midió la diferencia con datos reales. Ahí el promedio de los nueve métodos daba un
-sMAPE de 18,53 mientras el promedio de los nueve sMAPE individuales era otro número: **combinar
+sMAPE de 18,03 mientras el promedio de los nueve sMAPE individuales era otro número: **combinar
 pronósticos y promediar errores son operaciones distintas**, y solo la primera es un método.
 
 **Qué habría que guardar.** Para responder el ejercicio hacen falta los $h$ valores pronosticados por
@@ -7908,7 +7911,7 @@ conjunto la fuerza estuviera repartida de manera continua, esto habría que reha
 
 ```{python}
 #| label: tbl-sol-25-2
-#| tbl-cap: "La cota condicional con tres métodos base distintos, sobre las 34 series del catálogo."
+#| tbl-cap: "La cota condicional con tres métodos base distintos, sobre las series del catálogo."
 filas = []
 for nombre in PRON25:
     for etiqueta, umbral in [("sin cota", None), ("condicional", 0.8)]:
@@ -7935,7 +7938,8 @@ SOL25_2.round({"pasos recortados": 0, "sMAPE medio": 2, "MASE medio": 2,
 acotado no cambia nada.** Los números lo dicen mejor:
 
 - Con **Holt**, que extrapola tendencias sin freno, recorta
-  `{python} f"{int(SOL25_2.loc[('Holt', 'condicional'), 'pasos recortados'])}"` de 641 pasos y baja el
+  `{python} f"{int(SOL25_2.loc[('Holt', 'condicional'), 'pasos recortados'])}"` de
+  `{python} f"{sum(s.horizonte for s in SERIES25)}"` pasos y baja el
   MASE medio de `{python} f"{SOL25_2.loc[('Holt', 'sin cota'), 'MASE medio']:.1f}"` a
   `{python} f"{SOL25_2.loc[('Holt', 'condicional'), 'MASE medio']:.1f}"`.
 - Con **ARIMA(1,1,1)** recorta `{python} f"{int(SOL25_2.loc[('ARIMA(1,1,1)', 'condicional'), 'pasos recortados'])}"`

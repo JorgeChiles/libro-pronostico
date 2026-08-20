@@ -347,17 +347,24 @@ tabla.round(1)
 ```
 
 La tabla tiene una comprobación adentro que conviene mirar primero. **En las series no estacionales
-las dos fórmulas dan exactamente lo mismo: 85,7 %.** Es lo que tiene que pasar, porque con $m = 1$
+las dos fórmulas dan exactamente lo mismo:
+`{python} f"{tabla.loc["analítico, fórmula de snaive", "no estacionales, al 95 %"]:.1f}".replace(".", ",")` %.** Es lo que tiene que pasar, porque con $m = 1$
 el naive estacional *es* el naive y la @eq-varianza-snaive se reduce a $k\sigma^2$. Que coincidan
 confirma que las dos están bien implementadas.
 
-En las estacionales se separan, y mucho. La fórmula de la raíz cubre el 89,1 % y la correcta el
-77,5 %, **con la mitad del ancho**: 20,2 contra 40,5. La fórmula equivocada no cubre mejor por ser
-mejor: cubre mejor por ser el doble de ancha.
+En las estacionales se separan, y mucho. La fórmula de la raíz cubre el
+`{python} f"{tabla.loc["analítico, raíz de h", "estacionales, al 95 %"]:.1f}".replace(".", ",")` % y la correcta el
+`{python} f"{tabla.loc["analítico, fórmula de snaive", "estacionales, al 95 %"]:.1f}".replace(".", ",")` %, **con la mitad
+del ancho**: `{python} f"{tabla.loc["analítico, fórmula de snaive", "ancho al 95 %"]:.1f}".replace(".", ",")` contra
+`{python} f"{tabla.loc["analítico, raíz de h", "ancho al 95 %"]:.1f}".replace(".", ",")`. La fórmula equivocada no cubre
+mejor por ser mejor: cubre mejor por ser el doble de ancha.
 
-Y el bootstrap coincide con la fórmula correcta —79,9 % contra 77,5 % en las estacionales, con
-anchos de 18,6 y 20,2— sin que nadie le haya dicho nada sobre ciclos ni sobre $\lfloor (k-1)/m
-\rfloor$. Eso es lo que hace valioso al método:
+Y el bootstrap coincide con la fórmula correcta
+—`{python} f"{tabla.loc["bootstrap", "estacionales, al 95 %"]:.1f}".replace(".", ",")` % contra
+`{python} f"{tabla.loc["analítico, fórmula de snaive", "estacionales, al 95 %"]:.1f}".replace(".", ",")` % en las
+estacionales, con anchos de `{python} f"{tabla.loc["bootstrap", "ancho al 95 %"]:.1f}".replace(".", ",")` y
+`{python} f"{tabla.loc["analítico, fórmula de snaive", "ancho al 95 %"]:.1f}".replace(".", ",")`— sin que nadie le haya
+dicho nada sobre ciclos ni sobre $\lfloor (k-1)/m \rfloor$. Eso es lo que hace valioso al método:
 
 ::: {.callout-tip}
 ## El bootstrap no se equivoca de fórmula
@@ -401,8 +408,10 @@ mostrar(fig, alto=430, titulo_y="cobertura empírica (%)")
 ```
 
 **Todos los puntos están por debajo de la diagonal.** Un intervalo declarado del 95 % contiene el
-valor real entre el 79,6 % y el 88,2 % de las veces según el método, y uno declarado del 80 % lo
-contiene entre el 62,1 % y el 82,0 %.
+valor real entre el `{python} f"{tabla["cobertura al 95 %"].min():.1f}".replace(".", ",")` % y el
+`{python} f"{tabla["cobertura al 95 %"].max():.1f}".replace(".", ",")` % de las veces según el método, y uno declarado
+del 80 % lo contiene entre el `{python} f"{tabla["cobertura al 80 %"].min():.1f}".replace(".", ",")` % y el
+`{python} f"{tabla["cobertura al 80 %"].max():.1f}".replace(".", ",")` %.
 
 La brecha es peor en el nivel del 80 % que en el del 95 %, lo que descarta la explicación más
 cómoda —"las colas son más gordas que la normal"—: si fuera solo eso, el 80 % andaría bien y el
@@ -419,16 +428,21 @@ for metodo in METODOS:
     fila.update({f"paso {k + 1}": promedio[k] for k in range(8)})
     filas.append(fila)
 
-pd.DataFrame(filas).set_index("método").round(1)
+POR_PASO = pd.DataFrame(filas).set_index("método")
+POR_PASO.round(1)
 ```
 
 Y acá está el dato que descarta la otra explicación cómoda —"el intervalo se queda corto en los
-horizontes largos"—. **En el paso 1 los cuatro métodos cubren el 85,7 %**, y ahí no hay ninguna
-acumulación de nada: es un pronóstico a un paso con un intervalo construido con los residuos a un
-paso. Nueve puntos de brecha antes de que el horizonte empiece.
+horizontes largos"—. **En el paso 1 los cuatro métodos cubren el `{python} f"{POR_PASO["paso 1"].mean():.1f}".replace(".", ",")` %**, y ahí
+no hay ninguna acumulación de nada: es un pronóstico a un paso con un intervalo construido con los
+residuos a un paso. Son `{python} f"{95 - POR_PASO['paso 1'].mean():.0f}"` puntos de brecha antes de
+que el horizonte empiece.
 
-Después sí hay degradación, y desigual: la fórmula de la raíz se mantiene entre 85 y 89 por ser cada
-vez más ancha, la fórmula correcta cae a 75,0 y el bootstrap a 82,1. Pero eso es lo de menos frente
+Después sí hay degradación, y desigual: la fórmula de la raíz se mantiene entre
+`{python} f"{POR_PASO.loc['analítico, raíz de h'].min():.0f}"` y
+`{python} f"{POR_PASO.loc['analítico, raíz de h'].max():.0f}"` por ser cada vez más ancha, la
+fórmula correcta cae a `{python} f"{POR_PASO.loc["analítico, fórmula de snaive", "paso 8"]:.1f}".replace(".", ",")` y el
+bootstrap a `{python} f"{POR_PASO.loc["bootstrap", "paso 8"]:.1f}".replace(".", ",")`. Pero eso es lo de menos frente
 a la brecha que ya existe en el primer paso.
 
 ::: {.callout-warning}
