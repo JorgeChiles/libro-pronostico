@@ -338,7 +338,61 @@ app = App(app_ui, servidor)
 {{< include datos/cap04_estacionales.csv >}}
 ```
 
+::: {.diagrama}
+::: {#fig-dos-ventanas}
+<svg viewBox="0 0 700 420" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="Dos maneras de armar los pliegues. En la expansiva el bloque de ajuste crece en cada pliegue; en la deslizante mantiene el largo y se corre hacia adelante.">
+  <text x="14" y="30" font-size="13" font-weight="600">Ventana expansiva: el ajuste crece</text>
+  <rect x="70" y="46" width="180" height="22" rx="3" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="250" y="46" width="60" height="22" rx="3" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/>
+  <rect x="70" y="78" width="240" height="22" rx="3" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="310" y="78" width="60" height="22" rx="3" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/>
+  <rect x="70" y="110" width="300" height="22" rx="3" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="370" y="110" width="60" height="22" rx="3" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/>
+  <rect x="70" y="142" width="360" height="22" rx="3" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="430" y="142" width="60" height="22" rx="3" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/>
+  <rect x="70" y="174" width="420" height="22" rx="3" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="490" y="174" width="60" height="22" rx="3" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/>
+  <text x="46" y="62" font-size="11.5" fill="var(--dg-suave)">1</text>
+  <text x="46" y="94" font-size="11.5" fill="var(--dg-suave)">2</text>
+  <text x="46" y="126" font-size="11.5" fill="var(--dg-suave)">3</text>
+  <text x="46" y="158" font-size="11.5" fill="var(--dg-suave)">4</text>
+  <text x="46" y="190" font-size="11.5" fill="var(--dg-suave)">5</text>
+  <text x="14" y="242" font-size="13" font-weight="600">Ventana deslizante: el ajuste conserva el largo</text>
+  <rect x="70" y="258" width="180" height="22" rx="3" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="250" y="258" width="60" height="22" rx="3" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/>
+  <rect x="130" y="290" width="180" height="22" rx="3" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="310" y="290" width="60" height="22" rx="3" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/>
+  <rect x="190" y="322" width="180" height="22" rx="3" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="370" y="322" width="60" height="22" rx="3" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/>
+  <rect x="250" y="354" width="180" height="22" rx="3" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="430" y="354" width="60" height="22" rx="3" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/>
+  <rect x="310" y="386" width="180" height="22" rx="3" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="490" y="386" width="60" height="22" rx="3" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/>
+  <text x="46" y="274" font-size="11.5" fill="var(--dg-suave)">1</text>
+  <text x="46" y="306" font-size="11.5" fill="var(--dg-suave)">2</text>
+  <text x="46" y="338" font-size="11.5" fill="var(--dg-suave)">3</text>
+  <text x="46" y="370" font-size="11.5" fill="var(--dg-suave)">4</text>
+  <text x="46" y="402" font-size="11.5" fill="var(--dg-suave)">5</text>
+  <text x="70" y="216" font-size="12.5">
+    <tspan fill="var(--dg-observado)" font-weight="600">ajuste</tspan>
+    <tspan fill="var(--dg-suave)"> · </tspan>
+    <tspan fill="var(--dg-prueba)" font-weight="600">los h pasos que se evalúan</tspan>
+    <tspan fill="var(--dg-suave)"> · el tiempo corre hacia la derecha</tspan>
+  </text>
+</svg>
+
+Las dos ventanas de la validación cruzada temporal. La expansiva usa toda la historia
+disponible en cada pliegue; la deslizante descarta lo viejo para que todos los pliegues
+ajusten con la misma cantidad de datos. La @tbl-estimadores mide cuál estima mejor, y
+gana la expansiva: tirar datos cuesta caro.
+:::
+:::
+
 ## Ventana expansiva o deslizante {#sec-expansiva-deslizante}
+
+La @fig-dos-ventanas contrasta las dos maneras de armar los pliegues, que es lo que
+queda por decidir una vez elegido el origen móvil.
 
 Hay dos maneras de armar el conjunto de ajuste de cada pliegue. La **expansiva** usa todo lo
 anterior al origen; la **deslizante** usa una ventana de largo fijo $w$:

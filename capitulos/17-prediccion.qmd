@@ -85,6 +85,68 @@ más dos híbridos —*DirRec*, que agrega a las entradas del modelo $k$ las pre
 anteriores, y las estrategias de rectificación— y @marcellino2006 hicieron la comparación clásica
 en econometría, sobre 170 series macroeconómicas.
 
+::: {.diagrama}
+::: {#fig-estrategias}
+<svg viewBox="0 0 700 415" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="Tres estrategias para pronosticar h pasos. La recursiva ajusta un modelo y realimenta su salida. La directa ajusta un modelo por paso. La multisalida ajusta un modelo que devuelve los h pasos juntos.">
+  <text x="14" y="26" font-size="13" font-weight="600" fill="var(--dg-observado)">Recursiva · un modelo, h veces</text>
+  <rect x="14" y="40" width="86" height="40" rx="5" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.5"/>
+  <text x="57" y="65" font-size="12.5" text-anchor="middle">modelo f</text>
+  <path d="M100 60 H160" stroke="var(--dg-trazo)" stroke-width="1.4"/><path d="M160 60 l-9 -4 v8 z" fill="var(--dg-trazo)"/>
+  <rect x="162" y="45" width="52" height="30" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/>
+  <text x="188" y="65" font-size="12" text-anchor="middle">ŷ₁</text>
+  <path d="M214 60 H262" stroke="var(--dg-trazo)" stroke-width="1.4"/><path d="M262 60 l-9 -4 v8 z" fill="var(--dg-trazo)"/>
+  <rect x="264" y="45" width="52" height="30" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/>
+  <text x="290" y="65" font-size="12" text-anchor="middle">ŷ₂</text>
+  <path d="M316 60 H364" stroke="var(--dg-trazo)" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <text x="392" y="65" font-size="12.5" text-anchor="middle">…</text>
+  <path d="M410 60 H452" stroke="var(--dg-trazo)" stroke-width="1.4" stroke-dasharray="4 3"/><path d="M452 60 l-9 -4 v8 z" fill="var(--dg-trazo)"/>
+  <rect x="454" y="45" width="52" height="30" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/>
+  <text x="480" y="65" font-size="12" text-anchor="middle">ŷ<tspan font-size="9" dy="3">h</tspan></text>
+  <path d="M188 82 v18 H57 v-18" stroke="var(--dg-prueba)" stroke-width="1.3" fill="none" stroke-dasharray="4 3"/>
+  <path d="M57 84 l-4 9 h8 z" fill="var(--dg-prueba)"/>
+  <text x="200" y="115" font-size="12" fill="var(--dg-suave)">la salida vuelve a entrar: por eso el error se puede acumular</text>
+  <text x="14" y="160" font-size="13" font-weight="600" fill="var(--dg-pronostico)">Directa · h modelos, uno por paso</text>
+  <rect x="14" y="174" width="86" height="40" rx="5" fill="var(--dg-pronostico-suave)" stroke="var(--dg-pronostico)" stroke-width="1.5"/>
+  <text x="57" y="199" font-size="12.5" text-anchor="middle">modelo f<tspan font-size="9" dy="3">1</tspan></text>
+  <path d="M57 216 v20" stroke="var(--dg-trazo)" stroke-width="1.3"/><path d="M57 238 l-4 -9 h8 z" fill="var(--dg-trazo)"/>
+  <rect x="31" y="240" width="52" height="28" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/>
+  <text x="57" y="259" font-size="12" text-anchor="middle">ŷ<tspan font-size="9" dy="3">1</tspan></text>
+  <rect x="134" y="174" width="86" height="40" rx="5" fill="var(--dg-pronostico-suave)" stroke="var(--dg-pronostico)" stroke-width="1.5"/>
+  <text x="177" y="199" font-size="12.5" text-anchor="middle">modelo f<tspan font-size="9" dy="3">2</tspan></text>
+  <path d="M177 216 v20" stroke="var(--dg-trazo)" stroke-width="1.3"/><path d="M177 238 l-4 -9 h8 z" fill="var(--dg-trazo)"/>
+  <rect x="151" y="240" width="52" height="28" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/>
+  <text x="177" y="259" font-size="12" text-anchor="middle">ŷ<tspan font-size="9" dy="3">2</tspan></text>
+  <rect x="254" y="174" width="86" height="40" rx="5" fill="var(--dg-pronostico-suave)" stroke="var(--dg-pronostico)" stroke-width="1.5"/>
+  <text x="297" y="199" font-size="12.5" text-anchor="middle">modelo f<tspan font-size="9" dy="3">3</tspan></text>
+  <path d="M297 216 v20" stroke="var(--dg-trazo)" stroke-width="1.3"/><path d="M297 238 l-4 -9 h8 z" fill="var(--dg-trazo)"/>
+  <rect x="271" y="240" width="52" height="28" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/>
+  <text x="297" y="259" font-size="12" text-anchor="middle">ŷ<tspan font-size="9" dy="3">3</tspan></text>
+  <text x="380" y="199" font-size="12.5">…</text>
+  <rect x="440" y="174" width="86" height="40" rx="5" fill="var(--dg-pronostico-suave)" stroke="var(--dg-pronostico)" stroke-width="1.5"/>
+  <text x="483" y="199" font-size="12.5" text-anchor="middle">modelo f<tspan font-size="9" dy="3">h</tspan></text>
+  <path d="M483 216 v20" stroke="var(--dg-trazo)" stroke-width="1.3"/><path d="M483 238 l-4 -9 h8 z" fill="var(--dg-trazo)"/>
+  <rect x="457" y="240" width="52" height="28" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/>
+  <text x="483" y="259" font-size="12" text-anchor="middle">ŷ<tspan font-size="9" dy="3">h</tspan></text>
+  <text x="545" y="199" font-size="12" fill="var(--dg-suave)">nunca realimenta,</text>
+  <text x="545" y="216" font-size="12" fill="var(--dg-suave)">pero cada modelo ve</text>
+  <text x="545" y="233" font-size="12" fill="var(--dg-suave)">menos filas</text>
+  <text x="14" y="304" font-size="13" font-weight="600">Multisalida · un modelo, h salidas juntas</text>
+  <rect x="14" y="318" width="122" height="44" rx="5" fill="var(--dg-caja)" stroke="var(--dg-trazo)" stroke-width="1.5"/>
+  <text x="75" y="345" font-size="12.5" text-anchor="middle">modelo vectorial</text>
+  <path d="M136 340 L206 319" stroke="var(--dg-trazo)" stroke-width="1.2"/><path d="M206 319 l-9 -3.5 v7 z" fill="var(--dg-trazo)"/><rect x="208" y="306" width="56" height="26" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/><text x="236" y="324" font-size="12" text-anchor="middle">ŷ<tspan font-size="9" dy="3">1</tspan></text>
+  <path d="M136 340 L206 353" stroke="var(--dg-trazo)" stroke-width="1.2"/><path d="M206 353 l-9 -3.5 v7 z" fill="var(--dg-trazo)"/><rect x="208" y="340" width="56" height="26" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/><text x="236" y="358" font-size="12" text-anchor="middle">ŷ<tspan font-size="9" dy="3">2</tspan></text>
+  <path d="M136 340 L206 387" stroke="var(--dg-trazo)" stroke-width="1.2"/><path d="M206 387 l-9 -3.5 v7 z" fill="var(--dg-trazo)"/><rect x="208" y="374" width="56" height="26" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/><text x="236" y="392" font-size="12" text-anchor="middle">ŷ<tspan font-size="9" dy="3">h</tspan></text>
+  <text x="292" y="334" font-size="12" fill="var(--dg-suave)">las h salidas se producen de una sola vez, así que el modelo</text>
+  <text x="292" y="352" font-size="12" fill="var(--dg-suave)">puede aprovechar que están relacionadas entre sí</text>
+</svg>
+
+Las tres estrategias de la @eq-recursiva, la @eq-directa y la @eq-multisalida. La
+diferencia no es de precisión sino de **arquitectura**: cuántos modelos hay que ajustar,
+cuántos hay que guardar, y si la salida del modelo vuelve a ser su entrada.
+:::
+:::
+
 ## Qué se supone que pasa {#sec-teoria-multipaso}
 
 El argumento a favor de cada una es distinto, y los dos son correctos.

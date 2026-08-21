@@ -57,6 +57,58 @@ rama de la matemática, y que juzgarlo por sus teoremas era el error. Sesenta a�
 después, esa discusión sigue viva y es la que decide qué cuenta como evidencia en este
 libro.
 
+::: {.diagrama}
+::: {#fig-mapa-campos}
+<svg viewBox="0 0 700 340" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="Diagrama de cajas anidadas: la inteligencia artificial contiene al aprendizaje automático, que contiene al aprendizaje profundo. La ciencia de datos y el pronóstico de series los cruzan.">
+  <rect x="14" y="14" width="452" height="268" rx="10"
+        fill="var(--dg-caja)" stroke="var(--dg-trazo)" stroke-width="1.5"/>
+  <text x="30" y="38" font-size="15" font-weight="600">Inteligencia artificial</text>
+  <text x="30" y="57" font-size="12.5" fill="var(--dg-suave)">Dartmouth, 1956</text>
+  <rect x="38" y="72" width="404" height="192" rx="9"
+        fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.5"/>
+  <text x="54" y="96" font-size="14.5" font-weight="600" fill="var(--dg-observado)">Aprendizaje automático</text>
+  <text x="54" y="114" font-size="12.5" fill="var(--dg-suave)">Samuel, 1959 · las reglas salen de los ejemplos</text>
+  <rect x="62" y="132" width="356" height="112" rx="8"
+        fill="var(--dg-pronostico-suave)" stroke="var(--dg-pronostico)" stroke-width="1.5"/>
+  <text x="78" y="156" font-size="14" font-weight="600" fill="var(--dg-pronostico)">Aprendizaje profundo</text>
+  <text x="78" y="174" font-size="12.5" fill="var(--dg-suave)">Rumelhart, 1986 · muchas capas de representación</text>
+  <text x="78" y="200" font-size="12.5">redes recurrentes, convolucionales,</text>
+  <text x="78" y="218" font-size="12.5">Transformers</text>
+  <rect x="500" y="42" width="186" height="98" rx="9"
+        fill="none" stroke="var(--dg-suave)" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="516" y="68" font-size="14" font-weight="600">Ciencia de datos</text>
+  <text x="516" y="87" font-size="12.5" fill="var(--dg-suave)">Tukey, 1962</text>
+  <text x="516" y="110" font-size="12.5">otro linaje: el análisis</text>
+  <text x="516" y="127" font-size="12.5">de datos como ciencia</text>
+  <rect x="500" y="164" width="186" height="118" rx="9"
+        fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.5"/>
+  <text x="516" y="190" font-size="14" font-weight="600" fill="var(--dg-prueba)">Pronóstico</text>
+  <text x="516" y="209" font-size="12.5" fill="var(--dg-suave)">Box y Jenkins, 1970</text>
+  <text x="516" y="232" font-size="12.5">tradición propia, con</text>
+  <text x="516" y="249" font-size="12.5">sus competencias y</text>
+  <text x="516" y="266" font-size="12.5">sus métricas</text>
+  <path d="M466 108 H500" stroke="var(--dg-suave)" stroke-width="1.4" stroke-dasharray="4 3"/>
+  <path d="M466 205 H500" stroke="var(--dg-prueba)" stroke-width="1.6"/>
+  <path d="M494 205 l-9 -4 v8 z" fill="var(--dg-prueba)"/>
+  <path d="M472 205 l9 -4 v8 z" fill="var(--dg-prueba)"/>
+  <text x="14" y="312" font-size="12.5" fill="var(--dg-suave)">Este libro vive en el cruce: la Parte I es pronóstico clásico y la Parte II le trae</text>
+  <text x="14" y="330" font-size="12.5" fill="var(--dg-suave)">las herramientas del aprendizaje automático, midiendo si conviene.</text>
+</svg>
+
+Cómo se contienen los campos. El anidamiento es real —todo aprendizaje profundo es
+aprendizaje automático, y todo aprendizaje automático es inteligencia artificial— pero
+la ciencia de datos y el pronóstico no son ramas: son tradiciones que cruzan las tres
+cajas con preguntas propias.
+:::
+:::
+
+Y una advertencia sobre la @fig-mapa-campos, porque los diagramas de cajas anidadas
+invitan a leer jerarquía donde no hay: **estar en la caja de adentro no es estar más
+adelante**. Una red profunda no es una versión mejorada de un ARIMA; es otra manera de
+atacar el problema, con otros supuestos y otras necesidades de datos. El resto de esta
+parte mide cuándo cada una conviene.
+
 ::: {.callout-note}
 ## Las dos culturas, que es la discusión de fondo
 

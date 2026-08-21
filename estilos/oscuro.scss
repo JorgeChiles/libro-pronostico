@@ -29,3 +29,38 @@ div#refs .csl-entry {
   margin-bottom: 0.6rem;
   font-size: 0.94em;
 }
+
+/* ---------------------------------------------------------------------------
+   Diagramas explicativos (SVG en línea).
+
+   Los diagramas no llevan colores fijos: usan estas variables y por eso el
+   mismo SVG sirve en tema claro y en oscuro. Los valores replican la paleta de
+   los gráficos de datos —libro/graficos.py— para que un diagrama y la figura
+   que lo acompaña no se contradigan.
+   --------------------------------------------------------------------------- */
+:root {
+  --dg-trazo: #c3c8d0;
+  --dg-texto: #e6e6e6;
+  --dg-suave: #9aa0a8;
+  --dg-fondo: #16181d;
+  --dg-caja: #23262d;
+  --dg-observado: #6fb3e0;
+  --dg-observado-suave: #24384a;
+  --dg-prueba: #e0827f;
+  --dg-prueba-suave: #402a2a;
+  --dg-pronostico: #6fc79a;
+  --dg-pronostico-suave: #21362b;
+  --dg-aviso: #d8b34a;
+}
+
+.diagrama svg {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+}
+
+.diagrama text {
+  font-family: inherit;
+  fill: var(--dg-texto);
+}
