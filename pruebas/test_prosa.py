@@ -79,6 +79,67 @@ def test_todas_las_referencias_apuntan_a_algo_que_existe():
     assert not faltantes, "referencias sin destino:\n  " + "\n  ".join(sorted(set(faltantes)))
 
 
+def test_los_diagramas_no_tienen_lineas_en_blanco():
+    """Un SVG en línea con una línea en blanco adentro se publica como texto suelto.
+
+    Pandoc termina el bloque de HTML crudo en la primera línea en blanco, así que
+    la mitad de abajo del diagrama sale como párrafos de markdown con las
+    etiquetas comidas. Compila en verde y se ve roto: pasó con los cinco
+    diagramas la primera vez que se publicaron.
+    """
+    fallas = []
+    for ruta in FUENTES:
+        for svg in re.findall(r"<svg\b.*?</svg>", ruta.read_text(), re.S):
+            vacias = [i for i, l in enumerate(svg.split("\n"), 1) if not l.strip()]
+            if vacias:
+                fallas.append(f"{ruta.name}: líneas {vacias} en blanco dentro de un <svg>")
+    assert not fallas, "diagramas que se van a romper al publicar:\n  " + "\n  ".join(fallas)
+
+
+def test_los_diagramas_no_se_salen_del_lienzo():
+    """Lo que queda fuera del viewBox no se ve, y en el fuente no se nota."""
+    fallas = []
+    for ruta in FUENTES:
+        for svg in re.findall(r"<svg\b.*?</svg>", ruta.read_text(), re.S):
+            caja = re.search(r'viewBox="0 0 ([\d.]+) ([\d.]+)"', svg)
+            if not caja:
+                fallas.append(f"{ruta.name}: un <svg> sin viewBox")
+                continue
+            ancho, alto = float(caja.group(1)), float(caja.group(2))
+            for m in re.finditer(
+                r'<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)"', svg):
+                x, y, a, b = (float(v) for v in m.groups())
+                if x + a > ancho + 0.5 or y + b > alto + 0.5:
+                    fallas.append(
+                        f"{ruta.name}: un rect llega a ({x + a:.0f}, {y + b:.0f}) "
+                        f"y el lienzo es {ancho:.0f}×{alto:.0f}")
+            for m in re.finditer(
+                    r'<text x="([\d.]+)" y="([\d.]+)"([^>]*)>(.*?)</text>', svg, re.S):
+                x, y, atributos, contenido = (
+                    float(m.group(1)), float(m.group(2)), m.group(3), m.group(4))
+                if y > alto:
+                    fallas.append(f"{ruta.name}: un texto en y={y:.0f} y el lienzo mide {alto:.0f}")
+                # Ancho aproximado: el ancho medio de un carácter es como 0,52 del
+                # cuerpo. Alcanza para cazar la etiqueta que se sale, que es el
+                # error que de verdad pasa —y no se ve leyendo el fuente—.
+                cuerpo = re.search(r'font-size="([\d.]+)"', atributos)
+                if not cuerpo:
+                    continue
+                letras = len(re.sub(r"<[^>]+>", "", contenido))
+                ancho_texto = letras * float(cuerpo.group(1)) * 0.52
+                if 'text-anchor="middle"' in atributos:
+                    izquierda, derecha = x - ancho_texto / 2, x + ancho_texto / 2
+                elif 'text-anchor="end"' in atributos:
+                    izquierda, derecha = x - ancho_texto, x
+                else:
+                    izquierda, derecha = x, x + ancho_texto
+                if derecha > ancho + 2 or izquierda < -2:
+                    fallas.append(
+                        f"{ruta.name}: «{re.sub(r'<[^>]+>', '', contenido)[:34]}» "
+                        f"va de {izquierda:.0f} a {derecha:.0f} y el lienzo mide {ancho:.0f}")
+    assert not fallas, "diagramas recortados:\n  " + "\n  ".join(fallas)
+
+
 def test_los_decimales_en_linea_llevan_coma():
     """El libro escribe 0,7 y no 0.7, también cuando el número lo calcula Python.
 

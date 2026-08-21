@@ -527,6 +527,40 @@ La cláusula final de la @eq-conjunto-informacion es la que se olvida. No basta 
 sea de un período anterior: tiene que haber **estado disponible** entonces, y con el valor que
 tenía entonces.
 
+::: {.diagrama}
+::: {#fig-fugas}
+<svg viewBox="0 0 700 320" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="Una línea de tiempo partida en entrenamiento y prueba, con cinco flechas que muestran por dónde entra información del futuro al entrenamiento.">
+  <text x="14" y="118" font-size="12"><tspan font-weight="600">1.</tspan> un rezago negativo o una ventana centrada</text>
+  <path d="M446 114 L470 146" stroke="var(--dg-prueba)" stroke-width="1.4" fill="none"/>
+  <path d="M470 148 l-5 -8 l9 1 z" fill="var(--dg-prueba)"/>
+  <text x="14" y="88" font-size="12"><tspan font-weight="600">2.</tspan> escalar o imputar con estadísticas de toda la serie</text>
+  <path d="M446 84 L520 146" stroke="var(--dg-prueba)" stroke-width="1.4" fill="none"/>
+  <path d="M520 148 l-5 -8 l9 1 z" fill="var(--dg-prueba)"/>
+  <text x="14" y="58" font-size="12"><tspan font-weight="600">3.</tspan> elegir el modelo mirando el conjunto de prueba</text>
+  <path d="M446 54 L570 146" stroke="var(--dg-prueba)" stroke-width="1.4" fill="none"/>
+  <path d="M570 148 l-5 -8 l9 1 z" fill="var(--dg-prueba)"/>
+  <text x="14" y="232" font-size="12"><tspan font-weight="600">4.</tspan> usar la versión revisada de un dato viejo</text>
+  <path d="M446 228 L470 194" stroke="var(--dg-aviso)" stroke-width="1.4" fill="none"/>
+  <path d="M470 192 l-5 8 l9 -1 z" fill="var(--dg-aviso)"/>
+  <text x="14" y="262" font-size="12"><tspan font-weight="600">5.</tspan> que la muestra se haya elegido sabiendo el futuro</text>
+  <path d="M446 258 L540 194" stroke="var(--dg-aviso)" stroke-width="1.4" fill="none"/>
+  <path d="M540 192 l-5 8 l9 -1 z" fill="var(--dg-aviso)"/>
+  <rect x="14" y="150" width="400" height="40" rx="5" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.5"/>
+  <rect x="414" y="150" width="272" height="40" rx="5" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.5"/>
+  <text x="214" y="176" font-size="13" text-anchor="middle" fill="var(--dg-observado)">entrenamiento</text>
+  <text x="550" y="176" font-size="13" text-anchor="middle" fill="var(--dg-prueba)">lo que todavía no pasó</text>
+  <text x="414" y="208" font-size="12" text-anchor="middle" fill="var(--dg-suave)">t</text>
+  <text x="14" y="292" font-size="12" fill="var(--dg-suave)">Las tres de arriba cruzan el corte y se ven mirando el código. Las dos de abajo no lo cruzan:</text>
+  <text x="14" y="310" font-size="12" fill="var(--dg-suave)">el dato es de antes de t, pero con información que en t no existía. Esas no se ven.</text>
+</svg>
+
+Por dónde entra el futuro. La @eq-conjunto-informacion prohíbe las cinco, pero solo las tres
+primeras cruzan visiblemente la línea del corte. Las dos últimas usan datos anteriores a $t$ y
+aun así violan la condición, porque en $t$ ese valor todavía no era ese.
+:::
+:::
+
 Con eso, las formas de fuga se ordenan de la más obvia a la más difícil de ver.
 
 **1. Usar el futuro directamente.** Un rezago negativo, una ventana centrada, un `shift(-1)`. Es

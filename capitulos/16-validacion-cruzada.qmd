@@ -113,12 +113,90 @@ reutiliza.
 Este capítulo mide si la promesa se cumple. El resultado tiene matices y no coincide del todo
 con la recomendación habitual.
 
-## Origen móvil {#sec-origen-movil}
+## La validación cruzada de $k$ pliegues {#sec-k-pliegues}
 
-La validación cruzada de $k$ pliegues del aprendizaje automático clásico sortea las
-observaciones en $k$ grupos y usa cada grupo por turno como conjunto de evaluación. En series
-de tiempo eso está mal por las dos razones de la @sec-particion: fuga entre vecinos y evaluación
-que interpola en vez de extrapolar.
+Antes de la versión temporal conviene tener clara la original, porque es la que trae el
+aprendizaje automático y la que hay que saber por qué no se puede usar tal cual.
+
+El procedimiento es este. Se **mezclan** las $n$ filas y se las reparte en $k$ grupos del
+mismo tamaño, llamados pliegues. Después se hacen $k$ rondas: en cada una, un pliegue distinto
+queda como conjunto de evaluación y los otros $k-1$ se usan para ajustar. Al final se
+promedian los $k$ errores. Con $\mathcal{D}_j$ el pliegue $j$ y $\hat f^{(-j)}$ el modelo
+ajustado sin él,
+
+$$
+\widehat{\text{CV}}_k(f) = \frac{1}{k} \sum_{j=1}^{k}
+    L\!\left( \mathcal{D}_j,\; \hat f^{(-j)} \right)
+$$ {#eq-k-pliegues}
+
+::: {.diagrama}
+::: {#fig-k-pliegues}
+<svg viewBox="0 0 700 300" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="Cinco rondas de validación cruzada de cinco pliegues. En cada ronda un bloque distinto queda como evaluación y los otros cuatro se usan para ajustar.">
+  <text x="14" y="30" font-size="13" font-weight="600">Validación cruzada de k = 5 pliegues, después de mezclar las filas</text>
+  <text x="14" y="52" font-size="11.5" fill="var(--dg-suave)">ronda</text>
+  <text x="14" y="84" font-size="12" fill="var(--dg-suave)">1</text>
+  <rect x="76" y="64" width="112" height="28" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/>
+  <text x="132" y="83" font-size="11.5" text-anchor="middle" fill="var(--dg-prueba)">evalúa</text>
+  <rect x="196" y="64" width="112" height="28" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="316" y="64" width="112" height="28" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="436" y="64" width="112" height="28" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="556" y="64" width="112" height="28" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <text x="14" y="120" font-size="12" fill="var(--dg-suave)">2</text>
+  <rect x="76" y="100" width="112" height="28" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="196" y="100" width="112" height="28" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/>
+  <text x="252" y="119" font-size="11.5" text-anchor="middle" fill="var(--dg-prueba)">evalúa</text>
+  <rect x="316" y="100" width="112" height="28" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="436" y="100" width="112" height="28" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="556" y="100" width="112" height="28" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <text x="14" y="156" font-size="12" fill="var(--dg-suave)">3</text>
+  <rect x="76" y="136" width="112" height="28" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="196" y="136" width="112" height="28" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="316" y="136" width="112" height="28" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/>
+  <text x="372" y="155" font-size="11.5" text-anchor="middle" fill="var(--dg-prueba)">evalúa</text>
+  <rect x="436" y="136" width="112" height="28" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="556" y="136" width="112" height="28" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <text x="14" y="192" font-size="12" fill="var(--dg-suave)">4</text>
+  <rect x="76" y="172" width="112" height="28" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="196" y="172" width="112" height="28" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="316" y="172" width="112" height="28" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="436" y="172" width="112" height="28" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/>
+  <text x="492" y="191" font-size="11.5" text-anchor="middle" fill="var(--dg-prueba)">evalúa</text>
+  <rect x="556" y="172" width="112" height="28" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <text x="14" y="228" font-size="12" fill="var(--dg-suave)">5</text>
+  <rect x="76" y="208" width="112" height="28" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="196" y="208" width="112" height="28" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="316" y="208" width="112" height="28" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="436" y="208" width="112" height="28" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.3"/>
+  <rect x="556" y="208" width="112" height="28" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.3"/>
+  <text x="612" y="227" font-size="11.5" text-anchor="middle" fill="var(--dg-prueba)">evalúa</text>
+  <rect x="76" y="256" width="20" height="14" rx="3" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.2"/>
+  <text x="104" y="268" font-size="12" fill="var(--dg-suave)">ajusta</text>
+  <rect x="164" y="256" width="20" height="14" rx="3" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.2"/>
+  <text x="192" y="268" font-size="12" fill="var(--dg-suave)">evalúa</text>
+  <text x="76" y="288" font-size="12" fill="var(--dg-suave)">Cada fila se evalúa exactamente una vez y sirve para ajustar en las otras cuatro rondas.</text>
+</svg>
+
+La @eq-k-pliegues en cinco rondas. La virtud del método es que **cada observación cumple los
+dos papeles**: se evalúa una vez y contribuye al ajuste $k-1$ veces. Por eso no hay que apartar
+un bloque y por eso el estimador es más estable que el de un corte único.
+:::
+:::
+
+Ahí está también el problema, y se ve en el diagrama sin necesidad de cuentas: **el bloque que
+se evalúa tiene bloques de ajuste a los dos lados**. En una tabla de clientes eso es inofensivo.
+En una serie de tiempo significa dos cosas, las dos de la @sec-particion:
+
+**Fuga entre vecinos.** Las filas de la @eq-ventana se solapan: la fila de marzo y la de abril
+comparten casi todos sus predictores. Si marzo está en el ajuste y abril en la evaluación, el
+modelo ya vio casi exactamente lo que se le está preguntando.
+
+**Evaluación que interpola en vez de extrapolar.** Pronosticar es siempre extrapolar: estimar un
+valor posterior a todo lo que se conoce. La validación cruzada de $k$ pliegues evalúa **rodeada**
+de datos conocidos, que es un problema más fácil y por lo tanto una medición optimista de lo que
+importa.
+
+Con una salvedad importante que conviene no saltear.
 
 Con una salvedad importante que conviene no saltear. @bergmeir2018 demuestran que para modelos
 **autorregresivos bien especificados** el sorteo *sí* es válido: si los rezagos incluidos capturan
@@ -128,6 +206,8 @@ encuentra que en esas condiciones la validación cruzada aleatoria es prácticam
 
 O sea: la prohibición no es sobre el sorteo, es sobre el sorteo cuando el modelo puede memorizar
 al vecino. La @sec-trampa lo midió del lado en que la prohibición vale.
+
+## Origen móvil {#sec-origen-movil}
 
 La versión temporal reemplaza el sorteo por un **origen de pronóstico que se mueve**. Se elige
 una sucesión de orígenes $o_1 < o_2 < \cdots < o_k$ y para cada uno se ajusta el modelo con lo
