@@ -50,8 +50,75 @@ y_{p+1} \\ y_{p+2} \\ \vdots \\ y_n
 \end{pmatrix}
 $$ {#eq-ventana}
 
-El parámetro $p$ se llama **orden de la ventana** o profundidad del rezago, y es la
-primera decisión del capítulo. En código son ocho líneas:
+::: {.diagrama}
+::: {#fig-ventana-deslizante}
+<svg viewBox="0 0 700 340" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="La serie de arriba se recorre con una ventana de tres observaciones; cada posición de la ventana produce una fila de la tabla, con tres predictores y una respuesta.">
+  <text x="14" y="28" font-size="13" font-weight="600">La serie</text>
+  <rect x="60" y="46" width="44" height="30" rx="4" fill="var(--dg-caja)" stroke="var(--dg-trazo)" stroke-width="1.4"/>
+  <text x="82.0" y="66" font-size="12.5" text-anchor="middle">y<tspan font-size='9' dy='3'>1</tspan></text>
+  <rect x="110" y="46" width="44" height="30" rx="4" fill="var(--dg-caja)" stroke="var(--dg-trazo)" stroke-width="1.4"/>
+  <text x="132.0" y="66" font-size="12.5" text-anchor="middle">y<tspan font-size='9' dy='3'>2</tspan></text>
+  <rect x="160" y="46" width="44" height="30" rx="4" fill="var(--dg-caja)" stroke="var(--dg-trazo)" stroke-width="1.4"/>
+  <text x="182.0" y="66" font-size="12.5" text-anchor="middle">y<tspan font-size='9' dy='3'>3</tspan></text>
+  <rect x="210" y="46" width="44" height="30" rx="4" fill="var(--dg-caja)" stroke="var(--dg-trazo)" stroke-width="1.4"/>
+  <text x="232.0" y="66" font-size="12.5" text-anchor="middle">y<tspan font-size='9' dy='3'>4</tspan></text>
+  <rect x="260" y="46" width="44" height="30" rx="4" fill="var(--dg-caja)" stroke="var(--dg-trazo)" stroke-width="1.4"/>
+  <text x="282.0" y="66" font-size="12.5" text-anchor="middle">y<tspan font-size='9' dy='3'>5</tspan></text>
+  <rect x="310" y="46" width="44" height="30" rx="4" fill="var(--dg-caja)" stroke="var(--dg-trazo)" stroke-width="1.4"/>
+  <text x="332.0" y="66" font-size="12.5" text-anchor="middle">y<tspan font-size='9' dy='3'>6</tspan></text>
+  <rect x="360" y="46" width="44" height="30" rx="4" fill="var(--dg-caja)" stroke="var(--dg-trazo)" stroke-width="1.4"/>
+  <text x="382.0" y="66" font-size="12.5" text-anchor="middle">y<tspan font-size='9' dy='3'>7</tspan></text>
+  <rect x="410" y="46" width="44" height="30" rx="4" fill="var(--dg-caja)" stroke="var(--dg-trazo)" stroke-width="1.4"/>
+  <text x="432.0" y="66" font-size="12.5" text-anchor="middle">y<tspan font-size='9' dy='3'>8</tspan></text>
+  <text x="470" y="66" font-size="12.5" fill="var(--dg-suave)">…</text>
+  <text x="14" y="106" font-size="13" font-weight="600">La tabla, con p = 3</text>
+  <rect x="60" y="118" width="44" height="30" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.4"/>
+  <text x="82.0" y="138" font-size="12.5" text-anchor="middle">y<tspan font-size='9' dy='3'>1</tspan></text>
+  <rect x="110" y="118" width="44" height="30" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.4"/>
+  <text x="132.0" y="138" font-size="12.5" text-anchor="middle">y<tspan font-size='9' dy='3'>2</tspan></text>
+  <rect x="160" y="118" width="44" height="30" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.4"/>
+  <text x="182.0" y="138" font-size="12.5" text-anchor="middle">y<tspan font-size='9' dy='3'>3</tspan></text>
+  <rect x="210" y="118" width="44" height="30" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.4"/>
+  <text x="232.0" y="138" font-size="12.5" text-anchor="middle">y<tspan font-size='9' dy='3'>4</tspan></text>
+  <rect x="110" y="180" width="44" height="30" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.4"/>
+  <text x="132.0" y="200" font-size="12.5" text-anchor="middle">y<tspan font-size='9' dy='3'>2</tspan></text>
+  <rect x="160" y="180" width="44" height="30" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.4"/>
+  <text x="182.0" y="200" font-size="12.5" text-anchor="middle">y<tspan font-size='9' dy='3'>3</tspan></text>
+  <rect x="210" y="180" width="44" height="30" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.4"/>
+  <text x="232.0" y="200" font-size="12.5" text-anchor="middle">y<tspan font-size='9' dy='3'>4</tspan></text>
+  <rect x="260" y="180" width="44" height="30" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.4"/>
+  <text x="282.0" y="200" font-size="12.5" text-anchor="middle">y<tspan font-size='9' dy='3'>5</tspan></text>
+  <rect x="160" y="242" width="44" height="30" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.4"/>
+  <text x="182.0" y="262" font-size="12.5" text-anchor="middle">y<tspan font-size='9' dy='3'>3</tspan></text>
+  <rect x="210" y="242" width="44" height="30" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.4"/>
+  <text x="232.0" y="262" font-size="12.5" text-anchor="middle">y<tspan font-size='9' dy='3'>4</tspan></text>
+  <rect x="260" y="242" width="44" height="30" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.4"/>
+  <text x="282.0" y="262" font-size="12.5" text-anchor="middle">y<tspan font-size='9' dy='3'>5</tspan></text>
+  <rect x="310" y="242" width="44" height="30" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.4"/>
+  <text x="332.0" y="262" font-size="12.5" text-anchor="middle">y<tspan font-size='9' dy='3'>6</tspan></text>
+  <text x="266" y="139" font-size="12.5" fill="var(--dg-suave)">→ fila 1</text>
+  <text x="316" y="201" font-size="12.5" fill="var(--dg-suave)">→ fila 2</text>
+  <text x="366" y="263" font-size="12.5" fill="var(--dg-suave)">→ fila 3</text>
+  <text x="60" y="306" font-size="12.5">
+    <tspan fill="var(--dg-observado)" font-weight="600">predictores</tspan>
+    <tspan fill="var(--dg-suave)"> · la ventana que se desliza</tspan>
+  </text>
+  <text x="300" y="306" font-size="12.5">
+    <tspan fill="var(--dg-prueba)" font-weight="600">respuesta</tspan>
+    <tspan fill="var(--dg-suave)"> · la observación siguiente</tspan>
+  </text>
+  <text x="60" y="328" font-size="12.5" fill="var(--dg-suave)">Cada observación aparece varias veces: como respuesta una vez y como predictor hasta p veces.</text>
+</svg>
+
+La @eq-ventana en movimiento. La ventana avanza de a una observación y cada posición
+deja una fila. De ahí salen las dos consecuencias del capítulo: quedan $n - p$ filas y
+no $n$, y las filas **se solapan**, así que no son independientes entre sí.
+:::
+:::
+
+La @fig-ventana-deslizante muestra el mecanismo con $p = 3$. El parámetro $p$ se llama
+**orden de la ventana** o profundidad del rezago, y es la primera decisión del capítulo. En código son ocho líneas:
 
 ```{python}
 def tabla_supervisada(y, p, h=1):

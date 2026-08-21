@@ -253,7 +253,57 @@ $$
 \underbrace{y_{c_2+1}, \dots, y_{n}}_{\text{prueba}}
 $$ {#eq-tres-conjuntos}
 
-con un papel distinto y excluyente para cada uno. La división en tres es la práctica estándar
+::: {.diagrama}
+::: {#fig-partir-serie}
+<svg viewBox="0 0 700 250" xmlns="http://www.w3.org/2000/svg" role="img"
+     aria-label="Arriba, la partición correcta: tres bloques contiguos en el tiempo, ajuste, validación y prueba. Abajo, la partición al azar, con los tres colores entremezclados a lo largo de la serie.">
+  <text x="14" y="26" font-size="13" font-weight="600" fill="var(--dg-pronostico)">Correcto: cortar por tiempo</text>
+  <rect x="14" y="38" width="360" height="34" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.4"/>
+  <rect x="374" y="38" width="150" height="34" rx="4" fill="var(--dg-caja)" stroke="var(--dg-trazo)" stroke-width="1.4"/>
+  <rect x="524" y="38" width="162" height="34" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.4"/>
+  <text x="194" y="60" font-size="13" text-anchor="middle" fill="var(--dg-observado)">ajuste</text>
+  <text x="449" y="60" font-size="13" text-anchor="middle">validación</text>
+  <text x="605" y="60" font-size="13" text-anchor="middle" fill="var(--dg-prueba)">prueba</text>
+  <path d="M374 80 v10" stroke="var(--dg-suave)" stroke-width="1.2"/>
+  <path d="M524 80 v10" stroke="var(--dg-suave)" stroke-width="1.2"/>
+  <text x="374" y="104" font-size="12" text-anchor="middle" fill="var(--dg-suave)">c₁</text>
+  <text x="524" y="104" font-size="12" text-anchor="middle" fill="var(--dg-suave)">c₂</text>
+  <text x="14" y="104" font-size="12" fill="var(--dg-suave)">y₁</text>
+  <text x="686" y="104" font-size="12" text-anchor="end" fill="var(--dg-suave)">yₙ</text>
+  <text x="14" y="146" font-size="13" font-weight="600" fill="var(--dg-prueba)">Incorrecto: sortear las filas</text>
+  <rect x="14.0" y="158" width="30" height="34" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.4"/>
+  <rect x="47.6" y="158" width="30" height="34" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.4"/>
+  <rect x="81.2" y="158" width="30" height="34" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.4"/>
+  <rect x="114.80000000000001" y="158" width="30" height="34" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.4"/>
+  <rect x="148.4" y="158" width="30" height="34" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.4"/>
+  <rect x="182.0" y="158" width="30" height="34" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.4"/>
+  <rect x="215.60000000000002" y="158" width="30" height="34" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.4"/>
+  <rect x="249.20000000000002" y="158" width="30" height="34" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.4"/>
+  <rect x="282.8" y="158" width="30" height="34" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.4"/>
+  <rect x="316.40000000000003" y="158" width="30" height="34" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.4"/>
+  <rect x="350.0" y="158" width="30" height="34" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.4"/>
+  <rect x="383.6" y="158" width="30" height="34" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.4"/>
+  <rect x="417.20000000000005" y="158" width="30" height="34" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.4"/>
+  <rect x="450.8" y="158" width="30" height="34" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.4"/>
+  <rect x="484.40000000000003" y="158" width="30" height="34" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.4"/>
+  <rect x="518.0" y="158" width="30" height="34" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.4"/>
+  <rect x="551.6" y="158" width="30" height="34" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.4"/>
+  <rect x="585.2" y="158" width="30" height="34" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.4"/>
+  <rect x="618.8000000000001" y="158" width="30" height="34" rx="4" fill="var(--dg-prueba-suave)" stroke="var(--dg-prueba)" stroke-width="1.4"/>
+  <rect x="652.4" y="158" width="30" height="34" rx="4" fill="var(--dg-observado-suave)" stroke="var(--dg-observado)" stroke-width="1.4"/>
+  <text x="14" y="216" font-size="12.5" fill="var(--dg-suave)">Cada bloque evalúa con vecinos suyos en el conjunto de ajuste: la @eq-ventana los solapa, así que</text>
+  <text x="14" y="234" font-size="12.5" fill="var(--dg-suave)">predecirlos es casi copiarlos. El error de validación baja y no significa nada.</text>
+</svg>
+
+Las dos maneras de partir una serie. Arriba, la @eq-tres-conjuntos: tres bloques
+contiguos y en orden. Abajo, el sorteo que se usa en problemas tabulares, que acá
+mide un modelo que ya vio a los vecinos de lo que está evaluando. El ejercicio 4
+mide la diferencia: el error de validación baja un 21 % y el de prueba no se mueve.
+:::
+:::
+
+con un papel distinto y excluyente para cada uno, y con los cortes hechos por tiempo
+y no por sorteo, como muestra la @fig-partir-serie. La división en tres es la práctica estándar
 del aprendizaje automático [@hastie2009], y su traducción a series de tiempo —cortes temporales
 en vez de sorteos— es la que @tashman2000 revisó en detalle para la literatura de pronóstico:
 
