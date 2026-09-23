@@ -29,6 +29,3 @@ pruebas/*.txt
 /.quarto/
 **/*.quarto_ipynb
 .ultima-compilacion.log
-
-# Configuración local del editor
-.claude/
