@@ -5,7 +5,9 @@ project:
 book:
   title: "Pronóstico de series de tiempo con Python"
   subtitle: "Del método estadístico al aprendizaje automático"
-  author: "Jorge Andrés Peña Araya"
+  author:
+    - "Jorge Andrés Peña Araya"
+    - "Esther Segura Pérez"
   date: today
   date-format: "MMMM YYYY"
   search: true
